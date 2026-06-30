@@ -1,0 +1,376 @@
+"use client"
+
+import { useEffect, useMemo, useState, useCallback } from "react"
+import { apiFetch } from "@/lib/api"
+import { useAppStore } from "@/lib/store"
+import {
+  formatCurrency, expirationStatus, daysUntil, formatDate,
+} from "@/lib/format"
+import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from "@/components/ui/dialog"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table"
+import { toast } from "sonner"
+import {
+  Search, Plus, Pencil, Trash2, Package, AlertTriangle, CalendarClock,
+  Filter, Download,
+} from "lucide-react"
+
+interface Category { id: string; name: string }
+interface Product {
+  id: string
+  name: string
+  barcode: string | null
+  sku: string | null
+  categoryId: string | null
+  category?: { name: string } | null
+  description: string | null
+  cost: number
+  price: number
+  stock: number
+  minStock: number
+  unit: string
+  expirationDate: string | null
+  batch: string | null
+  location: string | null
+  active: boolean
+}
+
+const emptyForm = {
+  name: "", barcode: "", sku: "", categoryId: "", description: "",
+  cost: "", price: "", stock: "", minStock: "5", unit: "unidad",
+  expirationDate: "", batch: "", location: "",
+}
+
+export default function ProductsView() {
+  const refreshKey = useAppStore((s) => s.refreshKey)
+  const triggerRefresh = useAppStore((s) => s.triggerRefresh)
+  const [products, setProducts] = useState<Product[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [loading, setLoading] = useState(true)
+  const [query, setQuery] = useState("")
+  const [categoryFilter, setCategoryFilter] = useState("all")
+  const [showLow, setShowLow] = useState(false)
+  const [showExpiring, setShowExpiring] = useState(false)
+  const [editing, setEditing] = useState<Product | null>(null)
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState(emptyForm)
+  const [saving, setSaving] = useState(false)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
+
+  const load = useCallback(() => {
+    setLoading(true)
+    Promise.all([
+      apiFetch<Product[]>(`/api/products?q=${encodeURIComponent(query)}`),
+      apiFetch<Category[]>("/api/categories"),
+    ])
+      .then(([p, c]) => { setProducts(p); setCategories(c) })
+      .finally(() => setLoading(false))
+  }, [query])
+
+  useEffect(() => { load() }, [load, refreshKey])
+
+  const filtered = useMemo(() => {
+    let list = products
+    if (categoryFilter !== "all") list = list.filter((p) => p.categoryId === categoryFilter)
+    if (showLow) list = list.filter((p) => p.stock <= p.minStock)
+    if (showExpiring) list = list.filter((p) => {
+      const d = daysUntil(p.expirationDate)
+      return d !== null && d <= 30
+    })
+    return list
+  }, [products, categoryFilter, showLow, showExpiring])
+
+  const openNew = () => {
+    setEditing(null)
+    setForm(emptyForm)
+    setOpen(true)
+  }
+  const openEdit = (p: Product) => {
+    setEditing(p)
+    setForm({
+      name: p.name,
+      barcode: p.barcode ?? "",
+      sku: p.sku ?? "",
+      categoryId: p.categoryId ?? "",
+      description: p.description ?? "",
+      cost: String(p.cost),
+      price: String(p.price),
+      stock: String(p.stock),
+      minStock: String(p.minStock),
+      unit: p.unit,
+      expirationDate: p.expirationDate ? new Date(p.expirationDate).toISOString().slice(0, 10) : "",
+      batch: p.batch ?? "",
+      location: p.location ?? "",
+    })
+    setOpen(true)
+  }
+
+  const save = async () => {
+    if (!form.name.trim()) return toast.error("El nombre es obligatorio")
+    setSaving(true)
+    try {
+      const payload = { ...form, active: true }
+      if (editing) {
+        await apiFetch(`/api/products/${editing.id}`, { method: "PATCH", body: JSON.stringify(payload) })
+        toast.success("Producto actualizado")
+      } else {
+        await apiFetch("/api/products", { method: "POST", body: JSON.stringify(payload) })
+        toast.success("Producto creado")
+      }
+      setOpen(false)
+      load()
+      triggerRefresh()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteId) return
+    try {
+      await apiFetch(`/api/products/${deleteId}`, { method: "DELETE" })
+      toast.success("Producto eliminado")
+      load()
+      triggerRefresh()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setDeleteId(null)
+    }
+  }
+
+  const exportCsv = () => {
+    const rows = [
+      ["Nombre", "Código", "Categoría", "Costo", "Precio", "Stock", "Min", "Unidad", "Vencimiento", "Lote", "Ubicación"],
+      ...filtered.map((p) => [
+        p.name, p.barcode ?? "", p.category?.name ?? "", String(p.cost), String(p.price),
+        String(p.stock), String(p.minStock), p.unit,
+        p.expirationDate ? formatDate(p.expirationDate) : "", p.batch ?? "", p.location ?? "",
+      ]),
+    ]
+    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n")
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "inventario.csv"
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const totalStockValue = filtered.reduce((s, p) => s + p.cost * p.stock, 0)
+
+  return (
+    <div className="p-4 md:p-6 space-y-4">
+      {/* Header / filtros */}
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold flex items-center gap-2"><Package className="h-5 w-5 text-primary" /> Inventario de productos</h2>
+            <p className="text-sm text-muted-foreground">{filtered.length} productos · Valor en stock: {formatCurrency(totalStockValue)}</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={exportCsv}><Download className="h-4 w-4 mr-1" /> Exportar</Button>
+            <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1" /> Nuevo producto</Button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por nombre o código…" className="pl-9 h-9" />
+          </div>
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-[180px] h-9"><Filter className="h-3.5 w-3.5 mr-1" /><SelectValue placeholder="Categoría" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas las categorías</SelectItem>
+              {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Button variant={showLow ? "default" : "outline"} size="sm" className="h-9" onClick={() => setShowLow(!showLow)}>
+            <AlertTriangle className="h-3.5 w-3.5 mr-1" /> Stock bajo
+          </Button>
+          <Button variant={showExpiring ? "default" : "outline"} size="sm" className="h-9" onClick={() => setShowExpiring(!showExpiring)}>
+            <CalendarClock className="h-3.5 w-3.5 mr-1" /> Por vencer
+          </Button>
+        </div>
+      </div>
+
+      {/* Tabla */}
+      <Card>
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="p-4 space-y-2">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <Package className="h-10 w-10 mb-2 opacity-40" />
+              <p className="text-sm">No hay productos que mostrar</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Producto</TableHead>
+                    <TableHead className="hidden md:table-cell">Categoría</TableHead>
+                    <TableHead className="text-right">Precio</TableHead>
+                    <TableHead className="text-center">Stock</TableHead>
+                    <TableHead className="hidden lg:table-cell">Vencimiento</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((p) => {
+                    const exp = expirationStatus(p.expirationDate)
+                    const low = p.stock <= p.minStock
+                    const out = p.stock <= 0
+                    return (
+                      <TableRow key={p.id}>
+                        <TableCell>
+                          <div className="font-medium">{p.name}</div>
+                          <div className="text-xs text-muted-foreground">{p.barcode ?? "Sin código"} · {p.unit}</div>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{p.category?.name ?? "—"}</TableCell>
+                        <TableCell className="text-right font-medium">{formatCurrency(p.price)}</TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant={out ? "destructive" : low ? "secondary" : "outline"} className="font-mono">
+                            {p.stock}
+                          </Badge>
+                          {low && !out && <p className="text-[10px] text-amber-600 mt-0.5">min {p.minStock}</p>}
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell">
+                          {p.expirationDate ? (
+                            <div>
+                              <p className="text-xs">{formatDate(p.expirationDate)}</p>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${exp.variant === "expired" ? "border-red-500 text-red-600" : exp.variant === "soon" ? "border-orange-500 text-orange-600" : ""}`}
+                              >
+                                {exp.label}
+                              </Badge>
+                            </div>
+                          ) : <span className="text-xs text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(p)}><Pencil className="h-3.5 w-3.5" /></Button>
+                            <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => setDeleteId(p.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Modal crear/editar */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scroll-thin">
+          <DialogHeader>
+            <DialogTitle>{editing ? "Editar producto" : "Nuevo producto"}</DialogTitle>
+            <DialogDescription>{editing ? "Actualiza la información del producto" : "Registra un nuevo producto en el inventario"}</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 py-2">
+            <div className="md:col-span-2">
+              <Label>Nombre *</Label>
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ej: Acetaminofén 500mg x 10" />
+            </div>
+            <div>
+              <Label>Código de barras</Label>
+              <Input value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} placeholder="770..." />
+            </div>
+            <div>
+              <Label>Categoría</Label>
+              <Select value={form.categoryId} onValueChange={(v) => setForm({ ...form, categoryId: v })}>
+                <SelectTrigger><SelectValue placeholder="Sin categoría" /></SelectTrigger>
+                <SelectContent>
+                  {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Costo (compra)</Label>
+              <Input type="number" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} />
+            </div>
+            <div>
+              <Label>Precio de venta</Label>
+              <Input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+            </div>
+            <div>
+              <Label>Stock actual</Label>
+              <Input type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} />
+            </div>
+            <div>
+              <Label>Stock mínimo (alerta)</Label>
+              <Input type="number" value={form.minStock} onChange={(e) => setForm({ ...form, minStock: e.target.value })} />
+            </div>
+            <div>
+              <Label>Unidad</Label>
+              <Select value={form.unit} onValueChange={(v) => setForm({ ...form, unit: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {["unidad", "caja", "blister", "frasco", "tubo", "botella", "lata", "paquete", "ml", "g", "sobres"].map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Fecha de vencimiento</Label>
+              <Input type="date" value={form.expirationDate} onChange={(e) => setForm({ ...form, expirationDate: e.target.value })} />
+            </div>
+            <div>
+              <Label>Lote</Label>
+              <Input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} placeholder="L1234" />
+            </div>
+            <div>
+              <Label>Ubicación</Label>
+              <Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Estante E1" />
+            </div>
+            <div className="md:col-span-2">
+              <Label>Descripción</Label>
+              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+            <Button onClick={save} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar producto?</AlertDialogTitle>
+            <AlertDialogDescription>Esta acción no se puede deshacer. El producto se eliminará del inventario.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Eliminar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}

@@ -1,0 +1,74 @@
+// Utilidades de formato para el sistema POS de droguería (moneda COP)
+
+export function formatCurrency(value: number | string | null | undefined): string {
+  const n = typeof value === "string" ? parseFloat(value) : value ?? 0
+  if (isNaN(n)) return "$0"
+  return new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(n)
+}
+
+export function formatNumber(value: number | string | null | undefined): string {
+  const n = typeof value === "string" ? parseFloat(value) : value ?? 0
+  if (isNaN(n)) return "0"
+  return new Intl.NumberFormat("es-CO").format(n)
+}
+
+export function formatDate(date: Date | string | null | undefined): string {
+  if (!date) return "—"
+  const d = typeof date === "string" ? new Date(date) : date
+  return d.toLocaleDateString("es-CO", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  })
+}
+
+export function formatDateTime(date: Date | string | null | undefined): string {
+  if (!date) return "—"
+  const d = typeof date === "string" ? new Date(date) : date
+  return d.toLocaleString("es-CO", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+// Días hasta el vencimiento (negativo = ya vencido)
+export function daysUntil(date: Date | string | null | undefined): number | null {
+  if (!date) return null
+  const d = typeof date === "string" ? new Date(date) : date
+  const now = new Date()
+  now.setHours(0, 0, 0, 0)
+  const target = new Date(d)
+  target.setHours(0, 0, 0, 0)
+  return Math.round((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+export function expirationStatus(date: Date | string | null | undefined): {
+  label: string
+  variant: "expired" | "soon" | "ok"
+} {
+  const days = daysUntil(date)
+  if (days === null) return { label: "Sin fecha", variant: "ok" }
+  if (days < 0) return { label: `Vencido hace ${Math.abs(days)}d`, variant: "expired" }
+  if (days === 0) return { label: "Vence hoy", variant: "soon" }
+  if (days <= 30) return { label: `Vence en ${days}d`, variant: "soon" }
+  return { label: `Vence en ${days}d`, variant: "ok" }
+}
+
+// Generar número de factura consecutivo
+export function nextInvoiceNumber(last?: string | null): string {
+  const today = new Date()
+  const yy = String(today.getFullYear()).slice(-2)
+  const mm = String(today.getMonth() + 1).padStart(2, "0")
+  const prefix = `F${yy}${mm}-`
+  if (!last || !last.startsWith(prefix)) return `${prefix}0001`
+  const num = parseInt(last.slice(prefix.length), 10)
+  return `${prefix}${String(num + 1).padStart(4, "0")}`
+}

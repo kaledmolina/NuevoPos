@@ -1,0 +1,179 @@
+// Droguería POS - Sistema de punto de venta para droguería
+// learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Catálogos
+model Category {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  products  Product[]
+}
+
+model Product {
+  id             String         @id @default(cuid())
+  name           String
+  sku            String?        // código interno
+  barcode        String?        // código de barras
+  categoryId     String?
+  category       Category?      @relation(fields: [categoryId], references: [id])
+  description    String?
+  cost           Float          @default(0) // último precio de compra
+  price          Float          @default(0) // precio de venta
+  stock          Int            @default(0)
+  minStock       Int            @default(5) // alerta de reposición
+  unit           String         @default("unidad")
+  expirationDate DateTime?      // fecha de vencimiento
+  batch          String?        // lote
+  location       String?        // ubicación en estante
+  active         Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  saleItems      SaleItem[]
+  purchaseItems  PurchaseItem[]
+}
+
+// Terceros
+model Client {
+  id        String   @id @default(cuid())
+  name      String
+  document  String?  // cédula / NIT
+  phone     String?
+  email     String?
+  address   String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sales     Sale[]
+}
+
+model Supplier {
+  id          String    @id @default(cuid())
+  name        String
+  document    String?   // NIT
+  phone       String?
+  email       String?
+  address     String?
+  contactName String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  purchases   Purchase[]
+}
+
+// Ventas
+model Sale {
+  id            String     @id @default(cuid())
+  invoiceNumber String     @unique
+  clientId      String?
+  client        Client?    @relation(fields: [clientId], references: [id])
+  subtotal      Float
+  tax           Float      @default(0)
+  discount      Float      @default(0)
+  total         Float
+  paymentMethod String     @default("efectivo") // efectivo, tarjeta, transferencia, credito
+  amountReceived Float     @default(0)
+  change        Float      @default(0)
+  status        String     @default("completada") // completada, anulada
+  cashSessionId String?
+  notes         String?
+  createdAt     DateTime   @default(now())
+  items         SaleItem[]
+}
+
+model SaleItem {
+  id        String  @id @default(cuid())
+  saleId    String
+  sale      Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitPrice Float
+  unitCost  Float
+  subtotal  Float
+}
+
+// Compras a proveedores
+model Purchase {
+  id         String          @id @default(cuid())
+  reference  String?         // factura del proveedor
+  supplierId String?
+  supplier   Supplier?       @relation(fields: [supplierId], references: [id])
+  subtotal   Float
+  tax        Float           @default(0)
+  total      Float
+  status     String          @default("recibida") // recibida, pendiente, anulada
+  notes      String?
+  createdAt  DateTime        @default(now())
+  items      PurchaseItem[]
+}
+
+model PurchaseItem {
+  id             String   @id @default(cuid())
+  purchaseId     String
+  purchase       Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id])
+  quantity       Int
+  unitCost       Float
+  subtotal       Float
+  expirationDate DateTime?
+  batch          String?
+}
+
+// Caja y arqueo
+model CashSession {
+  id            String           @id @default(cuid())
+  openingAmount Float
+  closingAmount Float?
+  expectedAmount Float?
+  difference    Float?
+  status        String           @default("abierta") // abierta, cerrada
+  openedAt      DateTime         @default(now())
+  closedAt      DateTime?
+  openedBy      String?
+  closedBy      String?
+  notes         String?
+  transactions  CashTransaction[]
+}
+
+model CashTransaction {
+  id            String      @id @default(cuid())
+  cashSessionId String
+  cashSession   CashSession @relation(fields: [cashSessionId], references: [id], onDelete: Cascade)
+  type          String      // ingreso, egreso, venta
+  amount        Float
+  concept       String
+  method        String      @default("efectivo")
+  reference     String?
+  createdAt     DateTime    @default(now())
+}
+
+// Ingresos y egresos generales
+model Transaction {
+  id            String   @id @default(cuid())
+  type          String   // ingreso, egreso
+  category      String
+  amount        Float
+  concept       String
+  description   String?
+  method        String   @default("efectivo")
+  date          DateTime @default(now())
+  cashSessionId String?
+  createdAt     DateTime @default(now())
+}
+
+// Configuración de la tienda
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+}
