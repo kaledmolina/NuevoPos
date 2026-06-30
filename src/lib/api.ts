@@ -1,4 +1,6 @@
-// Helper de fetch para el cliente con manejo de errores y envío de rol
+// Helper de fetch para el cliente con manejo de errores.
+// La sesión (rol) se envía automáticamente como cookie httpOnly firmada,
+// no se puede manipular desde el cliente.
 
 export async function apiFetch<T>(
   url: string,
@@ -8,20 +10,7 @@ export async function apiFetch<T>(
     "Content-Type": "application/json",
     ...((options?.headers as Record<string, string>) || {}),
   }
-  // Adjuntar la sesión (rol + nombre) desde localStorage
-  if (typeof window !== "undefined") {
-    try {
-      const raw = localStorage.getItem("pos-session")
-      if (raw) {
-        const { role, name } = JSON.parse(raw)
-        if (role) headers["x-user-role"] = role
-        if (name) headers["x-user-name"] = encodeURIComponent(name)
-      }
-    } catch {
-      /* noop */
-    }
-  }
-  const res = await fetch(url, { ...options, headers })
+  const res = await fetch(url, { ...options, headers, credentials: "same-origin" })
   if (!res.ok) {
     let msg = `Error ${res.status}`
     try {

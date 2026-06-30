@@ -10,6 +10,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Usuarios del sistema con rol y PIN hasheado (login server-side)
+model User {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  role      String   // admin | vendedor
+  pinHash   String   // HMAC del PIN con AUTH_SECRET
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
 // Catálogos
 model Category {
   id        String   @id @default(cuid())

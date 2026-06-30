@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { nextInvoiceNumber } from "@/lib/format"
-import { requireAdmin } from "@/lib/auth"
+import { requireAdmin, hashPin } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -174,7 +174,16 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    return NextResponse.json({ ok: true, message: "Datos de demostración cargados correctamente" })
+    // Usuarios del sistema (con PIN hasheado)
+    await db.user.deleteMany()
+    await db.user.createMany({
+      data: [
+        { name: "admin", role: "admin", pinHash: hashPin("1234") },
+        { name: "vendedor", role: "vendedor", pinHash: hashPin("0000") },
+      ],
+    })
+
+    return NextResponse.json({ ok: true, message: "Datos de demostración cargados correctamente. Usuarios: admin (PIN 1234), vendedor (PIN 0000)." })
   } catch (e) {
     console.error(e)
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })

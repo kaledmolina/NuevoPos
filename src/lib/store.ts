@@ -1,6 +1,7 @@
 "use client"
 
 import { create } from "zustand"
+import { apiFetch } from "@/lib/api"
 import type { Role, ViewKey } from "@/lib/permissions"
 
 interface CartItem {
@@ -13,13 +14,13 @@ interface CartItem {
 }
 
 interface AppState {
-  // Autenticación
+  // Autenticación (sesión validada server-side vía cookie httpOnly)
   hydrated: boolean
   role: Role | null
   userName: string | null
-  hydrate: () => void
-  login: (role: Role, name: string) => void
-  logout: () => void
+  hydrate: () => Promise<void>
+  login: (name: string, pin: string) => Promise<void>
+  logout: () => Promise<void>
 
   // Navegación
   view: ViewKey
@@ -39,43 +40,51 @@ interface AppState {
   triggerRefresh: () => void
 }
 
-const SESSION_KEY = "pos-session"
-
 export const useAppStore = create<AppState>((set) => ({
   hydrated: false,
   role: null,
   userName: null,
-  hydrate: () => {
-    if (typeof window === "undefined") return
+
+  // Consulta al servidor quién es el usuario actual (cookie httpOnly)
+  hydrate: async () => {
     try {
-      const raw = localStorage.getItem(SESSION_KEY)
-      if (raw) {
-        const { role, name } = JSON.parse(raw)
-        if (role === "admin" || role === "vendedor") {
-          set({ role, userName: name, hydrated: true })
-          return
-        }
+      const data = await apiFetch<{ user: { name: string; role: Role } | null }>("/api/auth/me")
+      if (data.user) {
+        set({
+          role: data.user.role,
+          userName: data.user.name,
+          view: data.user.role === "admin" ? "dashboard" : "pos",
+          hydrated: true,
+        })
+        return
       }
     } catch {
       /* noop */
     }
-    set({ hydrated: true })
+    set({ hydrated: true, role: null, userName: null })
   },
-  login: (role, name) => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem(SESSION_KEY, JSON.stringify({ role, name }))
-    }
+
+  // Login: valida PIN contra la BD; el servidor setea la cookie firmada
+  login: async (name, pin) => {
+    const data = await apiFetch<{ ok: boolean; user: { name: string; role: Role } }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ name, pin }),
+    })
     set({
-      role,
-      userName: name,
-      view: role === "admin" ? "dashboard" : "pos",
+      role: data.user.role,
+      userName: data.user.name,
+      view: data.user.role === "admin" ? "dashboard" : "pos",
       cart: [],
       sidebarOpen: false,
     })
   },
-  logout: () => {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem(SESSION_KEY)
+
+  // Logout: el servidor borra la cookie
+  logout: async () => {
+    try {
+      await apiFetch("/api/auth/logout", { method: "POST" })
+    } catch {
+      /* noop */
     }
     set({ role: null, userName: null, view: "dashboard", cart: [], sidebarOpen: false })
   },
@@ -114,7 +123,6 @@ export const useAppStore = create<AppState>((set) => ({
   triggerRefresh: () => set((s) => ({ refreshKey: s.refreshKey + 1 })),
 }))
 
-// Hook de conveniencia para obtener los permisos del rol actual
 export function useRole() {
   return useAppStore((s) => s.role)
 }

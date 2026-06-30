@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { requireAuth } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
 // Cerrar caja / arqueo
 // body: { id, closingAmount (declarado), notes }
 export async function POST(req: NextRequest) {
+  const auth = requireAuth(req)
+  if (auth instanceof NextResponse) return auth
   try {
     const body = await req.json()
     const { id, closingAmount, notes } = body

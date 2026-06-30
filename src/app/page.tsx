@@ -101,7 +101,7 @@ export default function Home() {
   const [seedOpen, setSeedOpen] = useState(false)
   const [seeding, setSeeding] = useState(false)
 
-  // Hidratar sesión desde localStorage al montar
+  // Hidratar sesión consultando al servidor (cookie httpOnly firmada)
   useEffect(() => { hydrate() }, [hydrate])
 
   // Cargar nombre de la tienda
@@ -200,7 +200,7 @@ export default function Home() {
             <Database className="h-4 w-4 mr-2" /> Cargar datos demo
           </Button>
         )}
-        <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent" onClick={() => { logout(); toast.info("Sesión cerrada") }}>
+        <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent" onClick={() => { logout(); toast.info("Sesión cerrada") }} disabled={seeding}>
           <LogOut className="h-4 w-4 mr-2" /> Cerrar sesión
         </Button>
       </div>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { requireAuth } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -15,6 +16,8 @@ export async function GET() {
 
 // Abrir caja
 export async function POST(req: NextRequest) {
+  const auth = requireAuth(req)
+  if (auth instanceof NextResponse) return auth
   try {
     const body = await req.json()
     const existing = await db.cashSession.findFirst({ where: { status: "abierta" } })

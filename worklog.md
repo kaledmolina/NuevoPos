@@ -269,3 +269,43 @@ Stage Summary:
 - Permisos enforced en 3 capas: (1) UI filtra navegación y oculta acciones, (2) vistas respetan permisos (read-only, sin costos), (3) API rechaza con 403 operaciones no autorizadas.
 - Mitigación de bypass de inventario: vendedores ya no pueden editar stock manualmente. Solo admin puede crear/editar productos, registrar compras y anular ventas.
 - Nota honesta: el rol se transmite vía cabecera HTTP (x-user-role) desde el cliente; en un sistema de producción se debería usar NextAuth con sesiones/JWT server-side para evitar manipulación directa de la cabecera. La capa actual protege contra uso normal del UI pero no contra ataques deliberados al API.
+
+---
+Task ID: S1
+Agent: Coordinator (Z.ai Code)
+Task: Medidas de seguridad robustas (sesiones server-side) + verificación de ambos roles
+
+Work Log:
+- Vulnerabilidad identificada: el rol viajaba en cabecera HTTP `x-user-role` que un vendedor podía manipular desde la consola del navegador para escalar a admin.
+- Solución implementada: **sesiones firmadas server-side con cookies httpOnly**.
+  1. Modelo `User` en Prisma {id, name, role, pinHash, active}. db push + AUTH_SECRET en .env.
+  2. `src/lib/auth.ts` reescrito: hashPin (HMAC-SHA256), verifyPin (timingSafeEqual anti timing-attack), sign/verify de sesión (payload base64url + firma HMAC), getSession (lee cookie httpOnly), createSessionCookie/clearSessionCookie (httpOnly, sameSite=lax, maxAge 12h), requireAdmin (403 si no admin), requireAuth (401 si no autenticado), checkRateLimit/resetRateLimit (5 intentos / 5 min).
+  3. Endpoints auth: POST /api/auth/login (valida name+PIN contra BD, setea cookie firmada), POST /api/auth/logout (borra cookie), GET /api/auth/me (devuelve usuario desde cookie).
+  4. Seed actualizado: crea usuarios `admin` (PIN 1234) y `vendedor` (PIN 0000) con PIN hasheado.
+  5. Store reescrito: hydrate() consulta /api/auth/me (async), login() llama /api/auth/login, logout() llama /api/auth/logout. Ya NO se persiste nada en localStorage.
+  6. apiFetch simplificado: ya no envía cabecera x-user-role; la cookie httpOnly viaja automáticamente (credentials: same-origin).
+  7. login.tsx reescrito: selector de rol (atajo que prellena usuario) + input usuario + input PIN (password, numérico) + credenciales demo visibles.
+  8. Guardias añadidas: requireAdmin en products (POST/PATCH/DELETE), purchases (POST/PATCH), transactions (POST/PATCH/DELETE), sales/[id] (PATCH anular), seed. requireAuth en sales (POST), cash (POST abrir), cash/close (POST arqueo), cash/transaction (POST).
+- Verificación de seguridad con curl (6 tests de bypass):
+  * Vendedor anula venta → 403 ✓
+  * Vendedor crea producto → 403 ✓
+  * Vendedor edita stock → 403 ✓
+  * Vendedor crea compra → 403 ✓
+  * Vendedor inyecta cabecera x-user-role: admin → 403 (cabecera ignorada) ✓
+  * Anónimo anula venta → 401 ✓
+  * Vendedor vende → permitido ✓
+- Rate limiting: 5 intentos fallidos → HTTP 429 "Demasiados intentos. Intenta de nuevo en 300 segundos", bloquea incluso credenciales válidas ✓
+- Verificación con Agent Browser:
+  * FLUJO VENDEDOR: login (PIN 0000) → ve 5 secciones → vende F2606-0007 → consulta historial (sin botón Anular) → gestiona caja (registra egreso, ve saldo $105.400) ✓
+  * FLUJO ADMIN: login (PIN 1234) → ve 10 secciones → dashboard con costos → anula venta F2606-0008 (stock 233→234) ✓
+  * BYPASS desde navegador: vendedor manipula localStorage para fingir admin → recarga → /api/auth/me sigue devolviendo "vendedor" → intenta crear producto vía fetch → 403 ✓ (la cookie firmada es la única fuente de verdad)
+- Sin errores de consola. `bun run lint` limpio.
+
+Stage Summary:
+- Sistema de seguridad robusto implementado: sesiones firmadas HMAC con cookies httpOnly, inaccesibles y no falsificables desde el cliente.
+- PIN hasheado con HMAC + comparación timing-safe (anti timing attacks).
+- Rate limiting en login (5 intentos/5 min) anti fuerza bruta.
+- Cookies: httpOnly (no accesibles vía JS), sameSite=lax (anti CSRF), firmadas (anti falsificación).
+- 3 capas de autorización enforced server-side: requireAuth (cualquier autenticado), requireAdmin (solo admin), y la UI filtra por rol.
+- Bypass bloqueado: manipular localStorage, inyectar cabeceras, o llamar endpoints directamente → todos rechazados con 401/403.
+- Credenciales demo: admin/1234 (acceso completo), vendedor/0000 (venta + caja).
