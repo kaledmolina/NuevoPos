@@ -212,3 +212,30 @@ Stage Summary:
 - Funcionalidades operativas: panel con métricas/alertas, punto de venta con checkout y recibo, inventario con CRUD + alertas de stock y vencimiento, compras a proveedores con actualización de stock, clientes, proveedores, historial de ventas con anulación, caja con apertura/cierre/arqueo, ingresos/egresos, y reportes con gráficos.
 - `bun run lint` pasa sin errores. Dev server sin errores.
 - Tema esmeralda (farmacia), responsive mobile-first, footer sticky, toasts sonner, moneda COP.
+
+---
+Task ID: V1
+Agent: Coordinator (Z.ai Code)
+Task: Supervisión completa del flujo de negocio end-to-end con Agent Browser
+
+Work Log:
+- Capturé baseline: 26 productos, 2 ventas ($13.800), 1 compra ($36.000), caja abierta $113.800.
+- **Cierre de caja (arqueo)**: Abrí el diálogo de arqueo. Verifiqué cálculo: inicial $100.000 + ventas efectivo $13.800 = esperado $113.800. Probé semáforo de diferencia: declaré $110.000 → mostró "Faltante $3.800". Declaré $113.800 → "Cuadrado". Confirmé cierre. BD: status=cerrada, expected=113800, closing=113800, diff=0 ✓.
+- **Apertura de caja**: Abrí nueva sesión con monto inicial $150.000, cajero "Cajero Supervisor". BD: status=abierta, opening=150000 ✓.
+- **Registrar producto**: Creé "Paracetamol Infantil 120mg/5ml x 100ml" (barcode 7702001000999, categoría Analgésicos, cost $5.000, price $12.000, stock 10, minStock 5, vencimiento 2026-08-29, lote L9999, ubicación Estante E5). BD: todos los campos guardados correctamente ✓. (Nota: el input date controlado por React requiere setter nativo para fijar valor vía JS de prueba; por UI funciona normal).
+- **Compra a proveedor**: Registré compra a "Distribuciones Farma S.A.S" de 15 unidades del Paracetamol Infantil @ $5.000 = $75.000. Stock incrementó 10→25 ✓, costo actualizado, vinculada al proveedor ✓.
+- **Venta en POS**: Vendí 3 unidades de Paracetamol Infantil @ $12.000 = $36.000 en efectivo. Recibo "¡Venta exitosa! F2606-0003". Stock decrementó 25→22 ✓, caja registró movimiento tipo "venta" +$36.000 ✓.
+- **Ingreso en caja**: Registré ingreso $50.000 "Adelanto de efectivo para cambio" ✓.
+- **Egreso en caja**: Registré egreso $20.000 "Gastos de transporte" ✓.
+- **Cierre con arqueo final**: Calculó esperado = $150.000 + $36.000 + $50.000 − $20.000 = $216.000. Declaré $216.000 → "Cuadrado". BD: expected=216000, closing=216000, diff=0 ✓.
+- **Dashboard**: Refleja ventas hoy $49.800 (3 transacciones), valor inventario $10.927.700, caja cerrada, top productos (Acetaminofén #1, Paracetamol Infantil #2) ✓.
+- **Reportes**: Ventas totales $49.800, utilidad bruta $29.000 (verificado manualmente), ticket promedio $16.600, compras $111.000 ✓. Gráficos renderizan sin errores.
+- **Anulación de venta**: Anulé F2606-0003. Stock reversó 22→25 (+3 devueltos) ✓, estado cambió a "anulada" ✓.
+- Reabrí caja con $100.000 para dejar la app lista.
+- Errores de consola: 0. Solo advertencia menor de accesibilidad (DialogDescription faltante en algunos diálogos, no bloqueante).
+
+Stage Summary:
+- CICLO DE NEGOCIO COMPLETO VERIFICADO: abrir caja → registrar producto → comprar a proveedor (stock+) → vender (stock−, caja+) → ingreso/egreso caja → arqueo cierre (cuadre) → anular venta (stock reversa) → dashboard/reportes reflejan todo.
+- Cálculos de arqueo correctos (esperado = inicial + ventas efectivo + ingresos efectivo − egresos efectivo).
+- Stock consistente en todo el ciclo: 10 (registro) → 25 (+15 compra) → 22 (−3 venta) → 25 (+3 anulación).
+- Todas las funciones operativas. Sin errores de runtime. App lista para usar con caja abierta.
