@@ -1,10 +1,13 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { nextInvoiceNumber } from "@/lib/format"
+import { requireAdmin } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const denied = requireAdmin(req)
+  if (denied) return denied
   try {
     // Limpiar datos existentes
     await db.cashTransaction.deleteMany()

@@ -1,10 +1,17 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useAppStore, type ViewKey } from "@/lib/store"
+import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api"
+import { ROLE_CONFIG, canAccessView, defaultViewFor, type ViewKey } from "@/lib/permissions"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  Avatar, AvatarFallback,
+} from "@/components/ui/avatar"
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -13,10 +20,11 @@ import { toast } from "sonner"
 import {
   LayoutDashboard, ShoppingCart, Package, Truck, Users, Building2,
   ReceiptText, Wallet, ArrowLeftRight, BarChart3, Menu, Pill, Database,
-  Store, X,
+  Store, X, LogOut, ChevronDown, ShieldCheck, Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
+import LoginScreen from "@/components/pos/login"
 import DashboardView from "@/components/pos/dashboard"
 import PosTerminal from "@/components/pos/pos-terminal"
 import ProductsView from "@/components/pos/products"
@@ -78,6 +86,12 @@ const TITLES: Record<ViewKey, { title: string; subtitle: string }> = {
 }
 
 export default function Home() {
+  const hydrated = useAppStore((s) => s.hydrated)
+  const hydrate = useAppStore((s) => s.hydrate)
+  const role = useAppStore((s) => s.role)
+  const userName = useAppStore((s) => s.userName)
+  const logout = useAppStore((s) => s.logout)
+
   const view = useAppStore((s) => s.view)
   const setView = useAppStore((s) => s.setView)
   const sidebarOpen = useAppStore((s) => s.sidebarOpen)
@@ -87,11 +101,23 @@ export default function Home() {
   const [seedOpen, setSeedOpen] = useState(false)
   const [seeding, setSeeding] = useState(false)
 
+  // Hidratar sesión desde localStorage al montar
+  useEffect(() => { hydrate() }, [hydrate])
+
+  // Cargar nombre de la tienda
   useEffect(() => {
+    if (!role) return
     apiFetch<Record<string, string>>("/api/settings")
-      .then((s) => { if (s.store_name) setStoreName(s.store_name) })
+      .then((s) => { if (s.store_name) setStoreName(s.storeName) })
       .catch(() => {})
-  }, [])
+  }, [role])
+
+  // Si la vista actual no está permitida para el rol, redirigir
+  useEffect(() => {
+    if (role && !canAccessView(role, view)) {
+      setView(defaultViewFor(role))
+    }
+  }, [role, view, setView])
 
   const runSeed = async () => {
     setSeeding(true)
@@ -108,6 +134,27 @@ export default function Home() {
     }
   }
 
+  // Pantalla de carga mientras se hidrata la sesión
+  if (!hydrated) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Cargando sistema…</p>
+      </div>
+    )
+  }
+
+  // Si no hay sesión, mostrar pantalla de login
+  if (!role) {
+    return <LoginScreen />
+  }
+
+  const perms = ROLE_CONFIG[role]
+  const allowedGroups = NAV.map((g) => ({
+    ...g,
+    items: g.items.filter((it) => canAccessView(role, it.key)),
+  })).filter((g) => g.items.length > 0)
+
   const NavContent = () => (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2.5 px-5 py-5 border-b border-sidebar-border">
@@ -120,7 +167,7 @@ export default function Home() {
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto scroll-thin px-3 py-4 space-y-5">
-        {NAV.map((group) => (
+        {allowedGroups.map((group) => (
           <div key={group.label}>
             <p className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">{group.label}</p>
             <div className="space-y-0.5">
@@ -147,15 +194,21 @@ export default function Home() {
           </div>
         ))}
       </nav>
-      <div className="border-t border-sidebar-border p-3">
-        <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent" onClick={() => setSeedOpen(true)}>
-          <Database className="h-4 w-4 mr-2" /> Cargar datos demo
+      <div className="border-t border-sidebar-border p-3 space-y-1">
+        {perms.canSeedData && (
+          <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent" onClick={() => setSeedOpen(true)}>
+            <Database className="h-4 w-4 mr-2" /> Cargar datos demo
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent" onClick={() => { logout(); toast.info("Sesión cerrada") }}>
+          <LogOut className="h-4 w-4 mr-2" /> Cerrar sesión
         </Button>
       </div>
     </div>
   )
 
   const meta = TITLES[view]
+  const initials = (userName ?? "?").slice(0, 2).toUpperCase()
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -186,9 +239,37 @@ export default function Home() {
             <h1 className="text-base md:text-lg font-bold leading-tight truncate">{meta.title}</h1>
             <p className="text-xs text-muted-foreground truncate hidden sm:block">{meta.subtitle}</p>
           </div>
-          <div className="hidden md:flex items-center gap-2">
-            <Badge variant="outline" className="gap-1.5 text-xs"><Store className="h-3 w-3" /> {storeName}</Badge>
-          </div>
+
+          {/* Usuario + rol */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-2 rounded-lg border bg-card px-2 py-1.5 hover:bg-muted transition-colors">
+                <Avatar className="h-7 w-7">
+                  <AvatarFallback className={cn("text-[11px] font-semibold", role === "admin" ? "bg-primary text-primary-foreground" : "bg-teal-500/15 text-teal-700")}>
+                    {initials}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="hidden sm:block text-left leading-tight">
+                  <p className="text-xs font-semibold truncate max-w-[120px]">{userName}</p>
+                  <p className="text-[10px] text-muted-foreground">{perms.label}</p>
+                </div>
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuLabel className="flex items-center gap-2">
+                <ShieldCheck className={cn("h-4 w-4", role === "admin" ? "text-primary" : "text-teal-600")} />
+                <div>
+                  <p className="text-sm font-semibold">{userName}</p>
+                  <p className="text-xs text-muted-foreground font-normal">{perms.label}</p>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { logout(); toast.info("Sesión cerrada") }}>
+                <LogOut className="h-4 w-4 mr-2" /> Cerrar sesión
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </header>
 
         <main className="flex-1 overflow-y-auto scroll-thin">

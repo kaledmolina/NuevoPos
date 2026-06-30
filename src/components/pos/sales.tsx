@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { apiFetch } from "@/lib/api"
 import { useAppStore } from "@/lib/store"
+import { ROLE_CONFIG } from "@/lib/permissions"
 import { formatCurrency, formatDateTime } from "@/lib/format"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -48,6 +49,8 @@ export default function SalesView() {
   const refreshKey = useAppStore((s) => s.refreshKey)
   const triggerRefresh = useAppStore((s) => s.triggerRefresh)
   const setView = useAppStore((s) => s.setView)
+  const role = useAppStore((s) => s.role)
+  const canAnnul = role ? ROLE_CONFIG[role].canAnnulSales : false
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState("")
@@ -192,7 +195,7 @@ export default function SalesView() {
                 <div className="flex justify-between text-muted-foreground"><span>Recibido</span><span>{formatCurrency(detail.amountReceived)}</span></div>
                 {detail.change > 0 && <div className="flex justify-between text-emerald-600"><span>Cambio</span><span>{formatCurrency(detail.change)}</span></div>}
               </div>
-              {detail.status === "completada" && (
+              {detail.status === "completada" && canAnnul && (
                 <Button variant="outline" className="w-full text-destructive" onClick={() => annul(detail)}>
                   <Ban className="h-4 w-4 mr-2" /> Anular venta
                 </Button>

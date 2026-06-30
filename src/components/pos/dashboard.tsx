@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api"
 import { formatCurrency, formatNumber, expirationStatus, daysUntil, formatDateTime } from "@/lib/format"
 import { useAppStore } from "@/lib/store"
+import { ROLE_CONFIG } from "@/lib/permissions"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -41,6 +42,8 @@ export default function DashboardView() {
   const [loading, setLoading] = useState(true)
   const setView = useAppStore((s) => s.setView)
   const refreshKey = useAppStore((s) => s.refreshKey)
+  const role = useAppStore((s) => s.role)
+  const canSeeCosts = role ? ROLE_CONFIG[role].canSeeCosts : false
 
   useEffect(() => {
     setLoading(true)
@@ -66,7 +69,7 @@ export default function DashboardView() {
   const stats = [
     { label: "Ventas de hoy", value: formatCurrency(data.totalToday), sub: `${data.countToday} transacciones`, icon: ShoppingCart, tone: "primary" },
     { label: "Ventas del mes", value: formatCurrency(data.totalMonth), sub: "Acumulado mensual", icon: DollarSign, tone: "emerald" },
-    { label: "Valor de inventario", value: formatCurrency(data.retailValue), sub: `Costo: ${formatCurrency(data.stockValue)}`, icon: Boxes, tone: "amber" },
+    { label: "Valor de inventario", value: formatCurrency(data.retailValue), sub: canSeeCosts ? `Costo: ${formatCurrency(data.stockValue)}` : "Valor de venta", icon: Boxes, tone: "amber" },
     { label: "Caja actual", value: formatCurrency(data.cashBalance), sub: data.cashOpen ? `${data.cashMovements} movimientos` : "Caja cerrada", icon: Wallet, tone: "teal" },
   ]
 

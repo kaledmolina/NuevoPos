@@ -1,18 +1,7 @@
 "use client"
 
 import { create } from "zustand"
-
-export type ViewKey =
-  | "dashboard"
-  | "pos"
-  | "products"
-  | "clients"
-  | "suppliers"
-  | "purchases"
-  | "sales"
-  | "cash"
-  | "finance"
-  | "reports"
+import type { Role, ViewKey } from "@/lib/permissions"
 
 interface CartItem {
   productId: string
@@ -24,26 +13,78 @@ interface CartItem {
 }
 
 interface AppState {
+  // Autenticación
+  hydrated: boolean
+  role: Role | null
+  userName: string | null
+  hydrate: () => void
+  login: (role: Role, name: string) => void
+  logout: () => void
+
+  // Navegación
   view: ViewKey
   setView: (v: ViewKey) => void
   sidebarOpen: boolean
   setSidebarOpen: (o: boolean) => void
-  // carrito POS
+
+  // Carrito POS
   cart: CartItem[]
   addToCart: (item: Omit<CartItem, "quantity">, qty?: number) => void
   updateCartQty: (productId: string, qty: number) => void
   removeFromCart: (productId: string) => void
   clearCart: () => void
-  // contador de refresco global para forzar recarga de datos
+
+  // Refresco global
   refreshKey: number
   triggerRefresh: () => void
 }
 
+const SESSION_KEY = "pos-session"
+
 export const useAppStore = create<AppState>((set) => ({
+  hydrated: false,
+  role: null,
+  userName: null,
+  hydrate: () => {
+    if (typeof window === "undefined") return
+    try {
+      const raw = localStorage.getItem(SESSION_KEY)
+      if (raw) {
+        const { role, name } = JSON.parse(raw)
+        if (role === "admin" || role === "vendedor") {
+          set({ role, userName: name, hydrated: true })
+          return
+        }
+      }
+    } catch {
+      /* noop */
+    }
+    set({ hydrated: true })
+  },
+  login: (role, name) => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ role, name }))
+    }
+    set({
+      role,
+      userName: name,
+      view: role === "admin" ? "dashboard" : "pos",
+      cart: [],
+      sidebarOpen: false,
+    })
+  },
+  logout: () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(SESSION_KEY)
+    }
+    set({ role: null, userName: null, view: "dashboard", cart: [], sidebarOpen: false })
+  },
+
   view: "dashboard",
   setView: (v) => set({ view: v, sidebarOpen: false }),
   sidebarOpen: false,
   setSidebarOpen: (o) => set({ sidebarOpen: o }),
+
   cart: [],
   addToCart: (item, qty = 1) =>
     set((s) => {
@@ -68,6 +109,12 @@ export const useAppStore = create<AppState>((set) => ({
   removeFromCart: (productId) =>
     set((s) => ({ cart: s.cart.filter((c) => c.productId !== productId) })),
   clearCart: () => set({ cart: [] }),
+
   refreshKey: 0,
   triggerRefresh: () => set((s) => ({ refreshKey: s.refreshKey + 1 })),
 }))
+
+// Hook de conveniencia para obtener los permisos del rol actual
+export function useRole() {
+  return useAppStore((s) => s.role)
+}

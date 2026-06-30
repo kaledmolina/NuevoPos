@@ -239,3 +239,33 @@ Stage Summary:
 - Cálculos de arqueo correctos (esperado = inicial + ventas efectivo + ingresos efectivo − egresos efectivo).
 - Stock consistente en todo el ciclo: 10 (registro) → 25 (+15 compra) → 22 (−3 venta) → 25 (+3 anulación).
 - Todas las funciones operativas. Sin errores de runtime. App lista para usar con caja abierta.
+
+---
+Task ID: R1
+Agent: Coordinator (Z.ai Code)
+Task: Sistema de roles (Admin/Vendedor) + permisos + análisis de integridad de inventario
+
+Work Log:
+- Análisis de integridad de inventario: identifiqué 3 puntos de bypass — (1) edición manual de stock vía PATCH /api/products/[id] sin validación de valor (permite negativos), (2) sin trazabilidad/auditoría de cambios de stock, (3) cualquier usuario podía editar. Ahora mitigado con roles: solo admin puede editar inventario.
+- Creé `src/lib/permissions.ts`: tipos Role/ViewKey, ROLE_CONFIG con matriz de permisos por rol (admin = todo; vendedor = dashboard/pos/products(read-only)/sales/cash, sin costos ni edición).
+- Creé `src/lib/auth.ts`: helper server-side getRole()/requireAdmin() que lee cabecera x-user-role.
+- Actualicé `src/lib/store.ts`: añadí hydrated/role/userName/hydrate()/login()/logout() con persistencia en localStorage (clave pos-session).
+- Actualicé `src/lib/api.ts`: apiFetch adjunta x-user-role y x-user-name desde localStorage en cada petición.
+- Creé `src/components/pos/login.tsx`: pantalla de login con selector de rol (2 tarjetas Admin/Vendedor), input de nombre, descripción de permisos del rol seleccionado.
+- Actualicé `src/app/page.tsx`: gate de login (si no hay rol → LoginScreen), nav filtrado por ROLE_CONFIG[role].views, badge de usuario con avatar/iniciales en header, dropdown de usuario con logout, guardia de redirección si vista no permitida, botón "Cargar datos demo" solo para admin.
+- Guardias server-side (requireAdmin) en: POST /api/products, PATCH/DELETE /api/products/[id], POST /api/purchases, PATCH /api/purchases/[id], POST /api/transactions, PATCH/DELETE /api/transactions/[id], PATCH /api/sales/[id] (anular), POST /api/seed.
+- Actualicé `src/components/pos/products.tsx`: read-only para vendedor (sin botones Nuevo/Editar/Eliminar, sin columna Acciones, sin valor de stock en costo, badge "Solo lectura"), oculta costos en CSV.
+- Actualicé `src/components/pos/sales.tsx`: botón "Anular venta" solo visible si canAnnulSales (admin).
+- Actualicé `src/components/pos/dashboard.tsx`: oculta "Costo: $X" del card de inventario para vendedores (muestra "Valor de venta").
+- Verificación con Agent Browser:
+  * Login como VENDEDORA "Laura": nav muestra solo 5 secciones (Panel, POS, Productos, Ventas, Caja). POS por defecto. Productos en solo lectura (0 botones de acción). Vendió F2606-0004 ✓. No ve botón Anular en detalle de venta ✓.
+  * Login como ADMIN "Carlos": nav muestra 10 secciones. Dashboard por defecto. Productos con edición completa + valor de stock en costo. Puede anular ventas (anuló F2606-0005, stock 235→236) ✓.
+  * Verificación server-side con curl: anular/editar/comprar sin rol o con rol vendedor → 403 "Acción reservada para el administrador" ✓. Vender con rol vendedor → permitido (F2606-0005) ✓.
+  * Responsive móvil (390x844): login y menú funcionan ✓.
+  * Sin errores de consola/runtime. `bun run lint` limpio.
+
+Stage Summary:
+- Sistema de roles implementado y verificado: Admin (acceso completo) y Vendedor (solo vender + caja/arqueo + consulta).
+- Permisos enforced en 3 capas: (1) UI filtra navegación y oculta acciones, (2) vistas respetan permisos (read-only, sin costos), (3) API rechaza con 403 operaciones no autorizadas.
+- Mitigación de bypass de inventario: vendedores ya no pueden editar stock manualmente. Solo admin puede crear/editar productos, registrar compras y anular ventas.
+- Nota honesta: el rol se transmite vía cabecera HTTP (x-user-role) desde el cliente; en un sistema de producción se debería usar NextAuth con sesiones/JWT server-side para evitar manipulación directa de la cabecera. La capa actual protege contra uso normal del UI pero no contra ataques deliberados al API.

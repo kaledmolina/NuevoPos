@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { requireAdmin } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -8,6 +9,8 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = requireAdmin(req)
+  if (denied) return denied
   try {
     const { id } = await params
     const body = await req.json()
@@ -90,9 +93,11 @@ export async function PATCH(
 
 // DELETE /api/transactions/[id]
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = requireAdmin(req)
+  if (denied) return denied
   try {
     const { id } = await params
     const existing = await db.transaction.findUnique({ where: { id } })

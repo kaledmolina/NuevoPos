@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react"
 import { apiFetch } from "@/lib/api"
 import { useAppStore } from "@/lib/store"
+import { ROLE_CONFIG } from "@/lib/permissions"
 import {
   formatCurrency, expirationStatus, daysUntil, formatDate,
 } from "@/lib/format"
@@ -60,6 +61,9 @@ const emptyForm = {
 export default function ProductsView() {
   const refreshKey = useAppStore((s) => s.refreshKey)
   const triggerRefresh = useAppStore((s) => s.triggerRefresh)
+  const role = useAppStore((s) => s.role)
+  const canEdit = role ? ROLE_CONFIG[role].canEditProducts : false
+  const canSeeCosts = role ? ROLE_CONFIG[role].canSeeCosts : false
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
@@ -158,13 +162,15 @@ export default function ProductsView() {
   }
 
   const exportCsv = () => {
+    const header = canSeeCosts
+      ? ["Nombre", "Código", "Categoría", "Costo", "Precio", "Stock", "Min", "Unidad", "Vencimiento", "Lote", "Ubicación"]
+      : ["Nombre", "Código", "Categoría", "Precio", "Stock", "Min", "Unidad", "Vencimiento", "Lote", "Ubicación"]
     const rows = [
-      ["Nombre", "Código", "Categoría", "Costo", "Precio", "Stock", "Min", "Unidad", "Vencimiento", "Lote", "Ubicación"],
-      ...filtered.map((p) => [
-        p.name, p.barcode ?? "", p.category?.name ?? "", String(p.cost), String(p.price),
-        String(p.stock), String(p.minStock), p.unit,
-        p.expirationDate ? formatDate(p.expirationDate) : "", p.batch ?? "", p.location ?? "",
-      ]),
+      header,
+      ...filtered.map((p) => canSeeCosts
+        ? [p.name, p.barcode ?? "", p.category?.name ?? "", String(p.cost), String(p.price), String(p.stock), String(p.minStock), p.unit, p.expirationDate ? formatDate(p.expirationDate) : "", p.batch ?? "", p.location ?? ""]
+        : [p.name, p.barcode ?? "", p.category?.name ?? "", String(p.price), String(p.stock), String(p.minStock), p.unit, p.expirationDate ? formatDate(p.expirationDate) : "", p.batch ?? "", p.location ?? ""]
+      ),
     ]
     const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n")
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
@@ -176,7 +182,7 @@ export default function ProductsView() {
     URL.revokeObjectURL(url)
   }
 
-  const totalStockValue = filtered.reduce((s, p) => s + p.cost * p.stock, 0)
+  const totalStockValue = canSeeCosts ? filtered.reduce((s, p) => s + p.cost * p.stock, 0) : 0
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -185,12 +191,20 @@ export default function ProductsView() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold flex items-center gap-2"><Package className="h-5 w-5 text-primary" /> Inventario de productos</h2>
-            <p className="text-sm text-muted-foreground">{filtered.length} productos · Valor en stock: {formatCurrency(totalStockValue)}</p>
+            <p className="text-sm text-muted-foreground">
+              {filtered.length} productos{canSeeCosts ? ` · Valor en stock: ${formatCurrency(totalStockValue)}` : ""}
+              {!canEdit && <span className="ml-2 text-xs text-muted-foreground">· Solo lectura</span>}
+            </p>
           </div>
-          <div className="flex gap-2">
+          {canEdit && (
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={exportCsv}><Download className="h-4 w-4 mr-1" /> Exportar</Button>
+              <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1" /> Nuevo producto</Button>
+            </div>
+          )}
+          {!canEdit && (
             <Button variant="outline" size="sm" onClick={exportCsv}><Download className="h-4 w-4 mr-1" /> Exportar</Button>
-            <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1" /> Nuevo producto</Button>
-          </div>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -234,7 +248,7 @@ export default function ProductsView() {
                     <TableHead className="text-right">Precio</TableHead>
                     <TableHead className="text-center">Stock</TableHead>
                     <TableHead className="hidden lg:table-cell">Vencimiento</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
+                    {canEdit && <TableHead className="text-right">Acciones</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -270,10 +284,14 @@ export default function ProductsView() {
                           ) : <span className="text-xs text-muted-foreground">—</span>}
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(p)}><Pencil className="h-3.5 w-3.5" /></Button>
-                            <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => setDeleteId(p.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
-                          </div>
+                          {canEdit ? (
+                            <div className="flex justify-end gap-1">
+                              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(p)}><Pencil className="h-3.5 w-3.5" /></Button>
+                              <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => setDeleteId(p.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     )

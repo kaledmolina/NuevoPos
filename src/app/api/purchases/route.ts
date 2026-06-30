@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { requireAdmin } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -37,6 +38,8 @@ export async function GET(req: NextRequest) {
 
 // POST /api/purchases — registra una compra y actualiza stock/costos de productos
 export async function POST(req: NextRequest) {
+  const denied = requireAdmin(req)
+  if (denied) return denied
   try {
     const body = await req.json()
     const { reference, supplierId, notes, items } = body as {
