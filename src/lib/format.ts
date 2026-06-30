@@ -11,6 +11,17 @@ export function formatCurrency(value: number | string | null | undefined): strin
   }).format(n)
 }
 
+// Formato compacto para KPIs en móvil: $1.2k, $3.4M, $890
+export function formatCurrencyCompact(value: number | string | null | undefined): string {
+  const n = typeof value === "string" ? parseFloat(value) : value ?? 0
+  if (isNaN(n) || n === 0) return "$0"
+  const abs = Math.abs(n)
+  if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
+  if (abs >= 10_000) return `$${Math.round(n / 1000)}k`
+  if (abs >= 1000) return `$${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`
+  return formatCurrency(n)
+}
+
 export function formatNumber(value: number | string | null | undefined): string {
   const n = typeof value === "string" ? parseFloat(value) : value ?? 0
   if (isNaN(n)) return "0"

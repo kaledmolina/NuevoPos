@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api"
-import { formatCurrency, formatNumber, expirationStatus, daysUntil, formatDateTime } from "@/lib/format"
+import { formatCurrency, formatCurrencyCompact, formatNumber, expirationStatus, daysUntil, formatDateTime } from "@/lib/format"
 import { useAppStore } from "@/lib/store"
 import { ROLE_CONFIG } from "@/lib/permissions"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -67,29 +67,32 @@ export default function DashboardView() {
   }
 
   const stats = [
-    { label: "Ventas de hoy", value: formatCurrency(data.totalToday), sub: `${data.countToday} transacciones`, icon: ShoppingCart, tone: "primary" },
-    { label: "Ventas del mes", value: formatCurrency(data.totalMonth), sub: "Acumulado mensual", icon: DollarSign, tone: "emerald" },
-    { label: "Valor de inventario", value: formatCurrency(data.retailValue), sub: canSeeCosts ? `Costo: ${formatCurrency(data.stockValue)}` : "Valor de venta", icon: Boxes, tone: "amber" },
-    { label: "Caja actual", value: formatCurrency(data.cashBalance), sub: data.cashOpen ? `${data.cashMovements} movimientos` : "Caja cerrada", icon: Wallet, tone: "teal" },
+    { label: "Ventas de hoy", value: data.totalToday, sub: `${data.countToday} transacciones`, icon: ShoppingCart, tone: "primary" },
+    { label: "Ventas del mes", value: data.totalMonth, sub: "Acumulado mensual", icon: DollarSign, tone: "emerald" },
+    { label: "Valor de inventario", value: data.retailValue, sub: canSeeCosts ? `Costo: ${formatCurrencyCompact(data.stockValue)}` : "Valor de venta", icon: Boxes, tone: "amber" },
+    { label: "Caja actual", value: data.cashBalance, sub: data.cashOpen ? `${data.cashMovements} movimientos` : "Caja cerrada", icon: Wallet, tone: "teal" },
   ]
 
   return (
     <div className="p-4 md:p-6 space-y-6">
       {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 md:gap-4">
         {stats.map((s) => {
           const Icon = s.icon
           return (
             <Card key={s.label} className="relative overflow-hidden">
-              <CardContent className="p-4 md:p-5">
+              <CardContent className="p-3 sm:p-4 md:p-5">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-xs md:text-sm text-muted-foreground truncate">{s.label}</p>
-                    <p className="text-xl md:text-2xl font-bold mt-1 truncate">{s.value}</p>
-                    <p className="text-[11px] md:text-xs text-muted-foreground mt-1 truncate">{s.sub}</p>
+                    <p className="text-[11px] sm:text-xs md:text-sm text-muted-foreground truncate">{s.label}</p>
+                    <p className="text-lg sm:text-xl md:text-2xl font-bold mt-1 truncate">
+                      <span className="sm:hidden">{formatCurrencyCompact(s.value)}</span>
+                      <span className="hidden sm:inline">{formatCurrency(s.value)}</span>
+                    </p>
+                    <p className="text-[10px] sm:text-[11px] md:text-xs text-muted-foreground mt-1 truncate">{s.sub}</p>
                   </div>
-                  <div className="shrink-0 rounded-xl bg-primary/10 p-2.5 text-primary">
-                    <Icon className="h-5 w-5" />
+                  <div className="shrink-0 rounded-xl bg-primary/10 p-2 sm:p-2.5 text-primary">
+                    <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
                   </div>
                 </div>
               </CardContent>

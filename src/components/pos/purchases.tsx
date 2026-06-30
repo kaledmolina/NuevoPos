@@ -296,87 +296,136 @@ export default function PurchasesView() {
       </div>
 
       {/* Filtro */}
-      <div className="relative">
+      <div className="relative w-full md:max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Buscar por referencia o proveedor…"
-          className="pl-9 h-9 max-w-md"
+          className="pl-9 h-10"
         />
       </div>
 
-      {/* Tabla */}
-      <Card>
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="p-4 space-y-2">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : purchases.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <Truck className="h-10 w-10 mb-2 opacity-40" />
-              <p className="text-sm">No hay compras registradas</p>
-              <p className="text-xs mt-1">Haz clic en “Nueva compra” para registrar la primera.</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Referencia</TableHead>
-                    <TableHead className="hidden md:table-cell">Proveedor</TableHead>
-                    <TableHead className="hidden sm:table-cell">Fecha</TableHead>
-                    <TableHead className="text-center">Items</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead className="text-center">Estado</TableHead>
-                    <TableHead className="text-right">Acción</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {purchases.map((p) => (
-                    <TableRow key={p.id} className={p.status === "anulada" ? "opacity-60" : ""}>
-                      <TableCell className="font-mono text-sm font-medium">
-                        {p.reference ? (
-                          p.reference
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell text-sm">
-                        {p.supplier?.name ?? <span className="text-muted-foreground">Sin proveedor</span>}
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
-                        {formatDateTime(p.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-center text-sm">{p.items.length}</TableCell>
-                      <TableCell className="text-right font-semibold">
-                        {formatCurrency(p.total)}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <StatusBadge status={p.status} />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8"
-                          onClick={() => setDetail(p)}
-                          aria-label="Ver detalle"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                        </Button>
-                      </TableCell>
+      {/* Tabla (desktop) */}
+      <div className="hidden md:block">
+        <Card>
+          <CardContent className="p-0">
+            {loading ? (
+              <div className="p-4 space-y-2">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : purchases.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                <Truck className="h-10 w-10 mb-2 opacity-40" />
+                <p className="text-sm">No hay compras registradas</p>
+                <p className="text-xs mt-1">Haz clic en “Nueva compra” para registrar la primera.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Referencia</TableHead>
+                      <TableHead className="hidden md:table-cell">Proveedor</TableHead>
+                      <TableHead className="hidden sm:table-cell">Fecha</TableHead>
+                      <TableHead className="text-center">Items</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead className="text-center">Estado</TableHead>
+                      <TableHead className="text-right">Acción</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {purchases.map((p) => (
+                      <TableRow key={p.id} className={p.status === "anulada" ? "opacity-60" : ""}>
+                        <TableCell className="font-mono text-sm font-medium">
+                          {p.reference ? (
+                            p.reference
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell text-sm">
+                          {p.supplier?.name ?? <span className="text-muted-foreground">Sin proveedor</span>}
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
+                          {formatDateTime(p.createdAt)}
+                        </TableCell>
+                        <TableCell className="text-center text-sm">{p.items.length}</TableCell>
+                        <TableCell className="text-right font-semibold">
+                          {formatCurrency(p.total)}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <StatusBadge status={p.status} />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => setDetail(p)}
+                            aria-label="Ver detalle"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Tarjetas (móvil) */}
+      <div className="md:hidden grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {loading ? (
+          Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-36 w-full rounded-lg" />)
+        ) : purchases.length === 0 ? (
+          <div className="col-span-full flex flex-col items-center justify-center py-16 text-muted-foreground">
+            <Truck className="h-10 w-10 mb-2 opacity-40" />
+            <p className="text-sm">No hay compras registradas</p>
+            <p className="text-xs mt-1">Haz clic en “Nueva compra” para registrar la primera.</p>
+          </div>
+        ) : (
+          purchases.map((p) => (
+            <Card key={p.id} className={p.status === "anulada" ? "opacity-60" : ""}>
+              <CardContent className="p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-sm font-semibold truncate">
+                      {p.reference ?? <span className="text-muted-foreground font-sans">Sin ref.</span>}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {p.supplier?.name ?? "Sin proveedor"}
+                    </p>
+                  </div>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="h-10 w-10 shrink-0"
+                    onClick={() => setDetail(p)}
+                    aria-label="Ver detalle"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">{formatDateTime(p.createdAt)}</p>
+                <div className="flex items-center justify-between gap-2 pt-1 border-t">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Badge variant="outline" className="text-[10px] font-mono">{p.items.length} items</Badge>
+                    <StatusBadge status={p.status} />
+                  </div>
+                  <p className="text-lg font-bold text-primary leading-none">{formatCurrency(p.total)}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
 
       {/* Diálogo nueva compra */}
       <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) resetForm() }}>

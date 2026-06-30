@@ -207,101 +207,173 @@ export default function ProductsView() {
           )}
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <div className="relative flex-1 min-w-[200px]">
+        <div className="flex flex-col gap-2">
+          <div className="relative w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por nombre o código…" className="pl-9 h-9" />
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por nombre o código…" className="pl-9 h-10" />
           </div>
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-[180px] h-9"><Filter className="h-3.5 w-3.5 mr-1" /><SelectValue placeholder="Categoría" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas las categorías</SelectItem>
-              {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Button variant={showLow ? "default" : "outline"} size="sm" className="h-9" onClick={() => setShowLow(!showLow)}>
-            <AlertTriangle className="h-3.5 w-3.5 mr-1" /> Stock bajo
-          </Button>
-          <Button variant={showExpiring ? "default" : "outline"} size="sm" className="h-9" onClick={() => setShowExpiring(!showExpiring)}>
-            <CalendarClock className="h-3.5 w-3.5 mr-1" /> Por vencer
-          </Button>
+          <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scroll-thin">
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-[170px] h-10 shrink-0"><Filter className="h-3.5 w-3.5 mr-1" /><SelectValue placeholder="Categoría" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las categorías</SelectItem>
+                {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button variant={showLow ? "default" : "outline"} size="sm" className="h-10 shrink-0" onClick={() => setShowLow(!showLow)}>
+              <AlertTriangle className="h-3.5 w-3.5 mr-1" /> Stock bajo
+            </Button>
+            <Button variant={showExpiring ? "default" : "outline"} size="sm" className="h-10 shrink-0" onClick={() => setShowExpiring(!showExpiring)}>
+              <CalendarClock className="h-3.5 w-3.5 mr-1" /> Por vencer
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Tabla */}
-      <Card>
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="p-4 space-y-2">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-          ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <Package className="h-10 w-10 mb-2 opacity-40" />
-              <p className="text-sm">No hay productos que mostrar</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Producto</TableHead>
-                    <TableHead className="hidden md:table-cell">Categoría</TableHead>
-                    <TableHead className="text-right">Precio</TableHead>
-                    <TableHead className="text-center">Stock</TableHead>
-                    <TableHead className="hidden lg:table-cell">Vencimiento</TableHead>
-                    {canEdit && <TableHead className="text-right">Acciones</TableHead>}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.map((p) => {
-                    const exp = expirationStatus(p.expirationDate)
-                    const low = p.stock <= p.minStock
-                    const out = p.stock <= 0
-                    return (
-                      <TableRow key={p.id}>
-                        <TableCell>
-                          <div className="font-medium">{p.name}</div>
-                          <div className="text-xs text-muted-foreground">{p.barcode ?? "Sin código"} · {p.unit}</div>
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{p.category?.name ?? "—"}</TableCell>
-                        <TableCell className="text-right font-medium">{formatCurrency(p.price)}</TableCell>
-                        <TableCell className="text-center">
-                          <Badge variant={out ? "destructive" : low ? "secondary" : "outline"} className="font-mono">
-                            {p.stock}
-                          </Badge>
-                          {low && !out && <p className="text-[10px] text-amber-600 mt-0.5">min {p.minStock}</p>}
-                        </TableCell>
-                        <TableCell className="hidden lg:table-cell">
-                          {p.expirationDate ? (
-                            <div>
-                              <p className="text-xs">{formatDate(p.expirationDate)}</p>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] ${exp.variant === "expired" ? "border-red-500 text-red-600" : exp.variant === "soon" ? "border-orange-500 text-orange-600" : ""}`}
-                              >
-                                {exp.label}
-                              </Badge>
-                            </div>
-                          ) : <span className="text-xs text-muted-foreground">—</span>}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {canEdit ? (
-                            <div className="flex justify-end gap-1">
-                              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(p)}><Pencil className="h-3.5 w-3.5" /></Button>
-                              <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => setDeleteId(p.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Tabla (desktop) */}
+      <div className="hidden md:block">
+        <Card>
+          <CardContent className="p-0">
+            {loading ? (
+              <div className="p-4 space-y-2">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+            ) : filtered.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                <Package className="h-10 w-10 mb-2 opacity-40" />
+                <p className="text-sm">No hay productos que mostrar</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Producto</TableHead>
+                      <TableHead className="hidden md:table-cell">Categoría</TableHead>
+                      <TableHead className="text-right">Precio</TableHead>
+                      <TableHead className="text-center">Stock</TableHead>
+                      <TableHead className="hidden lg:table-cell">Vencimiento</TableHead>
+                      {canEdit && <TableHead className="text-right">Acciones</TableHead>}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filtered.map((p) => {
+                      const exp = expirationStatus(p.expirationDate)
+                      const low = p.stock <= p.minStock
+                      const out = p.stock <= 0
+                      return (
+                        <TableRow key={p.id}>
+                          <TableCell>
+                            <div className="font-medium">{p.name}</div>
+                            <div className="text-xs text-muted-foreground">{p.barcode ?? "Sin código"} · {p.unit}</div>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{p.category?.name ?? "—"}</TableCell>
+                          <TableCell className="text-right font-medium">{formatCurrency(p.price)}</TableCell>
+                          <TableCell className="text-center">
+                            <Badge variant={out ? "destructive" : low ? "secondary" : "outline"} className="font-mono">
+                              {p.stock}
+                            </Badge>
+                            {low && !out && <p className="text-[10px] text-amber-600 mt-0.5">min {p.minStock}</p>}
+                          </TableCell>
+                          <TableCell className="hidden lg:table-cell">
+                            {p.expirationDate ? (
+                              <div>
+                                <p className="text-xs">{formatDate(p.expirationDate)}</p>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[10px] ${exp.variant === "expired" ? "border-red-500 text-red-600" : exp.variant === "soon" ? "border-orange-500 text-orange-600" : ""}`}
+                                >
+                                  {exp.label}
+                                </Badge>
+                              </div>
+                            ) : <span className="text-xs text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {canEdit ? (
+                              <div className="flex justify-end gap-1">
+                                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(p)}><Pencil className="h-3.5 w-3.5" /></Button>
+                                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => setDeleteId(p.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Tarjetas (móvil) */}
+      <div className="md:hidden grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {loading ? (
+          Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-40 w-full rounded-lg" />)
+        ) : filtered.length === 0 ? (
+          <div className="col-span-full flex flex-col items-center justify-center py-16 text-muted-foreground">
+            <Package className="h-10 w-10 mb-2 opacity-40" />
+            <p className="text-sm">No hay productos que mostrar</p>
+          </div>
+        ) : (
+          filtered.map((p) => {
+            const exp = expirationStatus(p.expirationDate)
+            const low = p.stock <= p.minStock
+            const out = p.stock <= 0
+            return (
+              <Card key={p.id}>
+                <CardContent className="p-3 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium leading-tight">{p.name}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{p.barcode ?? "Sin código"} · {p.unit}</p>
+                    </div>
+                    {p.category?.name && (
+                      <Badge variant="outline" className="shrink-0 text-[10px]">{p.category.name}</Badge>
+                    )}
+                  </div>
+                  <div className="flex items-end justify-between gap-2">
+                    <div>
+                      <p className="text-[11px] text-muted-foreground">Precio</p>
+                      <p className="text-lg font-bold text-primary leading-none">{formatCurrency(p.price)}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[11px] text-muted-foreground mb-0.5">Stock</p>
+                      <Badge variant={out ? "destructive" : low ? "secondary" : "outline"} className="font-mono">
+                        {p.stock}
+                      </Badge>
+                      {low && !out && <p className="text-[10px] text-amber-600 mt-0.5">min {p.minStock}</p>}
+                    </div>
+                  </div>
+                  {p.expirationDate && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <CalendarClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span className="text-xs text-muted-foreground">{formatDate(p.expirationDate)}</span>
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] ${exp.variant === "expired" ? "border-red-500 text-red-600" : exp.variant === "soon" ? "border-orange-500 text-orange-600" : ""}`}
+                      >
+                        {exp.label}
+                      </Badge>
+                    </div>
+                  )}
+                  {canEdit && (
+                    <div className="flex gap-2 pt-1 border-t">
+                      <Button size="sm" variant="outline" className="h-10 flex-1" onClick={() => openEdit(p)}>
+                        <Pencil className="h-4 w-4 mr-1.5" /> Editar
+                      </Button>
+                      <Button size="icon" variant="outline" className="h-10 w-10 text-destructive shrink-0" onClick={() => setDeleteId(p.id)} aria-label="Eliminar producto">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )
+          })
+        )}
+      </div>
 
       {/* Modal crear/editar */}
       <Dialog open={open} onOpenChange={setOpen}>

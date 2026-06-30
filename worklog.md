@@ -309,3 +309,70 @@ Stage Summary:
 - 3 capas de autorización enforced server-side: requireAuth (cualquier autenticado), requireAdmin (solo admin), y la UI filtra por rol.
 - Bypass bloqueado: manipular localStorage, inyectar cabeceras, o llamar endpoints directamente → todos rechazados con 401/403.
 - Credenciales demo: admin/1234 (acceso completo), vendedor/0000 (venta + caja).
+
+---
+Task ID: U4
+Agent: full-stack-developer
+Task: Mejorar UI/UX responsive (mobile-first) de las 5 vistas de listado (Productos, Ventas, Compras, Clientes, Proveedores) que usaban tablas con `hidden md:table-cell` y perdían información en móvil (390px) y se comprimían en tablet (768px).
+
+Work Log:
+- Leí worklog.md previo y los 5 archivos objetivo. Confirmé convenciones del proyecto (apiFetch, useAppStore, formatCurrency/formatDate/formatDateTime/expirationStatus, sonner, shadcn/ui New York, tema esmeralda, español, COP). No toqué archivos fuera de scope.
+- Patrón uniforme aplicado en los 5 archivos: la tabla existente se envolvió en `<div className="hidden md:block">` (se mantiene intacta, solo desktop ≥768px) y se añadió un nuevo bloque `<div className="md:hidden grid grid-cols-1 sm:grid-cols-2 gap-3">` con tarjetas para móvil/tablet-pequeña (<768px; 1 col en <640px, 2 cols en 640–768px). Ambas vistas consumen el mismo array de datos, así que se mantienen en sync.
+- `src/components/pos/products.tsx`:
+  * Barra de filtros reestructurada: input de búsqueda full-width arriba (h-10), debajo un contenedor horizontal-scrollable (`flex overflow-x-auto pb-1 -mx-1 px-1 scroll-thin`) con el Select de categoría + toggles "Stock bajo"/"Por vencer" (todos h-10, shrink-0). Ya no se envuelve torpemente.
+  * Tarjeta móvil: nombre + código/unidad (mono), badge de categoría, precio grande (text-primary), badge de stock coloreado (destructive/secondary/outline) con "min X" si bajo, badge de vencimiento con icono CalendarClock (coloreado según exp.variant), y fila de acciones Editar + Eliminar (h-10) — solo si `canEdit`. Preserva la lógica `canEdit`/`canSeeCosts` (la tarjeta no muestra costo).
+  * Estados loading/empty/filtered replicados en ambas vistas. Diálogos CRUD y exportar CSV sin tocar.
+- `src/components/pos/sales.tsx`:
+  * Filtro: búsqueda full-width + Select de método en horizontal-scrollable row.
+  * Tarjeta móvil: factura (font-mono semibold), cliente, fecha, fila con badges pago+estado y total grande (text-primary), botón "ojo" h-10 w-10 para abrir el detalle. Opacidad-60 en anuladas.
+  * `canAnnul` y el diálogo de detalle con anulación preservados.
+- `src/components/pos/purchases.tsx`:
+  * Filtro: búsqueda full-width en móvil (`md:max-w-md` en desktop).
+  * Tarjeta móvil: referencia (mono, o "Sin ref." muted) + proveedor, fecha, fila con badge "{n} items" + StatusBadge + total grande, botón "ojo" h-10 w-10.
+  * Diálogos nueva compra / detalle / anulación (incluye `annulling` y AlertDialog) preservados.
+- `src/components/pos/clients.tsx` (añadí imports Phone, Mail, FileText):
+  * Tarjeta móvil: avatar User + nombre prominent + badge "{n} compras"; debajo, datos con iconos: FileText (documento, mono), Phone, Mail (cada línea solo si existe el dato; mensaje "Sin datos de contacto" si vacío); botones Editar (flex-1) + Eliminar (h-10 w-10).
+- `src/components/pos/suppliers.tsx` (añadí imports Phone, FileText):
+  * Tarjeta móvil: avatar Building2 + nombre prominent + badge "{n} compras"; debajo, datos con iconos: FileText (NIT, mono), Contact (contacto), Phone; botones Editar (flex-1) + Eliminar (h-10 w-10).
+- Touch targets: todos los icon buttons en tarjetas móviles son `h-10 w-10` (≥40px); los inputs de búsqueda pasaron a `h-10`. Los toggles "Stock bajo"/"Por vencer" y el Select de categoría también son `h-10`.
+- Verificación: `bun run lint` → EXIT=0 (sin errores ni warnings). Dev server compila limpio (`✓ Compiled in ...`) tras cada cambio. No se modificaron archivos fuera de scope. Work record en `/agent-ctx/U4-full-stack-developer.md`.
+
+Stage Summary:
+- Las 5 vistas de listado ahora son mobile-first: en <768px muestran tarjetas legibles (1 col en móvil, 2 cols en tablet pequeña) con toda la información relevante visible (categoría/fecha/vencimiento/acciones en productos; fecha/cliente/estado/total en ventas; proveedor/fecha/items/estado en compras; documento/teléfono/email en clientes; NIT/contacto/teléfono en proveedores), y en ≥768px mantienen la tabla original sin cambios.
+- Filtros/barras de búsqueda reestructurados para apilar correctamente en móvil (búsqueda full-width + fila scrollable de filtros), evitando el wrap torpe previo.
+- Targets táctiles ≥40px en toda interacción móvil. Tema esmeralda, español y COP consistentes. Estados loading/empty/error en ambas vistas.
+- Toda la funcionalidad existente preservada: CRUD dialogs, role permissions (canEdit/canSeeCosts/canAnnul), filtros, toasts, exportar CSV, anulación de ventas/compras con reversa de stock.
+
+---
+Task ID: U
+Agent: Coordinator (Z.ai Code)
+Task: Mejoras de UI/UX y responsive para tablet y móvil
+
+Work Log:
+- Auditoría con VLM (vision) de capturas en móvil 390px y tablet 768px. Problemas detectados:
+  * Login: iconos de roles pequeños, bajo contraste del subtítulo, jerarquía débil.
+  * POS móvil (crítico): el carrito requería scroll, no era accesible; los controles de pago competían por espacio con los productos.
+  * Dashboard: valores monetarios se truncaban ($22.2... en vez de formato completo).
+  * Tablas (productos/ventas/compras/clientes/proveedores): ilegibles en móvil con `hidden md:table-cell`.
+- Mejoras aplicadas directamente:
+  * **login.tsx**: logo más grande (h-16→h-20 en sm), subtítulo con `text-foreground/70 font-medium` (mejor contraste), RoleCard con iconos h-11/h-12, min-h-[88px], active:scale-[0.98] (feedback táctil), botón Ingresar h-12 con spinner Loader2.
+  * **pos-terminal.tsx** (rediseño completo móvil): en móvil, los productos ocupan toda la pantalla en grid 2-col; **bottom bar fija** con botón carrito (badge contador) + total + botón Cobrar; el carrito abre como **drawer** (Sheet bottom, 90vh) con todos los controles (cliente, descuento, pago, efectivo, total). En desktop (lg+) se mantiene el panel lateral de 2 columnas. Touch targets h-8/h-10/h-12. Padding `pb-28` en móvil para que la bottom bar no tape contenido. safe-area-inset-bottom para iOS.
+  * **globals.css**: añadido `.safe-pad` y `.safe-area-inset-bottom` (env(safe-area-inset-bottom)) + `-webkit-text-size-adjust:100%`.
+  * **format.ts**: añadida `formatCurrencyCompact()` → $1.2k, $3.4M, $890 para KPIs en móvil.
+  * **dashboard.tsx**: KPIs usan formato compacto en móvil (`sm:hidden`) y completo en desktop (`hidden sm:inline`); padding e iconos responsive (p-3 sm:p-5, icon h-4 sm:h-5).
+- Subagente U4 (paralelo): convirtió las 5 vistas de lista (productos, ventas, compras, clientes, proveedores) de tabla-only a **cards en móvil + tabla en desktop**. Patrón: `hidden md:block` (tabla) + `md:hidden` (cards). Touch targets ≥40px. Preservó toda la funcionalidad (CRUD, permisos por rol, filtros, toasts).
+- Verificación con Agent Browser + VLM:
+  * **Login móvil**: jerarquía clara, touch targets adecuados, contraste mejorado ✓
+  * **POS móvil**: bottom bar fija con total + badge carrito ✓, drawer del carrito funcional ✓, venta completa F2606-0009 registrada en móvil ✓
+  * **Dashboard móvil**: KPIs con formato compacto ($22k), sin overflow ✓
+  * **Productos móvil**: cards legibles con nombre/precio/stock/vencimiento, filtros apilados ✓
+  * **Tablet 768px**: POS muestra panel lateral de carrito (2 col), productos en grid 3col, dashboard KPIs en grid, login centrado ✓
+  * Sin errores de consola. `bun run lint` limpio (exit 0).
+
+Stage Summary:
+- UI/UX responsive completado para móvil (390px) y tablet (768px).
+- El POS móvil fue la mejora más crítica: de un layout que requería scroll a una bottom bar fija + drawer, permitiendo vender sin perder el carrito de vista.
+- Todas las tablas de lista ahora son cards en móvil y tablas en desktop, mejorando dramáticamente la legibilidad.
+- KPIs del dashboard usan formato compacto en móvil para evitar truncamiento.
+- Login mejorado en jerarquía visual, contraste y touch targets.
+- Safe area de iOS respetada. Touch targets ≥40px en todas las interacciones móviles.

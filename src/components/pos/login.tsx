@@ -7,7 +7,7 @@ import { apiFetch } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Pill, Shield, ShoppingCart, ArrowRight, Check, KeyRound, Lock, Info } from "lucide-react"
+import { Pill, Shield, ShoppingCart, ArrowRight, Check, KeyRound, Lock, Info, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -41,20 +41,20 @@ export default function LoginScreen() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-emerald-50 via-white to-teal-50">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-md px-1">
         {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20 mb-4">
-            <Pill className="h-8 w-8" />
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="inline-flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-xl shadow-primary/25 mb-4">
+            <Pill className="h-8 w-8 sm:h-10 sm:w-10" />
           </div>
-          <h1 className="text-2xl font-bold">Droguería La Salud</h1>
-          <p className="text-sm text-muted-foreground mt-1 flex items-center justify-center gap-1.5">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Droguería La Salud</h1>
+          <p className="text-sm sm:text-base text-foreground/70 mt-1.5 flex items-center justify-center gap-1.5 font-medium">
             <Lock className="h-3.5 w-3.5" /> Sistema POS · Acceso restringido
           </p>
         </div>
 
         {/* Selector de rol */}
-        <div className="grid grid-cols-2 gap-3 mb-5">
+        <div className="grid grid-cols-2 gap-2.5 sm:gap-3 mb-5">
           <RoleCard
             active={role === "admin"}
             onClick={() => selectRole("admin")}
@@ -101,8 +101,8 @@ export default function LoginScreen() {
               />
             </div>
           </div>
-          <Button className="w-full h-11 text-base" disabled={!role || loading} onClick={submit}>
-            {loading ? "Verificando…" : <>Ingresar <ArrowRight className="h-4 w-4 ml-2" /></>}
+          <Button className="w-full h-12 text-base font-semibold" disabled={!role || loading} onClick={submit}>
+            {loading ? <><Loader2 className="h-5 w-5 mr-2 animate-spin" /> Verificando…</> : <>Ingresar <ArrowRight className="h-4 w-4 ml-2" /></>}
           </Button>
         </div>
 
@@ -178,19 +178,19 @@ function RoleCard({
       type="button"
       onClick={onClick}
       className={cn(
-        "text-left rounded-xl border-2 p-4 transition-all",
+        "text-left rounded-xl border-2 p-3 sm:p-4 transition-all min-h-[88px] active:scale-[0.98]",
         active
-          ? "border-primary bg-primary/5 shadow-sm"
+          ? "border-primary bg-primary/5 shadow-md shadow-primary/10"
           : "border-border hover:border-muted-foreground/30 hover:bg-muted/30"
       )}
     >
       <div
         className={cn(
-          "flex h-10 w-10 items-center justify-center rounded-lg mb-2 transition-colors",
+          "flex h-11 w-11 sm:h-12 sm:w-12 items-center justify-center rounded-xl mb-2 transition-colors",
           active ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary"
         )}
       >
-        <Icon className="h-5 w-5" />
+        <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
       </div>
       <p className="font-semibold text-sm">{title}</p>
       <p className="text-xs text-muted-foreground">{desc}</p>

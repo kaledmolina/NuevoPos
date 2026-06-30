@@ -121,6 +121,20 @@
   }
 }
 
+/* Safe area para móviles con notch/home indicator (iOS) */
+.safe-pad {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.safe-area-inset-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Prevent text size adjust on orientation change */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 /* Scrollbar styling */
 .scroll-thin::-webkit-scrollbar {
   width: 8px;
