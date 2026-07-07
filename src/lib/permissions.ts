@@ -12,7 +12,9 @@ export type ViewKey =
   | "sales"
   | "cash"
   | "finance"
+  | "credit"
   | "reports"
+  | "settings"
 
 export interface RoleConfig {
   label: string
@@ -32,7 +34,7 @@ export const ROLE_CONFIG: Record<Role, RoleConfig> = {
   admin: {
     label: "Administrador",
     description: "Acceso completo: inventario, compras, finanzas, reportes y configuración.",
-    views: ["dashboard", "pos", "products", "purchases", "clients", "suppliers", "sales", "cash", "finance", "reports"],
+    views: ["dashboard", "pos", "products", "purchases", "clients", "suppliers", "sales", "cash", "finance", "credit", "reports", "settings"],
     canEditProducts: true,
     canManagePurchases: true,
     canManageClients: true,

@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Separator } from "@/components/ui/separator"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -29,10 +30,10 @@ import {
 import { toast } from "sonner"
 import {
   Search, Plus, Pencil, Trash2, Package, AlertTriangle, CalendarClock,
-  Filter, Download,
+  Filter, Download, Tag, X, Check,
 } from "lucide-react"
 
-interface Category { id: string; name: string }
+interface Category { id: string; name: string; _count?: { products: number } }
 interface Product {
   id: string
   name: string
@@ -76,6 +77,15 @@ export default function ProductsView() {
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
+  // Modal crear categoría rápida (desde el formulario de producto)
+  const [catModalOpen, setCatModalOpen] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState("")
+  const [savingCategory, setSavingCategory] = useState(false)
+  // Gestión de categorías
+  const [catManageOpen, setCatManageOpen] = useState(false)
+  const [editingCatId, setEditingCatId] = useState<string | null>(null)
+  const [editCatName, setEditCatName] = useState("")
+  const [deleteCatId, setDeleteCatId] = useState<string | null>(null)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -99,6 +109,14 @@ export default function ProductsView() {
     })
     return list
   }, [products, categoryFilter, showLow, showExpiring])
+
+  const hasActiveFilters = query.trim() !== "" || categoryFilter !== "all" || showLow || showExpiring
+  const clearFilters = () => {
+    setQuery("")
+    setCategoryFilter("all")
+    setShowLow(false)
+    setShowExpiring(false)
+  }
 
   const openNew = () => {
     setEditing(null)
@@ -161,6 +179,67 @@ export default function ProductsView() {
     }
   }
 
+  // Crear categoría nueva (desde el formulario de producto o desde el gestor)
+  const createCategory = async () => {
+    const name = newCategoryName.trim()
+    if (!name) return toast.error("Ingresa un nombre para la categoría")
+    setSavingCategory(true)
+    try {
+      const created = await apiFetch<Category>("/api/categories", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      })
+      toast.success(`Categoría "${created.name}" creada`)
+      const cats = await apiFetch<Category[]>("/api/categories")
+      setCategories(cats)
+      setForm({ ...form, categoryId: created.id })
+      setNewCategoryName("")
+      setCatModalOpen(false)
+      triggerRefresh()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSavingCategory(false)
+    }
+  }
+
+  // Guardar edición de categoría
+  const saveEditCategory = async () => {
+    const name = editCatName.trim()
+    if (!name) return toast.error("Ingresa un nombre")
+    if (!editingCatId) return
+    try {
+      await apiFetch(`/api/categories/${editingCatId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      })
+      toast.success("Categoría actualizada")
+      setEditingCatId(null)
+      setEditCatName("")
+      const cats = await apiFetch<Category[]>("/api/categories")
+      setCategories(cats)
+      triggerRefresh()
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+
+  // Eliminar categoría
+  const confirmDeleteCategory = async () => {
+    if (!deleteCatId) return
+    try {
+      await apiFetch(`/api/categories/${deleteCatId}`, { method: "DELETE" })
+      toast.success("Categoría eliminada")
+      const cats = await apiFetch<Category[]>("/api/categories")
+      setCategories(cats)
+      triggerRefresh()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setDeleteCatId(null)
+    }
+  }
+
   const exportCsv = () => {
     const header = canSeeCosts
       ? ["Nombre", "Código", "Categoría", "Costo", "Precio", "Stock", "Min", "Unidad", "Vencimiento", "Lote", "Ubicación"]
@@ -199,6 +278,7 @@ export default function ProductsView() {
           {canEdit && (
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={exportCsv}><Download className="h-4 w-4 mr-1" /> Exportar</Button>
+              <Button variant="outline" size="sm" onClick={() => setCatManageOpen(true)}><Tag className="h-4 w-4 mr-1" /> Categorías</Button>
               <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1" /> Nuevo producto</Button>
             </div>
           )}
@@ -237,10 +317,29 @@ export default function ProductsView() {
             {loading ? (
               <div className="p-4 space-y-2">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
             ) : filtered.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <Package className="h-10 w-10 mb-2 opacity-40" />
-                <p className="text-sm">No hay productos que mostrar</p>
-              </div>
+              hasActiveFilters ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                    <Package className="h-7 w-7" />
+                  </div>
+                  <p className="text-sm font-medium">No se encontraron productos</p>
+                  <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
+                  <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                    <Package className="h-7 w-7" />
+                  </div>
+                  <p className="text-sm font-medium">Aún no tienes productos</p>
+                  <p className="text-xs text-muted-foreground mt-1 mb-4">Crea tu primer producto para empezar a vender</p>
+                  {canEdit ? (
+                    <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Crear primer producto</Button>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Contacta al administrador para crear productos</p>
+                  )}
+                </div>
+              )
             ) : (
               <div className="overflow-x-auto">
                 <Table>
@@ -289,8 +388,8 @@ export default function ProductsView() {
                           <TableCell className="text-right">
                             {canEdit ? (
                               <div className="flex justify-end gap-1">
-                                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(p)}><Pencil className="h-3.5 w-3.5" /></Button>
-                                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => setDeleteId(p.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                                <Button size="icon" variant="ghost" className="h-8 w-8" title="Editar producto" onClick={() => openEdit(p)}><Pencil className="h-3.5 w-3.5" /></Button>
+                                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" title="Eliminar producto" onClick={() => setDeleteId(p.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
                               </div>
                             ) : (
                               <span className="text-xs text-muted-foreground">—</span>
@@ -312,9 +411,30 @@ export default function ProductsView() {
         {loading ? (
           Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-40 w-full rounded-lg" />)
         ) : filtered.length === 0 ? (
-          <div className="col-span-full flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <Package className="h-10 w-10 mb-2 opacity-40" />
-            <p className="text-sm">No hay productos que mostrar</p>
+          <div className="col-span-full">
+            {hasActiveFilters ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                  <Package className="h-7 w-7" />
+                </div>
+                <p className="text-sm font-medium">No se encontraron productos</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
+                <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                  <Package className="h-7 w-7" />
+                </div>
+                <p className="text-sm font-medium">Aún no tienes productos</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">Crea tu primer producto para empezar a vender</p>
+                {canEdit ? (
+                  <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Crear primer producto</Button>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Contacta al administrador para crear productos</p>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           filtered.map((p) => {
@@ -363,7 +483,7 @@ export default function ProductsView() {
                       <Button size="sm" variant="outline" className="h-10 flex-1" onClick={() => openEdit(p)}>
                         <Pencil className="h-4 w-4 mr-1.5" /> Editar
                       </Button>
-                      <Button size="icon" variant="outline" className="h-10 w-10 text-destructive shrink-0" onClick={() => setDeleteId(p.id)} aria-label="Eliminar producto">
+                      <Button size="icon" variant="outline" className="h-10 w-10 text-destructive shrink-0" title="Eliminar producto" onClick={() => setDeleteId(p.id)} aria-label="Eliminar producto">
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
@@ -393,12 +513,24 @@ export default function ProductsView() {
             </div>
             <div>
               <Label>Categoría</Label>
-              <Select value={form.categoryId} onValueChange={(v) => setForm({ ...form, categoryId: v })}>
-                <SelectTrigger><SelectValue placeholder="Sin categoría" /></SelectTrigger>
-                <SelectContent>
-                  {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <div className="flex gap-2">
+                <Select value={form.categoryId} onValueChange={(v) => setForm({ ...form, categoryId: v })}>
+                  <SelectTrigger className="flex-1"><SelectValue placeholder="Sin categoría" /></SelectTrigger>
+                  <SelectContent>
+                    {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  onClick={() => setCatModalOpen(true)}
+                  title="Crear nueva categoría"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
             <div>
               <Label>Costo (compra)</Label>
@@ -458,6 +590,127 @@ export default function ProductsView() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Eliminar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal crear categoría rápida (desde el formulario de producto) */}
+      <Dialog open={catModalOpen} onOpenChange={setCatModalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Tag className="h-4 w-4 text-primary" /> Nueva categoría</DialogTitle>
+            <DialogDescription>Crea una categoría personalizada para organizar tus productos.</DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Label>Nombre de la categoría *</Label>
+            <Input
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              placeholder="Ej: Cuidado del cabello"
+              className="h-10"
+              autoFocus
+              onKeyDown={(e) => e.key === "Enter" && createCategory()}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setCatModalOpen(false); setNewCategoryName("") }}>Cancelar</Button>
+            <Button onClick={createCategory} disabled={savingCategory}>
+              {savingCategory ? "Creando…" : <><Plus className="h-4 w-4 mr-1" /> Crear</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal gestionar categorías */}
+      <Dialog open={catManageOpen} onOpenChange={setCatManageOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto scroll-thin">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Tag className="h-4 w-4 text-primary" /> Gestionar categorías</DialogTitle>
+            <DialogDescription>Crea, edita o elimina las categorías de productos.</DialogDescription>
+          </DialogHeader>
+          <div className="py-2 space-y-3">
+            {/* Formulario crear nueva */}
+            <div className="flex gap-2">
+              <Input
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder="Nombre de nueva categoría"
+                className="h-10"
+                onKeyDown={(e) => e.key === "Enter" && createCategory()}
+              />
+              <Button onClick={createCategory} disabled={savingCategory} className="h-10 shrink-0">
+                <Plus className="h-4 w-4 mr-1" /> Crear
+              </Button>
+            </div>
+            <Separator />
+            {/* Lista de categorías */}
+            <div className="space-y-1.5 max-h-72 overflow-y-auto scroll-thin">
+              {categories.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">No hay categorías creadas.</p>
+              )}
+              {categories.map((c) => (
+                <div key={c.id} className="flex items-center gap-2 rounded-lg border p-2.5">
+                  {editingCatId === c.id ? (
+                    <>
+                      <Input
+                        value={editCatName}
+                        onChange={(e) => setEditCatName(e.target.value)}
+                        className="h-8"
+                        autoFocus
+                        onKeyDown={(e) => e.key === "Enter" && saveEditCategory()}
+                      />
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-emerald-600" title="Guardar" onClick={saveEditCategory}>
+                        <Check className="h-4 w-4" />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-8 w-8" title="Cancelar" onClick={() => { setEditingCatId(null); setEditCatName("") }}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{c.name}</p>
+                        <p className="text-[11px] text-muted-foreground">{c._count?.products ?? 0} producto(s)</p>
+                      </div>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        title="Editar"
+                        onClick={() => { setEditingCatId(c.id); setEditCatName(c.name) }}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-destructive"
+                        title="Eliminar"
+                        onClick={() => setDeleteCatId(c.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirmar eliminar categoría */}
+      <AlertDialog open={!!deleteCatId} onOpenChange={(o) => !o && setDeleteCatId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar categoría?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Si la categoría tiene productos asociados, deberás reasignarlos primero. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteCategory} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Eliminar</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

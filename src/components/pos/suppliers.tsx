@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/table"
 import { toast } from "sonner"
 import {
-  Search, Plus, Pencil, Trash2, Building2, Contact, Phone, FileText,
+  Search, Plus, Pencil, Trash2, Building2, Contact, Phone, FileText, Filter,
 } from "lucide-react"
 
 interface Supplier {
@@ -63,6 +63,9 @@ export default function SuppliersView() {
   }, [query])
 
   useEffect(() => { load() }, [load, refreshKey])
+
+  const hasActiveFilters = query.trim() !== ""
+  const clearFilters = () => setQuery("")
 
   const totalPurchases = suppliers.reduce((s, p) => s + (p._count?.purchases ?? 0), 0)
 
@@ -163,17 +166,25 @@ export default function SuppliersView() {
                 ))}
               </div>
             ) : suppliers.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <Building2 className="h-10 w-10 mb-2 opacity-40" />
-                <p className="text-sm">
-                  {query ? "No se encontraron proveedores" : "Aún no hay proveedores registrados"}
-                </p>
-                {!query && (
-                  <Button size="sm" variant="outline" className="mt-3" onClick={openNew}>
-                    <Plus className="h-4 w-4 mr-1" /> Registrar el primer proveedor
-                  </Button>
-                )}
-              </div>
+              hasActiveFilters ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                    <Building2 className="h-7 w-7" />
+                  </div>
+                  <p className="text-sm font-medium">No se encontraron proveedores</p>
+                  <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
+                  <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                    <Building2 className="h-7 w-7" />
+                  </div>
+                  <p className="text-sm font-medium">Aún no hay proveedores</p>
+                  <p className="text-xs text-muted-foreground mt-1 mb-4">Registra tu primer proveedor para asociarlo a las compras</p>
+                  <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Agregar primer proveedor</Button>
+                </div>
+              )
             ) : (
               <div className="overflow-x-auto">
                 <Table>
@@ -232,10 +243,10 @@ export default function SuppliersView() {
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-1">
-                              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(s)} aria-label="Editar proveedor">
+                              <Button size="icon" variant="ghost" className="h-8 w-8" title="Editar proveedor" onClick={() => openEdit(s)} aria-label="Editar proveedor">
                                 <Pencil className="h-3.5 w-3.5" />
                               </Button>
-                              <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => setDeleteId(s.id)} aria-label="Eliminar proveedor">
+                              <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" title="Eliminar proveedor" onClick={() => setDeleteId(s.id)} aria-label="Eliminar proveedor">
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             </div>
@@ -256,15 +267,25 @@ export default function SuppliersView() {
         {loading ? (
           Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-44 w-full rounded-lg" />)
         ) : suppliers.length === 0 ? (
-          <div className="col-span-full flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <Building2 className="h-10 w-10 mb-2 opacity-40" />
-            <p className="text-sm">
-              {query ? "No se encontraron proveedores" : "Aún no hay proveedores registrados"}
-            </p>
-            {!query && (
-              <Button size="sm" variant="outline" className="mt-3" onClick={openNew}>
-                <Plus className="h-4 w-4 mr-1" /> Registrar el primer proveedor
-              </Button>
+          <div className="col-span-full">
+            {hasActiveFilters ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                  <Building2 className="h-7 w-7" />
+                </div>
+                <p className="text-sm font-medium">No se encontraron proveedores</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
+                <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                  <Building2 className="h-7 w-7" />
+                </div>
+                <p className="text-sm font-medium">Aún no hay proveedores</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">Registra tu primer proveedor para asociarlo a las compras</p>
+                <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Agregar primer proveedor</Button>
+              </div>
             )}
           </div>
         ) : (
@@ -313,7 +334,7 @@ export default function SuppliersView() {
                     <Button size="sm" variant="outline" className="h-10 flex-1" onClick={() => openEdit(s)}>
                       <Pencil className="h-4 w-4 mr-1.5" /> Editar
                     </Button>
-                    <Button size="icon" variant="outline" className="h-10 w-10 text-destructive shrink-0" onClick={() => setDeleteId(s.id)} aria-label="Eliminar proveedor">
+                    <Button size="icon" variant="outline" className="h-10 w-10 text-destructive shrink-0" title="Eliminar proveedor" onClick={() => setDeleteId(s.id)} aria-label="Eliminar proveedor">
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
@@ -338,7 +359,7 @@ export default function SuppliersView() {
                 : "Registra un nuevo proveedor en el sistema"}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 py-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
             <div className="md:col-span-2">
               <Label>Nombre / Razón social *</Label>
               <Input

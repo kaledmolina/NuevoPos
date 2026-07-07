@@ -62,6 +62,27 @@ export async function POST(req: NextRequest) {
       const invoiceNumber = nextInvoiceNumber(lastSale?.invoiceNumber)
       const openSession = await tx.cashSession.findFirst({ where: { status: "abierta" } })
 
+      // Validación de crédito
+      let creditAccount: { id: string; balance: number; creditLimit: number } | null = null
+      if (paymentMethod === "credito") {
+        if (!clientId) {
+          throw new Error("Las ventas a crédito requieren un cliente (no se permite cliente genérico)")
+        }
+        const client = await tx.client.findUnique({ where: { id: clientId } })
+        if (!client) throw new Error("Cliente no encontrado")
+        if (client.isGeneric) {
+          throw new Error("No se permite venta a crédito al cliente genérico. Registra al cliente primero.")
+        }
+        creditAccount = await tx.creditAccount.findUnique({ where: { clientId } })
+        if (!creditAccount || !creditAccount.active) {
+          throw new Error("El cliente no tiene cuenta de crédito activa. El admin debe otorgarle crédito primero.")
+        }
+        const newBalance = creditAccount.balance + total
+        if (newBalance > creditAccount.creditLimit) {
+          throw new Error(`Crédito insuficiente. Saldo actual: $${creditAccount.balance.toLocaleString("es-CO")}, Límite: $${creditAccount.creditLimit.toLocaleString("es-CO")}. Faltan $${(newBalance - creditAccount.creditLimit).toLocaleString("es-CO")}.`)
+        }
+      }
+
       // Crear la venta con sus items
       const created = await tx.sale.create({
         data: {
@@ -111,6 +132,23 @@ export async function POST(req: NextRequest) {
         })
       }
 
+      // Si es venta a crédito, registrar cargo en la cuenta del cliente
+      if (paymentMethod === "credito" && creditAccount) {
+        await tx.creditAccount.update({
+          where: { id: creditAccount.id },
+          data: { balance: { increment: total } },
+        })
+        await tx.creditMovement.create({
+          data: {
+            accountId: creditAccount.id,
+            type: "cargo",
+            amount: total,
+            concept: `Venta ${invoiceNumber}`,
+            saleId: created.id,
+          },
+        })
+      }
+
       return created
     })
 
@@ -127,7 +165,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(sale)
   } catch (e) {
     const msg = (e as Error).message
-    if (msg.includes("Stock insuficiente") || msg.includes("Cantidad inválida") || msg.includes("no encontrado")) {
+    if (
+      msg.includes("Stock insuficiente") ||
+      msg.includes("Cantidad inválida") ||
+      msg.includes("no encontrado") ||
+      msg.includes("crédito") ||
+      msg.includes("Crédito") ||
+      msg.includes("genérico")
+    ) {
       return NextResponse.json({ error: msg }, { status: 400 })
     }
     console.error(e)

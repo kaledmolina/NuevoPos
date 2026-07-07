@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/table"
 import { toast } from "sonner"
 import {
-  Search, Truck, Plus, Eye, Ban, Package, Trash2, FileText,
+  Search, Truck, Plus, Eye, Ban, Package, Trash2, FileText, Filter,
 } from "lucide-react"
 
 interface Supplier { id: string; name: string; document?: string | null }
@@ -138,6 +138,9 @@ export default function PurchasesView() {
   }, [query])
 
   useEffect(() => { load() }, [load, refreshKey])
+
+  const hasActiveFilters = query.trim() !== ""
+  const clearFilters = () => setQuery("")
 
   const filteredProducts = useMemo(() => {
     const q = productQuery.trim().toLowerCase()
@@ -317,11 +320,25 @@ export default function PurchasesView() {
                 ))}
               </div>
             ) : purchases.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <Truck className="h-10 w-10 mb-2 opacity-40" />
-                <p className="text-sm">No hay compras registradas</p>
-                <p className="text-xs mt-1">Haz clic en “Nueva compra” para registrar la primera.</p>
-              </div>
+              hasActiveFilters ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                    <Truck className="h-7 w-7" />
+                  </div>
+                  <p className="text-sm font-medium">No se encontraron compras</p>
+                  <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
+                  <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                    <Truck className="h-7 w-7" />
+                  </div>
+                  <p className="text-sm font-medium">Aún no hay compras registradas</p>
+                  <p className="text-xs text-muted-foreground mt-1 mb-4">Registra tu primera compra para actualizar el inventario</p>
+                  <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Registrar primera compra</Button>
+                </div>
+              )
             ) : (
               <div className="overflow-x-auto">
                 <Table>
@@ -364,6 +381,7 @@ export default function PurchasesView() {
                             size="icon"
                             variant="ghost"
                             className="h-8 w-8"
+                            title="Ver detalle de compra"
                             onClick={() => setDetail(p)}
                             aria-label="Ver detalle"
                           >
@@ -385,10 +403,26 @@ export default function PurchasesView() {
         {loading ? (
           Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-36 w-full rounded-lg" />)
         ) : purchases.length === 0 ? (
-          <div className="col-span-full flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <Truck className="h-10 w-10 mb-2 opacity-40" />
-            <p className="text-sm">No hay compras registradas</p>
-            <p className="text-xs mt-1">Haz clic en “Nueva compra” para registrar la primera.</p>
+          <div className="col-span-full">
+            {hasActiveFilters ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                  <Truck className="h-7 w-7" />
+                </div>
+                <p className="text-sm font-medium">No se encontraron compras</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
+                <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                  <Truck className="h-7 w-7" />
+                </div>
+                <p className="text-sm font-medium">Aún no hay compras registradas</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">Registra tu primera compra para actualizar el inventario</p>
+                <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Registrar primera compra</Button>
+              </div>
+            )}
           </div>
         ) : (
           purchases.map((p) => (
@@ -407,6 +441,7 @@ export default function PurchasesView() {
                     size="icon"
                     variant="outline"
                     className="h-10 w-10 shrink-0"
+                    title="Ver detalle de compra"
                     onClick={() => setDetail(p)}
                     aria-label="Ver detalle"
                   >

@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
         { name: "Ana Martínez", document: "1047563829", phone: "3125550333" },
         { name: "Jorge Ramírez", document: "31556677", phone: "3135550444" },
         { name: "Farmacia La Esperanza", document: "900.456.789-1", phone: "3145550555" },
-        { name: "Cliente Genérico", document: null, phone: null },
+        { name: "Cliente Genérico", document: null, phone: null, isGeneric: true },
       ],
     })
 

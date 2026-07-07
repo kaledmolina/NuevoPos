@@ -130,7 +130,13 @@ export default function PosTerminal() {
           discount: disc,
         }),
       })
-      toast.success(`Venta ${sale.invoiceNumber} registrada`)
+      toast.success(`Venta ${sale.invoiceNumber} registrada`, {
+        description: `${formatCurrency(sale.total)} · ${sale.paymentMethod}`,
+        action: {
+          label: "Ver recibo",
+          onClick: () => setReceipt(sale),
+        },
+      })
       setReceipt(sale)
       clearCart()
       setReceived("")
@@ -151,15 +157,16 @@ export default function PosTerminal() {
 
   // Contenido del carrito (reutilizado en desktop panel + mobile drawer)
   const CartBody = (
-    <CardContent className="flex-1 flex flex-col min-h-0 p-0">
-      <ScrollArea className="flex-1 px-3 sm:px-4">
+    <CardContent className="flex-1 flex flex-col min-h-0 p-0 overflow-y-auto scroll-thin">
+      {/* Items del carrito — solo ocupa lo que necesita */}
+      <div className="px-3 sm:px-4 shrink-0">
         {cart.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full py-12 text-muted-foreground">
-            <ScanLine className="h-8 w-8 mb-2 opacity-40" />
+          <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+            <ScanLine className="h-7 w-7 mb-1.5 opacity-40" />
             <p className="text-sm">Escanea o selecciona productos</p>
           </div>
         ) : (
-          <div className="space-y-2 py-2">
+          <div className="space-y-1.5 py-2">
             <AnimatePresence initial={false}>
               {cart.map((it) => (
                 <motion.div
@@ -169,60 +176,57 @@ export default function PosTerminal() {
                   animate={{ opacity: 1, x: 0, height: "auto" }}
                   exit={{ opacity: 0, x: -20, height: 0 }}
                   transition={{ duration: 0.2 }}
-                  className="flex items-center gap-2 rounded-lg border p-2 bg-card"
+                  className="flex items-center gap-2 rounded-lg border p-1.5 bg-card"
                 >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{it.name}</p>
-                  <p className="text-xs text-muted-foreground">{formatCurrency(it.price)} · {it.unit ?? "unidad"}</p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => updateCartQty(it.productId, it.quantity - 1)}>
-                    <Minus className="h-3.5 w-3.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{it.name}</p>
+                    <p className="text-xs text-muted-foreground">{formatCurrency(it.price)} · {it.unit ?? "unidad"}</p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => updateCartQty(it.productId, it.quantity - 1)}>
+                      <Minus className="h-3 w-3" />
+                    </Button>
+                    <Input
+                      className="h-7 w-10 text-center px-0 text-sm"
+                      value={it.quantity}
+                      onChange={(e) => {
+                        const v = Math.max(0, Math.min(parseInt(e.target.value) || 0, it.stock))
+                        updateCartQty(it.productId, v)
+                      }}
+                    />
+                    <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => updateCartQty(it.productId, Math.min(it.quantity + 1, it.stock))}>
+                      <Plus className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  <div className="w-18 text-right">
+                    <p className="text-sm font-semibold">{formatCurrency(it.price * it.quantity)}</p>
+                  </div>
+                  <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground shrink-0" onClick={() => removeFromCart(it.productId)}>
+                    <X className="h-3 w-3" />
                   </Button>
-                  <Input
-                    className="h-8 w-11 text-center px-0"
-                    value={it.quantity}
-                    onChange={(e) => {
-                      const v = Math.max(0, Math.min(parseInt(e.target.value) || 0, it.stock))
-                      updateCartQty(it.productId, v)
-                    }}
-                  />
-                  <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => updateCartQty(it.productId, Math.min(it.quantity + 1, it.stock))}>
-                    <Plus className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-                <div className="w-20 text-right">
-                  <p className="text-sm font-semibold">{formatCurrency(it.price * it.quantity)}</p>
-                </div>
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground shrink-0" onClick={() => removeFromCart(it.productId)}>
-                  <X className="h-3.5 w-3.5" />
-                </Button>
                 </motion.div>
               ))}
             </AnimatePresence>
           </div>
         )}
-      </ScrollArea>
+      </div>
 
-      <div className="border-t p-3 sm:p-4 space-y-3">
-        <div>
-          <Label className="text-xs">Cliente</Label>
-          <Select value={clientId} onValueChange={setClientId}>
-            <SelectTrigger className="h-10"><SelectValue placeholder="Cliente genérico" /></SelectTrigger>
-            <SelectContent>
-              {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+      {/* Sección de pago — compacta, sin expandir */}
+      <div className="border-t p-2.5 sm:p-3 space-y-2 shrink-0">
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <Label className="text-xs">Descuento $</Label>
-            <Input className="h-10" type="number" inputMode="decimal" value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="0" />
+            <Label className="text-[11px]">Cliente</Label>
+            <Select value={clientId} onValueChange={setClientId}>
+              <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Genérico" /></SelectTrigger>
+              <SelectContent>
+                {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
           <div>
-            <Label className="text-xs">Pago</Label>
+            <Label className="text-[11px]">Pago</Label>
             <Select value={payment} onValueChange={setPayment}>
-              <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {PAYMENTS.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
               </SelectContent>
@@ -230,36 +234,54 @@ export default function PosTerminal() {
           </div>
         </div>
 
-        {payment === "efectivo" && (
+        <div className="grid grid-cols-2 gap-2">
           <div>
-            <Label className="text-xs">Efectivo recibido</Label>
-            <Input className="h-10" type="number" inputMode="decimal" value={received} onChange={(e) => setReceived(e.target.value)} placeholder="0" />
+            <Label className="text-[11px]">Descuento</Label>
+            <Input className="h-9 text-sm" type="number" inputMode="decimal" value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="0" />
+          </div>
+          {payment === "efectivo" ? (
+            <div>
+              <Label className="text-[11px]">Recibido</Label>
+              <Input className="h-9 text-sm" type="number" inputMode="decimal" value={received} onChange={(e) => setReceived(e.target.value)} placeholder="0" />
+            </div>
+          ) : (
+            <div className="flex items-end">
+              <div className="text-xs text-muted-foreground pb-2">—</div>
+            </div>
+          )}
+        </div>
+
+        {payment === "efectivo" && (
+          <>
             {receivedNum > 0 && (
-              <div className="flex items-center justify-between mt-1 text-xs">
+              <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Cambio:</span>
                 <span className="font-semibold text-emerald-600">{formatCurrency(change)}</span>
               </div>
             )}
-            <div className="flex gap-1 mt-1.5">
+            <div className="flex gap-1">
               {[total, Math.ceil(total / 5000) * 5000, Math.ceil(total / 10000) * 10000].filter((v, i, a) => v > 0 && a.indexOf(v) === i).map((v) => (
-                <Button key={v} variant="outline" size="sm" className="h-8 text-xs flex-1" onClick={() => setReceived(String(v))}>
+                <Button key={v} variant="outline" size="sm" className="h-7 text-[11px] flex-1 px-1" onClick={() => setReceived(String(v))}>
                   {formatCurrency(v)}
                 </Button>
               ))}
             </div>
-          </div>
+          </>
         )}
+      </div>
 
-        <Separator />
-        <div className="space-y-1 text-sm">
-          <div className="flex justify-between text-muted-foreground"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
-          {disc > 0 && <div className="flex justify-between text-muted-foreground"><span>Descuento</span><span>-{formatCurrency(disc)}</span></div>}
-          <div className="flex justify-between text-lg font-bold"><span>Total</span><span className="text-primary">{formatCurrency(total)}</span></div>
+      {/* Total + Botón Cobrar pegados, siempre visibles al final */}
+      <div className="border-t bg-card shrink-0">
+        <div className="px-3 sm:px-4 pt-2 pb-1 space-y-0.5 text-sm">
+          <div className="flex justify-between text-muted-foreground text-xs"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
+          {disc > 0 && <div className="flex justify-between text-muted-foreground text-xs"><span>Descuento</span><span>-{formatCurrency(disc)}</span></div>}
+          <div className="flex justify-between text-base font-bold"><span>Total</span><span className="text-primary">{formatCurrency(total)}</span></div>
         </div>
-
-        <Button className="w-full h-12 text-base font-semibold" disabled={cart.length === 0 || checkingOut} onClick={handleCheckout}>
-          <CheckCircle2 className="h-5 w-5 mr-2" /> {checkingOut ? "Procesando…" : "Cobrar"}
-        </Button>
+        <div className="p-2.5 sm:p-3 pt-2">
+          <Button className="w-full h-11 text-sm font-semibold shadow-md shadow-primary/20" disabled={cart.length === 0 || checkingOut} onClick={handleCheckout}>
+            <CheckCircle2 className="h-4 w-4 mr-2" /> {checkingOut ? "Procesando…" : `Cobrar ${cart.length > 0 ? formatCurrency(total) : ""}`}
+          </Button>
+        </div>
       </div>
     </CardContent>
   )

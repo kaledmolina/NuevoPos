@@ -405,15 +405,25 @@ export default function FinanceView() {
               </Button>
             </div>
           ) : items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <ArrowLeftRight className="h-10 w-10 mb-2 opacity-40" />
-              <p className="text-sm">
-                {hasActiveFilters
-                  ? "No hay movimientos que coincidan con el filtro"
-                  : "Aún no has registrado movimientos"}
-              </p>
-              <p className="text-xs mt-1">Usa los botones de arriba para registrar un ingreso o egreso</p>
-            </div>
+            hasActiveFilters ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                  <ArrowLeftRight className="h-7 w-7" />
+                </div>
+                <p className="text-sm font-medium">No se encontraron movimientos</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
+                <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                  <ArrowLeftRight className="h-7 w-7" />
+                </div>
+                <p className="text-sm font-medium">Aún no hay movimientos</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">Registra tu primer ingreso o egreso para llevar el control financiero</p>
+                <Button size="sm" onClick={() => openNew("ingreso")}><Plus className="h-4 w-4 mr-1.5" /> Registrar primer ingreso</Button>
+              </div>
+            )
           ) : (
             <div className="overflow-x-auto max-h-[60vh] overflow-y-auto scroll-thin">
               <Table>
@@ -485,6 +495,7 @@ export default function FinanceView() {
                               size="icon"
                               variant="ghost"
                               className="h-8 w-8"
+                              title="Editar movimiento"
                               onClick={() => openEdit(t)}
                               aria-label="Editar"
                             >
@@ -494,6 +505,7 @@ export default function FinanceView() {
                               size="icon"
                               variant="ghost"
                               className="h-8 w-8 text-destructive"
+                              title="Eliminar movimiento"
                               onClick={() => setDeleteId(t.id)}
                               aria-label="Eliminar"
                             >

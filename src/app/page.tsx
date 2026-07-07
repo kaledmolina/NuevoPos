@@ -20,12 +20,14 @@ import { toast } from "sonner"
 import {
   LayoutDashboard, ShoppingCart, Package, Truck, Users, Building2,
   ReceiptText, Wallet, ArrowLeftRight, BarChart3, Menu, Pill, Database,
-  Store, X, LogOut, ChevronDown, ShieldCheck, Loader2,
+  Store, X, LogOut, ChevronDown, ShieldCheck, Loader2, CreditCard, Trash2, HardDrive, Settings,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 import LoginScreen from "@/components/pos/login"
 import LandingPage from "@/components/pos/landing"
+import TourGuide from "@/components/pos/tour"
+import SetupChecklist from "@/components/pos/setup-checklist"
 import DashboardView from "@/components/pos/dashboard"
 import PosTerminal from "@/components/pos/pos-terminal"
 import ProductsView from "@/components/pos/products"
@@ -35,6 +37,9 @@ import PurchasesView from "@/components/pos/purchases"
 import SalesView from "@/components/pos/sales"
 import CashView from "@/components/pos/cash"
 import FinanceView from "@/components/pos/finance"
+import CreditView from "@/components/pos/credit"
+import BackupManager from "@/components/pos/backup-manager"
+import SettingsView from "@/components/pos/settings"
 import ReportsView from "@/components/pos/reports"
 
 interface NavItem { key: ViewKey; label: string; icon: React.ElementType }
@@ -68,7 +73,9 @@ const NAV: NavGroup[] = [
     items: [
       { key: "cash", label: "Caja y Arqueo", icon: Wallet },
       { key: "finance", label: "Ingresos/Egresos", icon: ArrowLeftRight },
+      { key: "credit", label: "Cuentas por Cobrar", icon: CreditCard },
       { key: "reports", label: "Reportes", icon: BarChart3 },
+      { key: "settings", label: "Configuración", icon: Settings },
     ],
   },
 ]
@@ -83,7 +90,9 @@ const TITLES: Record<ViewKey, { title: string; subtitle: string }> = {
   sales: { title: "Ventas", subtitle: "Historial y detalle de ventas" },
   cash: { title: "Caja y arqueo", subtitle: "Apertura, cierre y cuadre de caja" },
   finance: { title: "Ingresos y egresos", subtitle: "Movimientos financieros" },
+  credit: { title: "Cuentas por cobrar", subtitle: "Crédito de clientes y abonos" },
   reports: { title: "Reportes", subtitle: "Análisis y estadísticas" },
+  settings: { title: "Configuración", subtitle: "Copias de seguridad, datos demo y reseteo" },
 }
 
 export default function Home() {
@@ -141,6 +150,9 @@ export default function Home() {
   const [storeName, setStoreName] = useState("Droguería La Salud")
   const [seedOpen, setSeedOpen] = useState(false)
   const [seeding, setSeeding] = useState(false)
+  const [resetOpen, setResetOpen] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [backupOpen, setBackupOpen] = useState(false)
 
   // Hidratar sesión consultando al servidor (cookie httpOnly firmada)
   useEffect(() => { hydrate() }, [hydrate])
@@ -172,6 +184,24 @@ export default function Home() {
       toast.error((e as Error).message)
     } finally {
       setSeeding(false)
+    }
+  }
+
+  const runReset = async () => {
+    setResetting(true)
+    try {
+      const res = await apiFetch<{ message: string }>("/api/reset", {
+        method: "POST",
+        body: JSON.stringify({ confirm: "BORRAR" }),
+      })
+      toast.success(res.message)
+      setResetOpen(false)
+      triggerRefresh()
+      setView("dashboard")
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setResetting(false)
     }
   }
 
@@ -207,7 +237,7 @@ export default function Home() {
           <p className="text-[11px] text-sidebar-foreground/60">Sistema POS</p>
         </div>
       </div>
-      <nav className="flex-1 overflow-y-auto scroll-thin px-3 py-4 space-y-5">
+      <nav data-tour="sidebar-nav" className="flex-1 overflow-y-auto scroll-thin px-3 py-4 space-y-5">
         {allowedGroups.map((group) => (
           <div key={group.label}>
             <p className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">{group.label}</p>
@@ -218,6 +248,7 @@ export default function Home() {
                 return (
                   <button
                     key={item.key}
+                    data-tour={`nav-${item.key}`}
                     onClick={() => handleSetView(item.key)}
                     className={cn(
                       "w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
@@ -236,11 +267,6 @@ export default function Home() {
         ))}
       </nav>
       <div className="border-t border-sidebar-border p-3 space-y-1">
-        {perms.canSeedData && (
-          <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent" onClick={() => setSeedOpen(true)}>
-            <Database className="h-4 w-4 mr-2" /> Cargar datos demo
-          </Button>
-        )}
         <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent" onClick={handleLogout} disabled={seeding}>
           <LogOut className="h-4 w-4 mr-2" /> Cerrar sesión
         </Button>
@@ -284,7 +310,7 @@ export default function Home() {
           {/* Usuario + rol */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2 rounded-lg border bg-card px-2 py-1.5 hover:bg-muted transition-colors">
+              <button data-tour="user-menu" className="flex items-center gap-2 rounded-lg border bg-card px-2 py-1.5 hover:bg-muted transition-colors">
                 <Avatar className="h-7 w-7">
                   <AvatarFallback className={cn("text-[11px] font-semibold", role === "admin" ? "bg-primary text-primary-foreground" : "bg-teal-500/15 text-teal-700")}>
                     {initials}
@@ -314,7 +340,12 @@ export default function Home() {
         </header>
 
         <main className="flex-1 overflow-y-auto scroll-thin">
-          {view === "dashboard" && <DashboardView />}
+          {view === "dashboard" && (
+            <>
+              <SetupChecklist />
+              <DashboardView />
+            </>
+          )}
           {view === "pos" && <PosTerminal />}
           {view === "products" && <ProductsView />}
           {view === "purchases" && <PurchasesView />}
@@ -323,13 +354,21 @@ export default function Home() {
           {view === "sales" && <SalesView />}
           {view === "cash" && <CashView />}
           {view === "finance" && <FinanceView />}
+          {view === "credit" && <CreditView />}
           {view === "reports" && <ReportsView />}
+          {view === "settings" && <SettingsView />}
         </main>
 
         <footer className="mt-auto border-t bg-background px-4 py-2.5 text-center text-xs text-muted-foreground">
           {storeName} · Sistema POS de Droguería · {new Date().getFullYear()}
         </footer>
       </div>
+
+      {/* Tour interactivo */}
+      <TourGuide />
+
+      {/* Gestor de backups */}
+      <BackupManager open={backupOpen} onOpenChange={setBackupOpen} />
 
       {/* Dialog datos demo */}
       <Dialog open={seedOpen} onOpenChange={setSeedOpen}>
@@ -343,6 +382,27 @@ export default function Home() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setSeedOpen(false)}><X className="h-4 w-4 mr-1" /> Cancelar</Button>
             <Button onClick={runSeed} disabled={seeding}>{seeding ? "Cargando…" : "Cargar datos"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog borrar datos de prueba */}
+      <Dialog open={resetOpen} onOpenChange={setResetOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive"><Trash2 className="h-5 w-5" /> Borrar todos los datos</DialogTitle>
+            <DialogDescription>
+              <strong className="text-foreground">Esta acción es irreversible.</strong> Se eliminarán todos los productos, ventas, compras, clientes, proveedores, cajas, categorías y movimientos financieros. El sistema quedará vacío y listo para uso real. Solo se conservan los usuarios (admin y vendedor).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">
+            ⚠️ Asegúrate de haber hecho un backup si necesitas conservar algún dato.
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResetOpen(false)}>Cancelar</Button>
+            <Button variant="destructive" onClick={runReset} disabled={resetting}>
+              {resetting ? "Borrando…" : "Sí, borrar todo"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

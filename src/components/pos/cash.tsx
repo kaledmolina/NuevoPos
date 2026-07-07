@@ -553,7 +553,9 @@ export default function CashView() {
                               size="icon"
                               variant="ghost"
                               className="h-8 w-8"
+                              title="Ver detalle de sesión"
                               onClick={(e) => { e.stopPropagation(); setDetail(s) }}
+                              aria-label="Ver detalle de sesión"
                             >
                               <Eye className="h-3.5 w-3.5" />
                             </Button>

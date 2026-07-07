@@ -121,6 +121,27 @@
   }
 }
 
+/* Cursor pointer en todos los elementos interactivos (fuera de layer para mayor prioridad) */
+button:not(:disabled),
+[role="button"]:not(:disabled),
+a[href],
+select,
+label[for],
+[data-slot="select-trigger"],
+[data-slot="select-item"],
+[role="menuitem"],
+[role="option"],
+[role="tab"],
+summary,
+input[type="checkbox"]:not(:disabled),
+input[type="radio"]:not(:disabled) {
+  cursor: pointer !important;
+}
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed !important;
+}
+
 /* Safe area para móviles con notch/home indicator (iOS) */
 .safe-pad {
   padding-bottom: env(safe-area-inset-bottom, 0px);

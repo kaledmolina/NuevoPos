@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/table"
 import { toast } from "sonner"
 import {
-  Search, Plus, Pencil, Trash2, Users, User, Phone, Mail, FileText,
+  Search, Plus, Pencil, Trash2, Users, User, Phone, Mail, FileText, Filter,
 } from "lucide-react"
 
 interface Client {
@@ -62,6 +62,9 @@ export default function ClientsView() {
   }, [query])
 
   useEffect(() => { load() }, [load, refreshKey])
+
+  const hasActiveFilters = query.trim() !== ""
+  const clearFilters = () => setQuery("")
 
   const totalSales = clients.reduce((s, c) => s + (c._count?.sales ?? 0), 0)
 
@@ -161,17 +164,25 @@ export default function ClientsView() {
                 ))}
               </div>
             ) : clients.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <Users className="h-10 w-10 mb-2 opacity-40" />
-                <p className="text-sm">
-                  {query ? "No se encontraron clientes" : "Aún no hay clientes registrados"}
-                </p>
-                {!query && (
-                  <Button size="sm" variant="outline" className="mt-3" onClick={openNew}>
-                    <Plus className="h-4 w-4 mr-1" /> Registrar el primer cliente
-                  </Button>
-                )}
-              </div>
+              hasActiveFilters ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                    <Users className="h-7 w-7" />
+                  </div>
+                  <p className="text-sm font-medium">No se encontraron clientes</p>
+                  <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
+                  <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                    <Users className="h-7 w-7" />
+                  </div>
+                  <p className="text-sm font-medium">Aún no hay clientes</p>
+                  <p className="text-xs text-muted-foreground mt-1 mb-4">Registra tu primer cliente para llevar el historial de ventas</p>
+                  <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Agregar primer cliente</Button>
+                </div>
+              )
             ) : (
               <div className="overflow-x-auto">
                 <Table>
@@ -222,10 +233,10 @@ export default function ClientsView() {
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-1">
-                              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(c)} aria-label="Editar cliente">
+                              <Button size="icon" variant="ghost" className="h-8 w-8" title="Editar cliente" onClick={() => openEdit(c)} aria-label="Editar cliente">
                                 <Pencil className="h-3.5 w-3.5" />
                               </Button>
-                              <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => setDeleteId(c.id)} aria-label="Eliminar cliente">
+                              <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" title="Eliminar cliente" onClick={() => setDeleteId(c.id)} aria-label="Eliminar cliente">
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             </div>
@@ -246,15 +257,25 @@ export default function ClientsView() {
         {loading ? (
           Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-44 w-full rounded-lg" />)
         ) : clients.length === 0 ? (
-          <div className="col-span-full flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <Users className="h-10 w-10 mb-2 opacity-40" />
-            <p className="text-sm">
-              {query ? "No se encontraron clientes" : "Aún no hay clientes registrados"}
-            </p>
-            {!query && (
-              <Button size="sm" variant="outline" className="mt-3" onClick={openNew}>
-                <Plus className="h-4 w-4 mr-1" /> Registrar el primer cliente
-              </Button>
+          <div className="col-span-full">
+            {hasActiveFilters ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                  <Users className="h-7 w-7" />
+                </div>
+                <p className="text-sm font-medium">No se encontraron clientes</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
+                <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+                  <Users className="h-7 w-7" />
+                </div>
+                <p className="text-sm font-medium">Aún no hay clientes</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">Registra tu primer cliente para llevar el historial de ventas</p>
+                <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Agregar primer cliente</Button>
+              </div>
             )}
           </div>
         ) : (
@@ -303,7 +324,7 @@ export default function ClientsView() {
                     <Button size="sm" variant="outline" className="h-10 flex-1" onClick={() => openEdit(c)}>
                       <Pencil className="h-4 w-4 mr-1.5" /> Editar
                     </Button>
-                    <Button size="icon" variant="outline" className="h-10 w-10 text-destructive shrink-0" onClick={() => setDeleteId(c.id)} aria-label="Eliminar cliente">
+                    <Button size="icon" variant="outline" className="h-10 w-10 text-destructive shrink-0" title="Eliminar cliente" onClick={() => setDeleteId(c.id)} aria-label="Eliminar cliente">
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
@@ -328,7 +349,7 @@ export default function ClientsView() {
                 : "Registra un nuevo cliente en el sistema"}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 py-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
             <div className="md:col-span-2">
               <Label>Nombre / Razón social *</Label>
               <Input

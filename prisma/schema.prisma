@@ -87,9 +87,36 @@ model Client {
   email     String?
   address   String?
   notes     String?
+  isGeneric Boolean  @default(false) // marca el cliente genérico (no puede comprar a crédito)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   sales     Sale[]
+  creditAccount CreditAccount?
+}
+
+// Cuenta de crédito por cliente (cuentas por cobrar)
+model CreditAccount {
+  id          String   @id @default(cuid())
+  clientId    String   @unique
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  creditLimit Float    @default(0) // límite máximo que el admin otorga
+  balance     Float    @default(0) // saldo actual que debe el cliente (positivo = debe)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  movements   CreditMovement[]
+}
+
+// Movimientos de crédito: ventas a crédito y abonos
+model CreditMovement {
+  id          String   @id @default(cuid())
+  accountId   String
+  account     CreditAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  type        String   // "cargo" (venta a crédito) | "abono" (pago del cliente)
+  amount      Float
+  concept     String
+  saleId      String?  // referencia a la venta si es un cargo
+  createdAt   DateTime @default(now())
 }
 
 model Supplier {
