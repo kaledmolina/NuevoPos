@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireAdmin } from "@/lib/auth"
+import { requireAdmin, getSession, logAudit } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -10,6 +10,9 @@ export async function GET(req: NextRequest) {
   const categoryId = searchParams.get("categoryId")
   const lowStock = searchParams.get("lowStock") === "1"
   const expiring = searchParams.get("expiring") === "1"
+  const page = Math.max(1, Number(searchParams.get("page") ?? 1))
+  const pageSize = Math.min(100, Number(searchParams.get("pageSize") ?? 50))
+  const paginate = searchParams.get("paginate") === "1"
 
   const where: Record<string, unknown> = {}
   if (q) {
@@ -25,6 +28,7 @@ export async function GET(req: NextRequest) {
     where,
     include: { category: true },
     orderBy: { name: "asc" },
+    ...(paginate ? { skip: (page - 1) * pageSize, take: pageSize } : {}),
   })
 
   if (lowStock) {
@@ -39,6 +43,12 @@ export async function GET(req: NextRequest) {
       const t = new Date(p.expirationDate).getTime()
       return t <= limit
     })
+  }
+
+  // Si se pidió paginación, devolver { items, total, page, pageSize }
+  if (paginate) {
+    const total = await db.product.count({ where })
+    return NextResponse.json({ items: products, total, page, pageSize, totalPages: Math.ceil(total / pageSize) })
   }
 
   return NextResponse.json(products)
@@ -59,7 +69,7 @@ export async function POST(req: NextRequest) {
         cost: Number(body.cost) || 0,
         price: Number(body.price) || 0,
         stock: Number(body.stock) || 0,
-        minStock: Number(body.minStock) ?? 5,
+        minStock: Number(body.minStock) || 5,
         unit: body.unit || "unidad",
         expirationDate: body.expirationDate ? new Date(body.expirationDate) : null,
         batch: body.batch || null,
@@ -68,6 +78,24 @@ export async function POST(req: NextRequest) {
       },
       include: { category: true },
     })
+    const session = getSession(req)
+    try {
+      await logAudit({
+        action: "product_create",
+        entityType: "product",
+        entityId: product.id,
+        userName: session?.name ?? "Sistema",
+        role: session?.role ?? "admin",
+        detail: `Producto creado: ${product.name}`,
+        meta: {
+          name: product.name,
+          price: Number(product.price),
+          stock: Number(product.stock),
+        },
+      })
+    } catch {
+      // noop: logging failure must not break the operation
+    }
     return NextResponse.json(product)
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })

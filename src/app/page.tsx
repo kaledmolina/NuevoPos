@@ -99,7 +99,45 @@ export default function Home() {
   const setView = useAppStore((s) => s.setView)
   const sidebarOpen = useAppStore((s) => s.sidebarOpen)
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen)
+  const cartCount = useAppStore((s) => s.cart.reduce((n, c) => n + c.quantity, 0))
+
+  // Aviso al salir del POS si hay items en el carrito
+  const handleSetView = (v: typeof view) => {
+    if (view === "pos" && v !== "pos" && cartCount > 0) {
+      if (!confirm(`Tienes ${cartCount} producto(s) en el carrito. Si sales se conservarán, pero ¿seguro que quieres cambiar de sección?`)) {
+        return
+      }
+    }
+    setView(v)
+  }
   const triggerRefresh = useAppStore((s) => s.triggerRefresh)
+  const refreshKey = useAppStore((s) => s.refreshKey)
+  const [cashOpen, setCashOpen] = useState(false)
+
+  // Verificar si hay caja abierta (para avisar al cerrar sesión)
+  useEffect(() => {
+    if (!role) return
+    let active = true
+    const checkCash = () => {
+      apiFetch<{ status?: string } | null>("/api/cash")
+        .then((s) => { if (active) setCashOpen(!!s && s.status === "abierta") })
+        .catch(() => {})
+    }
+    checkCash()
+    const interval = setInterval(checkCash, 15000)
+    return () => { active = false; clearInterval(interval) }
+  }, [role, refreshKey])
+
+  // Logout con aviso de caja abierta
+  const handleLogout = async () => {
+    if (cashOpen) {
+      if (!confirm("⚠️ Tienes una caja abierta. Si cierras sesión sin hacer el arqueo, el turno quedará sin cuadrar. ¿Cerrar sesión de todos modos?")) {
+        return
+      }
+    }
+    await logout()
+    toast.info("Sesión cerrada")
+  }
   const [storeName, setStoreName] = useState("Droguería La Salud")
   const [seedOpen, setSeedOpen] = useState(false)
   const [seeding, setSeeding] = useState(false)
@@ -180,7 +218,7 @@ export default function Home() {
                 return (
                   <button
                     key={item.key}
-                    onClick={() => setView(item.key)}
+                    onClick={() => handleSetView(item.key)}
                     className={cn(
                       "w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                       active
@@ -203,7 +241,7 @@ export default function Home() {
             <Database className="h-4 w-4 mr-2" /> Cargar datos demo
           </Button>
         )}
-        <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent" onClick={() => { logout(); toast.info("Sesión cerrada") }} disabled={seeding}>
+        <Button variant="ghost" size="sm" className="w-full justify-start text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent" onClick={handleLogout} disabled={seeding}>
           <LogOut className="h-4 w-4 mr-2" /> Cerrar sesión
         </Button>
       </div>
@@ -268,7 +306,7 @@ export default function Home() {
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { logout(); toast.info("Sesión cerrada") }}>
+              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={handleLogout}>
                 <LogOut className="h-4 w-4 mr-2" /> Cerrar sesión
               </DropdownMenuItem>
             </DropdownMenuContent>

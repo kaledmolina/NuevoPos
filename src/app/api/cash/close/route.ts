@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireAuth } from "@/lib/auth"
+import { requireAuth, getSession, logAudit } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -45,6 +45,24 @@ export async function POST(req: NextRequest) {
       },
       include: { transactions: { orderBy: { createdAt: "desc" } } },
     })
+    const authSession = getSession(req)
+    try {
+      await logAudit({
+        action: "cash_close",
+        entityType: "cash",
+        entityId: id,
+        userName: authSession?.name ?? "Sistema",
+        role: authSession?.role ?? "admin",
+        detail: `Caja cerrada. Esperado: ${expected}, Contado: ${declared}, Diferencia: ${difference}`,
+        meta: {
+          expected: Number(expected),
+          declared: Number(declared),
+          difference: Number(difference),
+        },
+      })
+    } catch {
+      // noop: logging failure must not break the operation
+    }
     return NextResponse.json(updated)
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })

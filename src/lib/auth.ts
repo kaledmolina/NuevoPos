@@ -3,7 +3,12 @@ import crypto from "crypto"
 
 export type Role = "admin" | "vendedor"
 
-const SECRET = process.env.AUTH_SECRET || "drogueria-pos-dev-fallback-secret"
+const FALLBACK_SECRET = "drogueria-pos-dev-fallback-secret"
+const SECRET = process.env.AUTH_SECRET || FALLBACK_SECRET
+// En producción, exigir un AUTH_SECRET real (no el fallback)
+if (process.env.NODE_ENV === "production" && SECRET === FALLBACK_SECRET) {
+  console.error("⚠️  AUTH_SECRET no configurado. Define la variable de entorno AUTH_SECRET con un valor aleatorio (openssl rand -hex 32).")
+}
 const COOKIE_NAME = "pos_session"
 const MAX_AGE_SECONDS = 60 * 60 * 12 // 12 horas
 
@@ -108,6 +113,36 @@ export function requireAuth(req: NextRequest): { session: SessionPayload } | Nex
     return NextResponse.json({ error: "No autenticado" }, { status: 401 })
   }
   return { session }
+}
+
+// --- Log de auditoría ---
+import { db } from "@/lib/db"
+
+export async function logAudit(entry: {
+  action: string
+  entityType: string
+  entityId?: string | null
+  userName: string
+  role: string
+  detail?: string | null
+  meta?: Record<string, unknown> | null
+}) {
+  try {
+    await db.auditLog.create({
+      data: {
+        action: entry.action,
+        entityType: entry.entityType,
+        entityId: entry.entityId ?? null,
+        userName: entry.userName,
+        role: entry.role,
+        detail: entry.detail ?? null,
+        meta: entry.meta ? JSON.stringify(entry.meta) : null,
+      },
+    })
+  } catch (e) {
+    // No dejar que un error de logging rompa la operación principal
+    console.error("Error escribiendo audit log:", (e as Error).message)
+  }
 }
 
 // --- Rate limiting simple en memoria para login ---

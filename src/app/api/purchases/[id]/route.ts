@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireAdmin } from "@/lib/auth"
+import { requireAdmin, getSession, logAudit } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -74,6 +74,19 @@ export async function PATCH(
           items: { include: { product: true } },
         },
       })
+      const session = getSession(req)
+      try {
+        await logAudit({
+          action: "purchase_annul",
+          entityType: "purchase",
+          entityId: id,
+          userName: session?.name ?? "Sistema",
+          role: session?.role ?? "admin",
+          detail: "Compra anulada",
+        })
+      } catch {
+        // noop: logging failure must not break the operation
+      }
       return NextResponse.json(updated)
     }
 

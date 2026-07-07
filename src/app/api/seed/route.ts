@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { nextInvoiceNumber } from "@/lib/format"
-import { requireAdmin, hashPin } from "@/lib/auth"
+import { requireAdmin, hashPin, getSession, logAudit } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -182,6 +182,19 @@ export async function POST(req: NextRequest) {
         { name: "vendedor", role: "vendedor", pinHash: hashPin("0000") },
       ],
     })
+
+    const session = getSession(req)
+    try {
+      await logAudit({
+        action: "seed",
+        entityType: "system",
+        userName: session?.name ?? "Sistema",
+        role: session?.role ?? "admin",
+        detail: "Datos de demostración cargados",
+      })
+    } catch {
+      // noop: logging failure must not break the operation
+    }
 
     return NextResponse.json({ ok: true, message: "Datos de demostración cargados correctamente. Usuarios: admin (PIN 1234), vendedor (PIN 0000)." })
   } catch (e) {

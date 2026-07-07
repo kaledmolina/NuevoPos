@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireAdmin } from "@/lib/auth"
+import { requireAdmin, getSession, logAudit } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
       })
 
       // Actualizar cada producto: incrementar stock, actualizar costo,
-      // y asignar vencimiento/lote solo si el producto no los tiene.
+      // crear un lote individual y asignar vencimiento/lote legacy si no tiene.
       for (const it of items) {
         const product = products.find((p) => p.id === it.productId)!
         const data: Record<string, unknown> = {
@@ -148,10 +148,39 @@ export async function POST(req: NextRequest) {
           where: { id: it.productId },
           data,
         })
+        // Crear un lote individual para esta línea de compra
+        await tx.productBatch.create({
+          data: {
+            productId: it.productId,
+            batch: it.batch?.trim() || null,
+            stock: Number(it.quantity),
+            cost: Number(it.unitCost),
+            expirationDate: it.expirationDate ? new Date(it.expirationDate) : null,
+          },
+        })
       }
 
       return created
     })
+
+    const session = getSession(req)
+    try {
+      await logAudit({
+        action: "purchase_create",
+        entityType: "purchase",
+        entityId: purchase.id,
+        userName: session?.name ?? "Sistema",
+        role: session?.role ?? "admin",
+        detail: `Compra registrada: ${purchase.total}`,
+        meta: {
+          supplierId: cleanSupplierId ?? "",
+          total: Number(purchase.total),
+          itemCount: items.length,
+        },
+      })
+    } catch {
+      // noop: logging failure must not break the operation
+    }
 
     return NextResponse.json(purchase)
   } catch (e) {

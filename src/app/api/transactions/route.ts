@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireAdmin } from "@/lib/auth"
+import { requireAdmin, getSession, logAudit } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -129,6 +129,20 @@ export async function POST(req: NextRequest) {
           reference: transaction.id,
         },
       })
+    }
+
+    const session = getSession(req)
+    try {
+      await logAudit({
+        action: "transaction_create",
+        entityType: "transaction",
+        entityId: transaction.id,
+        userName: session?.name ?? "Sistema",
+        role: session?.role ?? "admin",
+        detail: `${type} ${category}: ${concept} (${amount})`,
+      })
+    } catch {
+      // noop: logging failure must not break the operation
     }
 
     return NextResponse.json(transaction, { status: 201 })

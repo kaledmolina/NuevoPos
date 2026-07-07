@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireAdmin } from "@/lib/auth"
+import { requireAdmin, getSession, logAudit } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -85,6 +85,20 @@ export async function PATCH(
       data,
     })
 
+    const session = getSession(req)
+    try {
+      await logAudit({
+        action: "transaction_update",
+        entityType: "transaction",
+        entityId: id,
+        userName: session?.name ?? "Sistema",
+        role: session?.role ?? "admin",
+        detail: `Movimiento actualizado: ${updated.type} ${updated.category} - ${updated.concept} (${updated.amount})`,
+      })
+    } catch {
+      // noop: logging failure must not break the operation
+    }
+
     return NextResponse.json(updated)
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })
@@ -115,6 +129,20 @@ export async function DELETE(
       await db.cashTransaction.deleteMany({
         where: { reference: id },
       })
+    }
+
+    const session = getSession(req)
+    try {
+      await logAudit({
+        action: "transaction_delete",
+        entityType: "transaction",
+        entityId: id,
+        userName: session?.name ?? "Sistema",
+        role: session?.role ?? "admin",
+        detail: `Movimiento eliminado: ${existing.type} ${existing.category} - ${existing.concept} (${existing.amount})`,
+      })
+    } catch {
+      // noop: logging failure must not break the operation
     }
 
     return NextResponse.json({ ok: true })

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import {
-  hashPin, verifyPin, setSessionCookie, checkRateLimit, resetRateLimit,
+  hashPin, verifyPin, setSessionCookie, checkRateLimit, resetRateLimit, logAudit,
 } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
@@ -50,6 +50,14 @@ export async function POST(req: NextRequest) {
 
     // Login OK: resetear contador y setear cookie firmada
     resetRateLimit(name)
+    await logAudit({
+      action: "login",
+      entityType: "user",
+      entityId: user.id,
+      userName: user.name,
+      role: user.role,
+      detail: `Inicio de sesión`,
+    })
     const res = NextResponse.json({
       ok: true,
       user: { id: user.id, name: user.name, role: user.role },

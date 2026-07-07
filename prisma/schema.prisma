@@ -20,6 +20,19 @@ model User {
   createdAt DateTime @default(now())
 }
 
+// Log de auditoría: registra quién hizo qué y cuándo
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String   // login, logout, sale_create, sale_annul, product_create, product_update, product_delete, purchase_create, purchase_annul, cash_open, cash_close, cash_tx, transaction_create, transaction_update, transaction_delete, category_create, category_update, category_delete, seed
+  entityType String  // sale, product, purchase, cash, transaction, category, user, system
+  entityId  String?
+  userName  String
+  role      String
+  detail    String?  // descripción legible
+  meta      String?  // JSON string con detalles adicionales
+  createdAt DateTime @default(now())
+}
+
 // Catálogos
 model Category {
   id        String   @id @default(cuid())
@@ -38,17 +51,31 @@ model Product {
   description    String?
   cost           Float          @default(0) // último precio de compra
   price          Float          @default(0) // precio de venta
-  stock          Int            @default(0)
+  stock          Int            @default(0) // stock total (suma de lotes)
   minStock       Int            @default(5) // alerta de reposición
   unit           String         @default("unidad")
-  expirationDate DateTime?      // fecha de vencimiento
-  batch          String?        // lote
+  expirationDate DateTime?      // fecha de vencimiento (del lote más próximo, legacy)
+  batch          String?        // lote (legacy)
   location       String?        // ubicación en estante
   active         Boolean        @default(true)
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   saleItems      SaleItem[]
   purchaseItems  PurchaseItem[]
+  batches        ProductBatch[]
+}
+
+// Lotes individuales por producto (para gestionar múltiples vencimientos)
+model ProductBatch {
+  id             String   @id @default(cuid())
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batch          String?  // identificador del lote
+  stock          Int      @default(0) // unidades disponibles en este lote
+  cost           Float    @default(0) // costo de compra de este lote
+  expirationDate DateTime? // vencimiento de este lote
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 // Terceros

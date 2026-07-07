@@ -1,6 +1,7 @@
 "use client"
 
 import { create } from "zustand"
+import { persist } from "zustand/middleware"
 import { apiFetch } from "@/lib/api"
 import type { Role, ViewKey } from "@/lib/permissions"
 
@@ -44,10 +45,12 @@ interface AppState {
   triggerRefresh: () => void
 }
 
-export const useAppStore = create<AppState>((set) => ({
-  hydrated: false,
-  role: null,
-  userName: null,
+export const useAppStore = create<AppState>()(
+  persist(
+    (set) => ({
+      hydrated: false,
+      role: null,
+      userName: null,
 
   // Consulta al servidor quién es el usuario actual (cookie httpOnly)
   hydrate: async () => {
@@ -128,7 +131,14 @@ export const useAppStore = create<AppState>((set) => ({
 
   refreshKey: 0,
   triggerRefresh: () => set((s) => ({ refreshKey: s.refreshKey + 1 })),
-}))
+    }),
+    {
+      name: "pos-cart",
+      // Solo persistir el carrito (la sesión se valida server-side con cookie)
+      partialize: (state) => ({ cart: state.cart }) as unknown as AppState,
+    }
+  )
+)
 
 export function useRole() {
   return useAppStore((s) => s.role)
