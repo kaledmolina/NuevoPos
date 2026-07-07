@@ -376,3 +376,68 @@ Stage Summary:
 - KPIs del dashboard usan formato compacto en móvil para evitar truncamiento.
 - Login mejorado en jerarquía visual, contraste y touch targets.
 - Safe area de iOS respetada. Touch targets ≥40px en todas las interacciones móviles.
+
+---
+Task ID: U2
+Agent: Coordinator (Z.ai Code)
+Task: Fix login (credenciales no funcionaban) + rediseño UI del login
+
+Work Log:
+- **Bug detectado**: el login devolvía 401 con las credenciales demo (admin/1234, vendedor/0000). Causa: los usuarios se habían borrado de la BD (probablemente por un reset o limpieza). 
+- Fix: recreé los usuarios con PIN hasheado vía script directo a la BD. Verificado con curl: admin y vendedor loguean correctamente (HTTP 200).
+- **Rediseño completo del login** (login.tsx):
+  * Estructura en **tarjeta Card** con sombra, agrupando rol + credenciales.
+  * **Numeración de pasos** (1. Selecciona tu rol → Datos de acceso) con separador visual.
+  * **Espaciado label-input corregido**: cambié de `space-y-3` sin margen a `space-y-2` por campo (label + input con gap claro). El Label ahora tiene `text-sm font-medium text-foreground/80` y el campo wrapper `space-y-2`.
+  * Inputs con **iconos a la izquierda** (User, KeyRound), altura h-12, texto base, mejor padding.
+  * PIN con `tracking-[0.4em]` para mejor legibilidad de los puntos.
+  * Sección de credenciales demo **clickeable**: al tocar "Administrador" o "Vendedor" se rellenan rol + usuario + PIN automáticamente (función `quickFill`), con hint "Toca para rellenar automáticamente".
+  * Permisos del rol en formato compacto (chips horizontales con ✓) en vez de lista vertical.
+  * Estados: `opacity-50 pointer-events-none` en la sección de credenciales cuando no hay rol seleccionado.
+  * RoleCard con `flex flex-col`, min-h-[92px], icono h-10/h-11, feedback `active:scale-[0.98]`.
+- Verificación con VLM: 8/10. Espaciado label-input bien, tarjeta profesional, credenciales demo claras.
+- Verificación funcional: clic en credencial demo admin → rellena name=admin, pin=1234 → Ingresar → entra al dashboard como admin ✓.
+- Recargué datos demo via seed (26 productos, clientes, proveedores, caja abierta).
+- `bun run lint` limpio. Sin errores.
+
+Stage Summary:
+- Login funciona: admin/1234 y vendedor/0000 entran correctamente.
+- UI del login rediseñado: tarjeta con pasos numerados, espaciado label-input corregido, credenciales demo de acceso rápido (un toque rellena todo), permisos compactos.
+- Datos demo recargados.
+
+---
+Task ID: L
+Agent: Coordinator (Z.ai Code)
+Task: Landing page educativa + animaciones modernas en POS
+
+Work Log:
+- **Landing page educativa** (`src/components/pos/landing.tsx`):
+  * Hero con título gradiente (verde esmeralda → teal), badge, CTAs animados (Framer Motion: fade-in + slide-up).
+  * Stats animadas con stagger (4 cards: productos, ventas, roles, reportes).
+  * Sección "Características" con 6 cards (hover lift animation, whileInView).
+  * **Guía interactiva por rol**: selector Admin/Vendedor, lista de pasos numerados a la izquierda, tarjeta de detalle a la derecha con AnimatePresence (transición suave al cambiar paso). Admin = 7 pasos (registrar productos, comprar, gestionar terceros, ingresos/egresos, anular ventas, arqueo, reportes). Vendedor = 6 pasos (abrir caja, buscar, agregar al carrito, cobrar, movimientos de caja, cerrar arqueo). Cada paso explica qué hacer, dónde y por qué.
+  * Navegación Anterior/Siguiente con contador, CTA final "¡Listo, ir al login!".
+  * Sección credenciales con dos cards (admin/vendedor) explicando permisos.
+  * Header sticky con menú móvil, navegación ancla (características, guía, credenciales).
+  * Footer.
+- **Integración en el flujo**:
+  * Store: añadido `showLanding` / `setShowLanding`.
+  * `page.tsx`: si no hay rol y `showLanding` → LandingPage, si no → LoginScreen.
+  * `login.tsx`: botón "¿Primera vez? Ver cómo usar el sistema" que activa la landing.
+  * Landing: botones "Ir al login" usan `setShowLanding(false)`.
+- **Animaciones modernas en POS** (`pos-terminal.tsx` con Framer Motion):
+  * Grid de productos: `motion.div` con `layout` + `AnimatePresence mode="popLayout"`, cada producto entra con `initial={{opacity:0, scale:0.9, y:10}}` y stagger (`delay: i*0.02`). Hover `y:-2`, tap `scale:0.97`. Botón "+" con `whileHover` rotación 90°.
+  * Items del carrito: `motion.div` con `layout`, entrada desde la derecha (`x:20→0`), salida a la izquierda (`x:0→-20`), height animado. AnimatePresence para entrada/salida suave.
+  * Badge del carrito (móvil): `AnimatePresence` + `motion.span` con spring animation (`type:spring, stiffness:500, damping:25`) — rebota al cambiar el contador.
+  * Recibo de venta exitosa: icono CheckCircle2 con `initial={{scale:0, rotate:-20}}` → spring al tamaño real, da sensación de logro.
+- Verificación con VLM + Agent Browser:
+  * Landing desktop: 8/10, hero profesional, secciones claras, animaciones modernas ✓
+  * Guía interactiva: selector rol funciona, 6-7 pasos según rol, navegación anterior/siguiente, CTA final ✓
+  * Landing móvil 390px: responsive, legible, stats animadas ✓
+  * POS con animaciones: productos con stagger, carrito animado, badge spring, recibo con spring ✓
+  * Sin errores de consola. `bun run lint` limpio.
+
+Stage Summary:
+- Landing page educativa completa: enseña a usuarios admin y vendedor cómo usar el sistema paso a paso, con guías interactivas por rol.
+- Animaciones modernas (Framer Motion) añadidas al POS: stagger en grid de productos, layout animations en carrito, spring en badge contador, celebración en recibo de venta.
+- Acceso: desde el login, botón "¿Primera vez? Ver cómo usar el sistema" abre la landing; botones "Ir al login" regresan.

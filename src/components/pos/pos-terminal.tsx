@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState, useCallback } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import { apiFetch } from "@/lib/api"
 import { useAppStore } from "@/lib/store"
 import { formatCurrency, expirationStatus, formatDateTime } from "@/lib/format"
@@ -159,8 +160,17 @@ export default function PosTerminal() {
           </div>
         ) : (
           <div className="space-y-2 py-2">
-            {cart.map((it) => (
-              <div key={it.productId} className="flex items-center gap-2 rounded-lg border p-2">
+            <AnimatePresence initial={false}>
+              {cart.map((it) => (
+                <motion.div
+                  key={it.productId}
+                  layout
+                  initial={{ opacity: 0, x: 20, height: 0 }}
+                  animate={{ opacity: 1, x: 0, height: "auto" }}
+                  exit={{ opacity: 0, x: -20, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="flex items-center gap-2 rounded-lg border p-2 bg-card"
+                >
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{it.name}</p>
                   <p className="text-xs text-muted-foreground">{formatCurrency(it.price)} · {it.unit ?? "unidad"}</p>
@@ -187,8 +197,9 @@ export default function PosTerminal() {
                 <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground shrink-0" onClick={() => removeFromCart(it.productId)}>
                   <X className="h-3.5 w-3.5" />
                 </Button>
-              </div>
-            ))}
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         )}
       </ScrollArea>
@@ -283,43 +294,58 @@ export default function PosTerminal() {
               <p className="text-sm">No se encontraron productos</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3 pr-2">
-              {filtered.map((p) => {
-                const exp = expirationStatus(p.expirationDate)
-                const out = p.stock <= 0
-                const low = p.stock <= 5
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => {
-                      if (out) return toast.error("Producto sin stock")
-                      if (exp.variant === "expired") return toast.error("Producto vencido, no se puede vender")
-                      addToCart({ productId: p.id, name: p.name, price: p.price, cost: p.cost, stock: p.stock })
-                      toast.success(`${p.name} agregado`)
-                    }}
-                    disabled={out}
-                    className="group text-left rounded-xl border bg-card p-2.5 sm:p-3 hover:border-primary hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]"
-                  >
-                    <div className="flex items-start justify-between gap-1 mb-1.5">
-                      <span className="text-[9px] sm:text-[10px] uppercase tracking-wide text-muted-foreground truncate">{p.category?.name ?? "Sin categoría"}</span>
-                      <Badge variant={out ? "destructive" : low ? "secondary" : "outline"} className="text-[9px] sm:text-[10px] px-1.5 py-0 shrink-0">
-                        {out ? "Agotado" : `${p.stock}`}
-                      </Badge>
-                    </div>
-                    <p className="text-xs sm:text-sm font-medium leading-tight line-clamp-2 min-h-[2.5rem] group-hover:text-primary">{p.name}</p>
-                    <div className="flex items-end justify-between mt-2">
-                      <span className="text-sm sm:text-base font-bold text-primary">{formatCurrency(p.price)}</span>
-                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                        <Plus className="h-4 w-4" />
-                      </span>
-                    </div>
-                    {exp.variant !== "ok" && (
-                      <p className={`text-[9px] sm:text-[10px] mt-1 ${exp.variant === "expired" ? "text-red-600" : "text-orange-600"}`}>{exp.label}</p>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
+            <motion.div
+              layout
+              className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3 pr-2"
+            >
+              <AnimatePresence mode="popLayout">
+                {filtered.map((p, i) => {
+                  const exp = expirationStatus(p.expirationDate)
+                  const out = p.stock <= 0
+                  const low = p.stock <= 5
+                  return (
+                    <motion.button
+                      key={p.id}
+                      layout
+                      initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      transition={{ duration: 0.2, delay: Math.min(i * 0.02, 0.3) }}
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => {
+                        if (out) return toast.error("Producto sin stock")
+                        if (exp.variant === "expired") return toast.error("Producto vencido, no se puede vender")
+                        addToCart({ productId: p.id, name: p.name, price: p.price, cost: p.cost, stock: p.stock })
+                        toast.success(`${p.name} agregado`)
+                      }}
+                      disabled={out}
+                      className="group text-left rounded-xl border bg-card p-2.5 sm:p-3 hover:border-primary hover:shadow-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <div className="flex items-start justify-between gap-1 mb-1.5">
+                        <span className="text-[9px] sm:text-[10px] uppercase tracking-wide text-muted-foreground truncate">{p.category?.name ?? "Sin categoría"}</span>
+                        <Badge variant={out ? "destructive" : low ? "secondary" : "outline"} className="text-[9px] sm:text-[10px] px-1.5 py-0 shrink-0">
+                          {out ? "Agotado" : `${p.stock}`}
+                        </Badge>
+                      </div>
+                      <p className="text-xs sm:text-sm font-medium leading-tight line-clamp-2 min-h-[2.5rem] group-hover:text-primary">{p.name}</p>
+                      <div className="flex items-end justify-between mt-2">
+                        <span className="text-sm sm:text-base font-bold text-primary">{formatCurrency(p.price)}</span>
+                        <motion.span
+                          whileHover={{ scale: 1.1, rotate: 90 }}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </motion.span>
+                      </div>
+                      {exp.variant !== "ok" && (
+                        <p className={`text-[9px] sm:text-[10px] mt-1 ${exp.variant === "expired" ? "text-red-600" : "text-orange-600"}`}>{exp.label}</p>
+                      )}
+                    </motion.button>
+                  )
+                })}
+              </AnimatePresence>
+            </motion.div>
           )}
         </ScrollArea>
       </div>
@@ -353,11 +379,20 @@ export default function PosTerminal() {
             onClick={() => setCartOpenMobile(true)}
           >
             <ShoppingCart className="h-5 w-5" />
-            {cartCount > 0 && (
-              <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-bold">
-                {cartCount}
-              </span>
-            )}
+            <AnimatePresence>
+              {cartCount > 0 && (
+                <motion.span
+                  key={cartCount}
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  exit={{ scale: 0 }}
+                  transition={{ type: "spring", stiffness: 500, damping: 25 }}
+                  className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-bold"
+                >
+                  {cartCount}
+                </motion.span>
+              )}
+            </AnimatePresence>
           </Button>
           <div className="flex-1 min-w-0">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total</p>
@@ -398,9 +433,14 @@ export default function PosTerminal() {
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <div className="flex flex-col items-center text-center gap-2">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+              <motion.div
+                initial={{ scale: 0, rotate: -20 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ type: "spring", stiffness: 300, damping: 18, delay: 0.1 }}
+                className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600"
+              >
                 <CheckCircle2 className="h-8 w-8" />
-              </div>
+              </motion.div>
               <DialogTitle>¡Venta exitosa!</DialogTitle>
               <DialogDescription className="sr-only">Detalle de la venta realizada</DialogDescription>
             </div>

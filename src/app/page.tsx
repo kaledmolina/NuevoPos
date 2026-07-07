@@ -25,6 +25,7 @@ import {
 import { cn } from "@/lib/utils"
 
 import LoginScreen from "@/components/pos/login"
+import LandingPage from "@/components/pos/landing"
 import DashboardView from "@/components/pos/dashboard"
 import PosTerminal from "@/components/pos/pos-terminal"
 import ProductsView from "@/components/pos/products"
@@ -91,6 +92,8 @@ export default function Home() {
   const role = useAppStore((s) => s.role)
   const userName = useAppStore((s) => s.userName)
   const logout = useAppStore((s) => s.logout)
+  const showLanding = useAppStore((s) => s.showLanding)
+  const setShowLanding = useAppStore((s) => s.setShowLanding)
 
   const view = useAppStore((s) => s.view)
   const setView = useAppStore((s) => s.setView)
@@ -144,9 +147,9 @@ export default function Home() {
     )
   }
 
-  // Si no hay sesión, mostrar pantalla de login
+  // Si no hay sesión, mostrar login o landing
   if (!role) {
-    return <LoginScreen />
+    return showLanding ? <LandingPage /> : <LoginScreen />
   }
 
   const perms = ROLE_CONFIG[role]

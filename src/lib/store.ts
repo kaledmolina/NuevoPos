@@ -22,6 +22,10 @@ interface AppState {
   login: (name: string, pin: string) => Promise<void>
   logout: () => Promise<void>
 
+  // Landing page (vista educativa antes del login)
+  showLanding: boolean
+  setShowLanding: (v: boolean) => void
+
   // Navegación
   view: ViewKey
   setView: (v: ViewKey) => void
@@ -86,8 +90,11 @@ export const useAppStore = create<AppState>((set) => ({
     } catch {
       /* noop */
     }
-    set({ role: null, userName: null, view: "dashboard", cart: [], sidebarOpen: false })
+    set({ role: null, userName: null, view: "dashboard", cart: [], sidebarOpen: false, showLanding: true })
   },
+
+  showLanding: true,
+  setShowLanding: (v) => set({ showLanding: v }),
 
   view: "dashboard",
   setView: (v) => set({ view: v, sidebarOpen: false }),
