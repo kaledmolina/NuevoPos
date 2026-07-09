@@ -784,3 +784,30 @@ Work Log:
 
 Stage Summary:
 - Todos los botones, enlaces, selects y elementos interactivos ahora muestran cursor pointer (mano) al pasar el ratón. Los deshabilitados muestran not-allowed.
+
+---
+Task ID: TOUR-FIX
+Agent: Coordinator (Z.ai Code)
+Task: Revisar y arreglar tour interactivo
+
+Work Log:
+- Problemas encontrados:
+  1. El tour arrancaba con un beacon (punto pulsante) que requería un click extra
+  2. Al finalizar el tour, no marcaba localStorage, así que se repetía en cada recarga
+  3. No había forma de repetir el tour manualmente
+- Fixes aplicados:
+  1. Auto-clic en el beacon: effect que detecta el beacon y hace clic automáticamente para mostrar el tooltip directo
+  2. MutationObserver: detecta cuando el tooltip del tour desaparece y marca localStorage como completado
+  3. Pantalla de bienvenida: añadí un paso inicial con target="body" y placement="center" que da la bienvenida antes de empezar
+  4. Botón "Repetir tour" en Configuración: limpia localStorage y recarga para que el tour se ejecute de nuevo
+  5. Todos los pasos tienen disableBeacon: true
+- Verificación completa:
+  * Tour arranca automáticamente tras login (1.2s delay) con tooltip directo ✓
+  * Navega por 9 pasos (admin) / 6 pasos (vendedor) con Siguiente/Atrás ✓
+  * Al finalizar, marca localStorage "1" ✓
+  * No se repite al recargar ✓
+  * Botón "Repetir tour" en Configuración funciona ✓
+- Lint limpio.
+
+Stage Summary:
+- Tour interactivo funcionando correctamente. Arranca automático, navega todos los pasos, marca como completado al finalizar, y se puede repetir desde Configuración.

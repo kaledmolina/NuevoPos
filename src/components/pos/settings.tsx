@@ -15,8 +15,9 @@ import {
 import { toast } from "sonner"
 import {
   Database, HardDrive, Trash2, Upload, Download, RotateCcw, RefreshCw, AlertTriangle,
-  FileUp, CheckCircle2,
+  FileUp, CheckCircle2, HelpCircle, Play,
 } from "lucide-react"
+import { TOUR_STORAGE_KEY_PREFIX } from "@/components/pos/tour"
 
 interface Backup {
   name: string
@@ -284,6 +285,27 @@ export default function SettingsView() {
             <Trash2 className="h-4 w-4 mr-2" /> Borrar datos de prueba
           </Button>
           <p className="text-xs text-muted-foreground mt-2">⚠️ Asegúrate de hacer un backup primero. Esta acción es irreversible.</p>
+        </CardContent>
+      </Card>
+
+      {/* SECCIÓN 4: Ayuda y tour */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base"><HelpCircle className="h-5 w-5 text-primary" /> Ayuda y tutorial</CardTitle>
+          <CardDescription>Reproduce el tour guiado para aprender a usar el sistema</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            onClick={() => {
+              const role = useAppStore.getState().role
+              if (role) localStorage.removeItem(TOUR_STORAGE_KEY_PREFIX + role)
+              window.location.reload()
+            }}
+            className="w-full h-10"
+          >
+            <Play className="h-4 w-4 mr-2" /> Repetir tour guiado
+          </Button>
+          <p className="text-xs text-muted-foreground mt-2">El tour te guiará por las principales funciones del sistema según tu rol.</p>
         </CardContent>
       </Card>
 
