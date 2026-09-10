@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdmin, getSession, logAudit } from "@/lib/auth"
+import { getDatabasePath } from "@/lib/db"
 import fs from "fs"
 import path from "path"
 
@@ -11,7 +12,7 @@ export async function GET(req: NextRequest) {
   const denied = requireAdmin(req)
   if (denied) return denied
   try {
-    const dbPath = process.env.DATABASE_URL?.replace("file:", "") || "/home/z/my-project/db/custom.db"
+    const dbPath = getDatabasePath()
     const backupDir = path.join(path.dirname(dbPath), "backups")
     if (!fs.existsSync(backupDir)) {
       return NextResponse.json([])
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest) {
   if (denied) return denied
   const session = getSession(req)
   try {
-    const dbPath = process.env.DATABASE_URL?.replace("file:", "") || "/home/z/my-project/db/custom.db"
+    const dbPath = getDatabasePath()
     if (!fs.existsSync(dbPath)) {
       return NextResponse.json({ error: "Base de datos no encontrada" }, { status: 500 })
     }
@@ -92,7 +93,7 @@ export async function DELETE(req: NextRequest) {
     if (!backupName || !/^(backup|upload|pre-restore)-[\w.-]+\.db$/.test(backupName)) {
       return NextResponse.json({ error: "Nombre de backup inválido" }, { status: 400 })
     }
-    const dbPath = process.env.DATABASE_URL?.replace("file:", "") || "/home/z/my-project/db/custom.db"
+    const dbPath = getDatabasePath()
     const backupDir = path.join(path.dirname(dbPath), "backups")
     const backupPath = path.join(backupDir, backupName)
     if (!fs.existsSync(backupPath)) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdmin, getSession, logAudit } from "@/lib/auth"
+import { getDatabasePath } from "@/lib/db"
 import fs from "fs"
 import path from "path"
 
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Nombre de backup inválido" }, { status: 400 })
     }
 
-    const dbPath = process.env.DATABASE_URL?.replace("file:", "") || "/home/z/my-project/db/custom.db"
+    const dbPath = getDatabasePath()
     const backupDir = path.join(path.dirname(dbPath), "backups")
     const backupPath = path.join(backupDir, backupName)
 
