@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo, type ReactNode } from "react
 import { apiFetch } from "@/lib/api"
 import { useAppStore } from "@/lib/store"
 import { formatCurrency, formatDateTime } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
 } from "@/components/ui/card"
@@ -25,10 +26,10 @@ import {
 } from "@/components/ui/table"
 import { toast } from "sonner"
 import {
-  Wallet, Lock, Unlock, Plus, Minus, ArrowDownCircle, ArrowUpCircle,
-  Receipt, CheckCircle2, AlertTriangle, History, Eye, Coins, Calculator,
-  User, XCircle, Clock, FileText,
-} from "lucide-react"
+  IconWallet, IconLock, IconLockOpen, IconPlus, IconMinus, IconCircleArrowDown, IconCircleArrowUp,
+  IconReceipt2, IconCircleCheck, IconAlertTriangle, IconHistory, IconEye, IconCoins, IconCalculator,
+  IconUser, IconCircleX, IconClock, IconFileText, IconCreditCard,
+} from "@tabler/icons-react"
 
 // ---------------------------------------------------------------------------
 // Tipos
@@ -62,25 +63,52 @@ interface CashSession {
 
 const METHOD_LABEL: Record<string, string> = {
   efectivo: "Efectivo",
-  tarjeta: "Tarjeta",
-  transferencia: "Transferencia",
+  credito: "Crédito",
 }
 
 // ---------------------------------------------------------------------------
-// Helpers de cálculo (solo efectivo)
+// Helpers de cálculo (efectivo y créditos)
 // ---------------------------------------------------------------------------
 function breakdown(s: CashSession) {
-  const ventas = (s.transactions ?? [])
+  const ventasEfectivo = (s.transactions ?? [])
     .filter((t) => t.method === "efectivo" && t.type === "venta")
     .reduce((a, t) => a + Number(t.amount), 0)
+
+  const ventasCredito = (s.transactions ?? [])
+    .filter((t) => t.method === "credito" && t.type === "venta")
+    .reduce((a, t) => a + Number(t.amount), 0)
+
+  const abonosCredito = (s.transactions ?? [])
+    .filter((t) => t.method === "efectivo" && t.type === "ingreso" && t.concept.toLowerCase().includes("abono"))
+    .reduce((a, t) => a + Number(t.amount), 0)
+
+  const otrosIngresos = (s.transactions ?? [])
+    .filter((t) => t.method === "efectivo" && t.type === "ingreso" && !t.concept.toLowerCase().includes("abono"))
+    .reduce((a, t) => a + Number(t.amount), 0)
+
   const ingresos = (s.transactions ?? [])
     .filter((t) => t.method === "efectivo" && t.type === "ingreso")
     .reduce((a, t) => a + Number(t.amount), 0)
+
   const egresos = (s.transactions ?? [])
     .filter((t) => t.method === "efectivo" && t.type === "egreso")
     .reduce((a, t) => a + Number(t.amount), 0)
-  const esperado = Number(s.openingAmount) + ventas + ingresos - egresos
-  return { ventas, ingresos, egresos, esperado }
+
+  // Saldo real en efectivo esperado en caja
+  const esperado = Number(s.openingAmount) + ventasEfectivo + ingresos - egresos
+  const totalVendidoTurno = ventasEfectivo + ventasCredito
+
+  return {
+    ventas: ventasEfectivo,
+    ventasEfectivo,
+    ventasCredito,
+    abonosCredito,
+    otrosIngresos,
+    ingresos,
+    egresos,
+    esperado,
+    totalVendidoTurno,
+  }
 }
 
 function effectiveBalance(s: CashSession): number {
@@ -89,7 +117,7 @@ function effectiveBalance(s: CashSession): number {
 
 function diferenciaInfo(diff: number) {
   if (Math.abs(diff) < 0.5)
-    return { label: "Cuadrado", tone: "ok", color: "text-emerald-600", bg: "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-900" }
+    return { label: "Cuadrado", tone: "ok", color: "text-blue-600", bg: "bg-blue-50 border-blue-200 dark:bg-blue-950/40 dark:border-blue-900" }
   if (diff < 0)
     return { label: `Faltante ${formatCurrency(Math.abs(diff))}`, tone: "bad", color: "text-red-600", bg: "bg-red-50 border-red-200 dark:bg-red-950/40 dark:border-red-900" }
   return { label: `Sobrante ${formatCurrency(diff)}`, tone: "warn", color: "text-amber-600", bg: "bg-amber-50 border-amber-200 dark:bg-amber-950/40 dark:border-amber-900" }
@@ -269,9 +297,9 @@ export default function CashView() {
   if (error) {
     return (
       <div className="p-4 md:p-6">
-        <Card className="border-red-200 dark:border-red-900">
+        <Card className="border-border">
           <CardContent className="p-6 flex flex-col items-center text-center gap-3">
-            <AlertTriangle className="h-10 w-10 text-red-500" />
+            <IconAlertTriangle className="h-10 w-10 text-destructive" />
             <p className="text-sm text-muted-foreground">{error}</p>
             <Button variant="outline" size="sm" onClick={load}>Reintentar</Button>
           </CardContent>
@@ -286,7 +314,7 @@ export default function CashView() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold flex items-center gap-2">
-            <Wallet className="h-5 w-5 text-primary" /> Caja y arqueo
+            <IconWallet className="h-5 w-5 text-primary" /> Caja y arqueo
           </h2>
           <p className="text-sm text-muted-foreground">
             {current
@@ -295,12 +323,12 @@ export default function CashView() {
           </p>
         </div>
         {current ? (
-          <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white gap-1">
-            <CheckCircle2 className="h-3.5 w-3.5" /> Caja abierta
+          <Badge className="bg-primary hover:bg-primary text-primary-foreground gap-1 rounded-full px-3 py-1 shadow-xs">
+            <IconCircleCheck className="h-3.5 w-3.5" /> Caja abierta
           </Badge>
         ) : (
-          <Badge variant="secondary" className="gap-1">
-            <Lock className="h-3.5 w-3.5" /> Caja cerrada
+          <Badge variant="secondary" className="gap-1 rounded-full px-3 py-1">
+            <IconLock className="h-3.5 w-3.5" /> Caja cerrada
           </Badge>
         )}
       </div>
@@ -308,70 +336,75 @@ export default function CashView() {
       {/* ===================== SESIÓN ABIERTA ===================== */}
       {current && stats && (
         <>
-          {/* Tarjeta resumen */}
-          <Card className="overflow-hidden">
-            <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 dark:from-emerald-700 dark:to-emerald-900 text-white">
-              <CardContent className="p-4 md:p-6">
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-emerald-50 text-sm">
-                      <Unlock className="h-4 w-4" /> Sesión abierta
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-emerald-50/90">
-                      <span className="inline-flex items-center gap-1">
-                        <Clock className="h-3.5 w-3.5" /> {formatDateTime(current.openedAt)}
-                      </span>
-                      <span className="inline-flex items-center gap-1">
-                        <User className="h-3.5 w-3.5" /> {current.openedBy ?? "—"}
-                      </span>
-                    </div>
+          {/* Tarjeta resumen de la sesión */}
+          <Card className="overflow-hidden rounded-2xl shadow-xs border bg-card text-card-foreground">
+            <CardContent className="p-4 md:p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-border/70">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <span className="flex h-2 w-2 rounded-full bg-primary" />
+                    <span>Sesión de caja activa</span>
                   </div>
-                  <div className="flex flex-col items-start lg:items-end">
-                    <span className="text-emerald-50/80 text-xs uppercase tracking-wide">Saldo en efectivo</span>
-                    <span className="text-3xl md:text-4xl font-bold tabular-nums">
-                      {formatCurrency(stats.esperado)}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                      <IconClock className="h-3.5 w-3.5" /> Apertura: {formatDateTime(current.openedAt)}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <IconUser className="h-3.5 w-3.5" /> Responsable: {current.openedBy ?? "—"}
                     </span>
                   </div>
                 </div>
-
-                <Separator className="my-4 bg-emerald-400/30" />
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <SummaryStat label="Monto inicial" value={formatCurrency(current.openingAmount)} />
-                  <SummaryStat label="Ventas efectivo" value={formatCurrency(stats.ventas)} tone="pos" />
-                  <SummaryStat label="Ingresos efectivo" value={formatCurrency(stats.ingresos)} tone="pos" />
-                  <SummaryStat label="Egresos efectivo" value={formatCurrency(stats.egresos)} tone="neg" />
+                <div className="flex flex-col items-start sm:items-end">
+                  <span className="text-muted-foreground text-[11px] uppercase tracking-wider font-semibold">
+                    Saldo en efectivo esperado
+                  </span>
+                  <span className="text-3xl md:text-4xl font-extrabold text-foreground tabular-nums tracking-tight">
+                    {formatCurrency(stats.esperado)}
+                  </span>
                 </div>
-              </CardContent>
-            </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                <SummaryStat label="Monto inicial" value={formatCurrency(current.openingAmount)} />
+                <SummaryStat label="Ventas efectivo" value={formatCurrency(stats.ventasEfectivo)} />
+                <SummaryStat label="Abonos crédito (+)" value={formatCurrency(stats.abonosCredito)} />
+                <SummaryStat label="Otros ingresos (+)" value={formatCurrency(stats.otrosIngresos)} />
+                <SummaryStat label="Egresos efectivo (−)" value={formatCurrency(stats.egresos)} isNegative />
+                <SummaryStat label="Ventas crédito (Turno)" value={formatCurrency(stats.ventasCredito)} isCredit />
+              </div>
+            </CardContent>
           </Card>
 
-          {/* Acciones */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Acciones de Caja */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" data-tour="cash-movement-actions">
             <Button
               size="lg"
-              className="h-auto py-4 bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+              variant="outline"
+              className="h-12 rounded-xl text-sm font-semibold gap-2 border-border hover:bg-muted/80"
               onClick={() => openTxDialog("ingreso")}
+              data-tour="cash-income-btn"
             >
-              <ArrowDownCircle className="h-5 w-5" /> Ingreso
+              <IconCircleArrowDown className="h-4 w-4 text-primary" /> Registrar Ingreso
             </Button>
             <Button
               size="lg"
-              variant="destructive"
-              className="h-auto py-4 gap-2"
+              variant="outline"
+              className="h-12 rounded-xl text-sm font-semibold gap-2 border-border hover:bg-muted/80 text-foreground"
               onClick={() => openTxDialog("egreso")}
+              data-tour="cash-expense-btn"
             >
-              <ArrowUpCircle className="h-5 w-5" /> Egreso
+              <IconCircleArrowUp className="h-4 w-4 text-rose-500" /> Registrar Egreso
             </Button>
             <Button
               size="lg"
-              className="h-auto py-4 gap-2 bg-amber-600 hover:bg-amber-700 text-white"
+              className="h-12 rounded-xl text-sm font-semibold gap-2 shadow-sm"
               onClick={() => {
                 setCloseForm({ closingAmount: String(stats.esperado), closedBy: current.openedBy ?? "", notes: "" })
                 setOpenClose(true)
               }}
+              data-tour="cash-close-btn"
             >
-              <Calculator className="h-5 w-5" /> Cerrar caja / Arqueo
+              <IconCalculator className="h-4 w-4" /> Cerrar caja / Realizar Arqueo
             </Button>
           </div>
 
@@ -380,9 +413,9 @@ export default function CashView() {
             <CardHeader className="border-b">
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Receipt className="h-4 w-4 text-primary" /> Movimientos de la sesión
+                  <IconReceipt2 className="h-4 w-4 text-primary" /> Movimientos de la sesión
                 </CardTitle>
-                <Badge variant="outline" className="text-xs">
+                <Badge variant="outline" className="text-xs font-normal">
                   {(current.transactions ?? []).length} registros
                 </Badge>
               </div>
@@ -390,7 +423,7 @@ export default function CashView() {
             <CardContent className="p-0">
               {(!current.transactions || current.transactions.length === 0) ? (
                 <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                  <Receipt className="h-10 w-10 mb-2 opacity-40" />
+                  <IconReceipt2 className="h-10 w-10 mb-2 opacity-40" />
                   <p className="text-sm">Aún no hay movimientos en esta sesión</p>
                   <p className="text-xs">Las ventas y los ingresos/egresos aparecerán aquí</p>
                 </div>
@@ -414,13 +447,23 @@ export default function CashView() {
                           .map((t) => (
                             <TableRow key={t.id}>
                               <TableCell>
-                                <TypeBadge type={t.type} />
+                                <TypeBadge type={t.type} method={t.method} concept={t.concept} />
                               </TableCell>
                               <TableCell className="max-w-[16rem]">
-                                <span className="text-sm truncate block">{t.concept}</span>
+                                <span className="text-sm truncate block font-medium">{t.concept}</span>
+                                {t.method === "credito" && (
+                                  <span className="text-[10px] text-muted-foreground font-medium block">
+                                    Cuenta por cobrar (No suma a caja física)
+                                  </span>
+                                )}
+                                {t.type === "ingreso" && t.concept?.toLowerCase().includes("abono") && (
+                                  <span className="text-[10px] text-primary font-medium block">
+                                    Recaudo de cartera en efectivo
+                                  </span>
+                                )}
                               </TableCell>
                               <TableCell className="hidden sm:table-cell">
-                                <Badge variant="outline" className="text-xs">
+                                <Badge variant="outline" className="text-xs capitalize font-normal">
                                   {METHOD_LABEL[t.method] ?? t.method}
                                 </Badge>
                               </TableCell>
@@ -431,7 +474,7 @@ export default function CashView() {
                                 {formatDateTime(t.createdAt)}
                               </TableCell>
                               <TableCell className="text-right font-semibold tabular-nums">
-                                <span className={t.type === "egreso" ? "text-red-600" : "text-emerald-600"}>
+                                <span className={t.type === "egreso" ? "text-rose-600 dark:text-rose-400" : "text-foreground"}>
                                   {t.type === "egreso" ? "−" : "+"}{formatCurrency(t.amount)}
                                 </span>
                               </TableCell>
@@ -449,10 +492,10 @@ export default function CashView() {
 
       {/* ===================== CAJA CERRADA ===================== */}
       {!current && (
-        <Card className="border-dashed">
+        <Card className="border-dashed" data-tour="cash-open-card">
           <CardContent className="p-6 md:p-10 flex flex-col items-center text-center gap-4">
-            <div className="h-16 w-16 rounded-full bg-emerald-50 dark:bg-emerald-950/50 flex items-center justify-center">
-              <Wallet className="h-8 w-8 text-emerald-600 dark:text-emerald-400" />
+            <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center">
+              <IconWallet className="h-8 w-8 text-foreground" />
             </div>
             <div className="space-y-1">
               <h3 className="text-lg font-semibold">Caja cerrada</h3>
@@ -460,17 +503,17 @@ export default function CashView() {
                 No hay una sesión de caja activa. Abre una nueva sesión para registrar ventas y movimientos.
               </p>
             </div>
-            <Button size="lg" className="gap-2" onClick={() => setOpenOpen(true)}>
-              <Unlock className="h-4 w-4" /> Abrir caja
+            <Button size="lg" className="gap-2" onClick={() => setOpenOpen(true)} data-tour="cash-open-btn">
+              <IconLockOpen className="h-4 w-4" /> Abrir caja
             </Button>
           </CardContent>
         </Card>
       )}
 
       {/* ===================== HISTORIAL ===================== */}
-      <div className="space-y-2">
+      <div className="space-y-2" data-tour="cash-history-card">
         <h3 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground">
-          <History className="h-4 w-4" /> Historial de sesiones
+          <IconHistory className="h-4 w-4" /> Historial de sesiones
         </h3>
         <Card>
           <CardContent className="p-0">
@@ -480,7 +523,7 @@ export default function CashView() {
               </div>
             ) : history.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                <History className="h-10 w-10 mb-2 opacity-40" />
+                <IconHistory className="h-10 w-10 mb-2 opacity-40" />
                 <p className="text-sm">No hay sesiones registradas</p>
               </div>
             ) : (
@@ -501,7 +544,6 @@ export default function CashView() {
                   <TableBody>
                     {history.map((s) => {
                       const diff = s.difference ?? null
-                      const diffInfo = diff === null ? null : diferenciaInfo(diff)
                       return (
                         <TableRow
                           key={s.id}
@@ -513,7 +555,7 @@ export default function CashView() {
                           </TableCell>
                           <TableCell className="hidden sm:table-cell text-sm">
                             <span className="inline-flex items-center gap-1">
-                              <User className="h-3 w-3 text-muted-foreground" />
+                              <IconUser className="h-3 w-3 text-muted-foreground" />
                               {s.openedBy ?? "—"}
                             </span>
                           </TableCell>
@@ -530,21 +572,21 @@ export default function CashView() {
                             {diff === null ? (
                               <span className="text-muted-foreground">—</span>
                             ) : Math.abs(diff) < 0.5 ? (
-                              <span className="text-emerald-600 font-medium">{formatCurrency(0)}</span>
+                              <span className="text-primary font-medium">{formatCurrency(0)}</span>
                             ) : (
-                              <span className={diff < 0 ? "text-red-600 font-medium" : "text-amber-600 font-medium"}>
+                              <span className={diff < 0 ? "text-rose-600 font-medium" : "text-amber-600 font-medium"}>
                                 {diff < 0 ? "−" : "+"}{formatCurrency(Math.abs(diff))}
                               </span>
                             )}
                           </TableCell>
                           <TableCell className="text-center">
                             {s.status === "abierta" ? (
-                              <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-xs gap-1">
-                                <CheckCircle2 className="h-3 w-3" /> Abierta
+                              <Badge className="bg-primary hover:bg-primary text-primary-foreground text-xs gap-1">
+                                <IconCircleCheck className="h-3 w-3" /> Abierta
                               </Badge>
                             ) : (
                               <Badge variant="secondary" className="text-xs gap-1">
-                                <Lock className="h-3 w-3" /> Cerrada
+                                <IconLock className="h-3 w-3" /> Cerrada
                               </Badge>
                             )}
                           </TableCell>
@@ -557,7 +599,7 @@ export default function CashView() {
                               onClick={(e) => { e.stopPropagation(); setDetail(s) }}
                               aria-label="Ver detalle de sesión"
                             >
-                              <Eye className="h-3.5 w-3.5" />
+                              <IconEye className="h-3.5 w-3.5" />
                             </Button>
                           </TableCell>
                         </TableRow>
@@ -576,7 +618,7 @@ export default function CashView() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Unlock className="h-5 w-5 text-primary" /> Abrir caja
+              <IconLockOpen className="h-5 w-5 text-primary" /> Abrir caja
             </DialogTitle>
             <DialogDescription>
               Registra el monto inicial en efectivo y el responsable de la sesión.
@@ -619,9 +661,9 @@ export default function CashView() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {txForm.type === "ingreso" ? (
-                <><ArrowDownCircle className="h-5 w-5 text-emerald-600" /> Registrar ingreso</>
+                <><IconCircleArrowDown className="h-5 w-5 text-primary" /> Registrar ingreso</>
               ) : (
-                <><ArrowUpCircle className="h-5 w-5 text-red-600" /> Registrar egreso</>
+                <><IconCircleArrowUp className="h-5 w-5 text-rose-500" /> Registrar egreso</>
               )}
             </DialogTitle>
             <DialogDescription>
@@ -660,8 +702,7 @@ export default function CashView() {
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="efectivo">Efectivo</SelectItem>
-                    <SelectItem value="tarjeta">Tarjeta</SelectItem>
-                    <SelectItem value="transferencia">Transferencia</SelectItem>
+                    <SelectItem value="credito">Crédito</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -675,8 +716,8 @@ export default function CashView() {
               </div>
             </div>
             {txForm.method !== "efectivo" && (
-              <p className="text-xs text-amber-600 flex items-center gap-1">
-                <AlertTriangle className="h-3.5 w-3.5" />
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <IconAlertTriangle className="h-3.5 w-3.5 text-amber-500" />
                 Los movimientos no efectivo no afectan el saldo de efectivo ni el arqueo.
               </p>
             )}
@@ -687,8 +728,8 @@ export default function CashView() {
               onClick={saveTx}
               disabled={saving}
               className={txForm.type === "ingreso"
-                ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                : "bg-red-600 hover:bg-red-700 text-white"}
+                ? "bg-primary hover:bg-primary/90 text-primary-foreground"
+                : "bg-destructive hover:bg-destructive/90 text-destructive-foreground"}
             >
               {saving ? "Guardando…" : "Registrar"}
             </Button>
@@ -701,7 +742,7 @@ export default function CashView() {
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto scroll-thin">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Calculator className="h-5 w-5 text-amber-600" /> Arqueo de caja
+              <IconCalculator className="h-5 w-5 text-primary" /> Arqueo de caja
             </DialogTitle>
             <DialogDescription>
               Cuenta el efectivo real y compáralo con el monto esperado para cerrar la sesión.
@@ -712,18 +753,34 @@ export default function CashView() {
             <div className="space-y-3">
               {/* Resumen del cálculo */}
               <div className="rounded-lg border bg-muted/40 p-3 space-y-1.5 text-sm">
-                <CalcRow icon={<Coins className="h-4 w-4 text-muted-foreground" />} label="Monto inicial" value={formatCurrency(current?.openingAmount ?? 0)} />
-                <CalcRow icon={<ArrowDownCircle className="h-4 w-4 text-emerald-600" />} label="Ventas en efectivo" value={`+ ${formatCurrency(stats.ventas)}`} valueClass="text-emerald-600" />
-                <CalcRow icon={<Plus className="h-4 w-4 text-emerald-600" />} label="Ingresos en efectivo" value={`+ ${formatCurrency(stats.ingresos)}`} valueClass="text-emerald-600" />
-                <CalcRow icon={<Minus className="h-4 w-4 text-red-600" />} label="Egresos en efectivo" value={`− ${formatCurrency(stats.egresos)}`} valueClass="text-red-600" />
+                <CalcRow icon={<IconCoins className="h-4 w-4 text-muted-foreground" />} label="Monto inicial" value={formatCurrency(current?.openingAmount ?? 0)} />
+                <CalcRow icon={<IconCircleArrowDown className="h-4 w-4 text-primary" />} label="Ventas en efectivo (+)" value={`+ ${formatCurrency(stats.ventasEfectivo)}`} valueClass="text-primary font-semibold" />
+                {stats.abonosCredito > 0 && (
+                  <CalcRow icon={<IconPlus className="h-4 w-4 text-primary" />} label="Abonos a crédito recibidos (+)" value={`+ ${formatCurrency(stats.abonosCredito)}`} valueClass="text-primary font-semibold" />
+                )}
+                {stats.otrosIngresos > 0 && (
+                  <CalcRow icon={<IconPlus className="h-4 w-4 text-primary" />} label="Otros ingresos en efectivo (+)" value={`+ ${formatCurrency(stats.otrosIngresos)}`} valueClass="text-primary font-semibold" />
+                )}
+                <CalcRow icon={<IconMinus className="h-4 w-4 text-rose-500" />} label="Egresos en efectivo (−)" value={`− ${formatCurrency(stats.egresos)}`} valueClass="text-rose-600 font-semibold" />
                 <Separator />
                 <div className="flex items-center justify-between pt-1">
                   <span className="font-semibold inline-flex items-center gap-2">
-                    <Coins className="h-4 w-4 text-primary" /> Monto esperado
+                    <IconCoins className="h-4 w-4 text-primary" /> Total efectivo esperado (a contar)
                   </span>
                   <span className="font-bold tabular-nums text-base">{formatCurrency(stats.esperado)}</span>
                 </div>
               </div>
+
+              {/* Bloque informativo de ventas a crédito */}
+              {stats.ventasCredito > 0 && (
+                <div className="rounded-lg border bg-muted/40 p-2.5 flex items-center justify-between text-xs text-foreground">
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <IconCreditCard className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span>Ventas a crédito del turno (por cobrar):</span>
+                  </span>
+                  <span className="font-bold tabular-nums text-sm shrink-0">{formatCurrency(stats.ventasCredito)}</span>
+                </div>
+              )}
 
               {/* Input declarado */}
               <div>
@@ -746,11 +803,11 @@ export default function CashView() {
               <div className={`rounded-lg border p-3 flex items-center justify-between ${diferenciaInfo(liveDiff).bg}`}>
                 <div className="flex items-center gap-2">
                   {Math.abs(liveDiff) < 0.5 ? (
-                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                    <IconCircleCheck className="h-5 w-5 text-primary" />
                   ) : liveDiff < 0 ? (
-                    <XCircle className="h-5 w-5 text-red-600" />
+                    <IconCircleX className="h-5 w-5 text-destructive" />
                   ) : (
-                    <AlertTriangle className="h-5 w-5 text-amber-600" />
+                    <IconAlertTriangle className="h-5 w-5 text-amber-500" />
                   )}
                   <span className="text-sm font-medium">Diferencia</span>
                 </div>
@@ -791,7 +848,7 @@ export default function CashView() {
             <Button
               onClick={closeCash}
               disabled={saving}
-              className="bg-amber-600 hover:bg-amber-700 text-white"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground"
             >
               {saving ? "Cerrando…" : "Confirmar cierre"}
             </Button>
@@ -804,7 +861,7 @@ export default function CashView() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5 text-primary" /> Detalle de sesión
+              <IconFileText className="h-5 w-5 text-primary" /> Detalle de sesión
             </DialogTitle>
             <DialogDescription>
               {detail && formatDateTime(detail.openedAt)}
@@ -830,17 +887,17 @@ export default function CashView() {
                 {detail.difference == null ? (
                   <span className="text-sm text-muted-foreground">—</span>
                 ) : Math.abs(detail.difference) < 0.5 ? (
-                  <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white gap-1">
-                    <CheckCircle2 className="h-3.5 w-3.5" /> Cuadrado
+                  <Badge className="bg-primary hover:bg-primary text-primary-foreground gap-1">
+                    <IconCircleCheck className="h-3.5 w-3.5" /> Cuadrado
                   </Badge>
                 ) : (
                   <Badge
                     variant="outline"
                     className={`gap-1 ${detail.difference < 0
-                      ? "border-red-300 text-red-600 dark:border-red-800"
+                      ? "border-destructive/30 text-destructive"
                       : "border-amber-300 text-amber-600 dark:border-amber-800"}`}
                   >
-                    {detail.difference < 0 ? <XCircle className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                    {detail.difference < 0 ? <IconCircleX className="h-3.5 w-3.5" /> : <IconAlertTriangle className="h-3.5 w-3.5" />}
                     {detail.difference < 0 ? "Faltante " : "Sobrante "}
                     {formatCurrency(Math.abs(detail.difference))}
                   </Badge>
@@ -870,30 +927,54 @@ export default function CashView() {
 // Subcomponentes
 // ---------------------------------------------------------------------------
 function SummaryStat({
-  label, value, tone,
-}: { label: string; value: string; tone?: "pos" | "neg" }) {
+  label, value, isNegative, isCredit,
+}: { label: string; value: string; isNegative?: boolean; isCredit?: boolean }) {
   return (
-    <div>
-      <p className="text-emerald-50/70 text-xs">{label}</p>
-      <p className={`font-semibold tabular-nums ${tone === "neg" ? "text-red-100" : "text-white"}`}>
+    <div className="bg-muted/40 p-3 rounded-xl border border-border/60 flex flex-col justify-between">
+      <p className="text-muted-foreground text-[10px] uppercase font-semibold tracking-wider truncate mb-1">
+        {label}
+      </p>
+      <p className={cn(
+        "font-bold text-sm sm:text-base tabular-nums truncate",
+        isNegative ? "text-rose-600 dark:text-rose-400" : isCredit ? "text-primary" : "text-foreground"
+      )}>
         {value}
       </p>
     </div>
   )
 }
 
-function TypeBadge({ type }: { type: string }) {
-  if (type === "venta")
-    return <Badge className="text-xs">Venta</Badge>
-  if (type === "ingreso")
+function TypeBadge({ type, method, concept }: { type: string; method?: string; concept?: string }) {
+  if (type === "venta") {
+    if (method === "credito") {
+      return (
+        <Badge variant="outline" className="text-[11px] font-normal border-border">
+          Venta Crédito
+        </Badge>
+      )
+    }
     return (
-      <Badge variant="outline" className="text-xs border-emerald-300 text-emerald-700 bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:bg-emerald-950/40">
-        Ingreso
+      <Badge variant="secondary" className="text-[11px] font-medium bg-primary/10 text-primary border border-primary/20">
+        Venta Efectivo
       </Badge>
     )
-  if (type === "egreso")
-    return <Badge variant="destructive" className="text-xs">Egreso</Badge>
-  return <Badge variant="outline" className="text-xs">{type}</Badge>
+  }
+  if (type === "ingreso") {
+    const isAbono = concept?.toLowerCase().includes("abono")
+    return (
+      <Badge variant="outline" className="text-[11px] font-normal text-foreground">
+        {isAbono ? "Abono Crédito" : "Ingreso"}
+      </Badge>
+    )
+  }
+  if (type === "egreso") {
+    return (
+      <Badge variant="outline" className="text-[11px] font-medium text-rose-600 dark:text-rose-400 border-rose-500/30">
+        Egreso
+      </Badge>
+    )
+  }
+  return <Badge variant="outline" className="text-[11px]">{type}</Badge>
 }
 
 function CalcRow({

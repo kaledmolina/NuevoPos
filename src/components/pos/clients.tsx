@@ -15,15 +15,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { toast } from "sonner"
 import {
-  Search, Plus, Pencil, Trash2, Users, User, Phone, Mail, FileText, Filter,
-} from "lucide-react"
+  IconSearch, IconPlus, IconPencil, IconUsers, IconUser, IconPhone, IconMail, IconFileText, IconFilter,
+} from "@tabler/icons-react"
 
 interface Client {
   id: string
@@ -51,7 +48,6 @@ export default function ClientsView() {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
-  const [deleteId, setDeleteId] = useState<string | null>(null)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -108,20 +104,6 @@ export default function ClientsView() {
     }
   }
 
-  const confirmDelete = async () => {
-    if (!deleteId) return
-    try {
-      await apiFetch(`/api/clients/${deleteId}`, { method: "DELETE" })
-      toast.success("Cliente eliminado")
-      load()
-      triggerRefresh()
-    } catch (e) {
-      toast.error((e as Error).message)
-    } finally {
-      setDeleteId(null)
-    }
-  }
-
   return (
     <div className="p-4 md:p-6 space-y-4">
       {/* Header / filtros */}
@@ -129,20 +111,20 @@ export default function ClientsView() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold flex items-center gap-2">
-              <Users className="h-5 w-5 text-primary" /> Clientes
+              <IconUsers className="h-5 w-5 text-primary" /> Clientes
             </h2>
             <p className="text-sm text-muted-foreground">
               {clients.length} cliente(s) · {totalSales} compra(s) registradas
             </p>
           </div>
           <Button size="sm" onClick={openNew}>
-            <Plus className="h-4 w-4 mr-1" /> Nuevo cliente
+            <IconPlus className="h-4 w-4 mr-1" /> Nuevo cliente
           </Button>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -167,20 +149,20 @@ export default function ClientsView() {
               hasActiveFilters ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
-                    <Users className="h-7 w-7" />
+                    <IconUsers className="h-7 w-7" />
                   </div>
                   <p className="text-sm font-medium">No se encontraron clientes</p>
                   <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
-                  <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+                  <Button size="sm" variant="outline" onClick={clearFilters}><IconFilter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
-                    <Users className="h-7 w-7" />
+                    <IconUsers className="h-7 w-7" />
                   </div>
                   <p className="text-sm font-medium">Aún no hay clientes</p>
                   <p className="text-xs text-muted-foreground mt-1 mb-4">Registra tu primer cliente para llevar el historial de ventas</p>
-                  <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Agregar primer cliente</Button>
+                  <Button size="sm" onClick={openNew}><IconPlus className="h-4 w-4 mr-1.5" /> Agregar primer cliente</Button>
                 </div>
               )
             ) : (
@@ -203,8 +185,8 @@ export default function ClientsView() {
                         <TableRow key={c.id}>
                           <TableCell>
                             <div className="font-medium flex items-center gap-2">
-                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                                <User className="h-4 w-4" />
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
+                                <IconUser className="h-4 w-4" />
                               </span>
                               <div className="min-w-0">
                                 <p className="truncate">{c.name}</p>
@@ -234,10 +216,7 @@ export default function ClientsView() {
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-1">
                               <Button size="icon" variant="ghost" className="h-8 w-8" title="Editar cliente" onClick={() => openEdit(c)} aria-label="Editar cliente">
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" title="Eliminar cliente" onClick={() => setDeleteId(c.id)} aria-label="Eliminar cliente">
-                                <Trash2 className="h-3.5 w-3.5" />
+                                <IconPencil className="h-3.5 w-3.5" />
                               </Button>
                             </div>
                           </TableCell>
@@ -261,20 +240,20 @@ export default function ClientsView() {
             {hasActiveFilters ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
-                  <Users className="h-7 w-7" />
+                  <IconUsers className="h-7 w-7" />
                 </div>
                 <p className="text-sm font-medium">No se encontraron clientes</p>
                 <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
-                <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+                <Button size="sm" variant="outline" onClick={clearFilters}><IconFilter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
-                  <Users className="h-7 w-7" />
+                  <IconUsers className="h-7 w-7" />
                 </div>
                 <p className="text-sm font-medium">Aún no hay clientes</p>
                 <p className="text-xs text-muted-foreground mt-1 mb-4">Registra tu primer cliente para llevar el historial de ventas</p>
-                <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Agregar primer cliente</Button>
+                <Button size="sm" onClick={openNew}><IconPlus className="h-4 w-4 mr-1.5" /> Agregar primer cliente</Button>
               </div>
             )}
           </div>
@@ -286,8 +265,8 @@ export default function ClientsView() {
                 <CardContent className="p-3 space-y-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2 min-w-0 flex-1">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                        <User className="h-4 w-4" />
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
+                        <IconUser className="h-4 w-4" />
                       </span>
                       <div className="min-w-0">
                         <p className="font-semibold leading-tight truncate">{c.name}</p>
@@ -300,19 +279,19 @@ export default function ClientsView() {
                   <div className="space-y-1 text-xs">
                     {c.document && (
                       <div className="flex items-center gap-2 text-muted-foreground">
-                        <FileText className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                        <IconFileText className="h-3.5 w-3.5 shrink-0 opacity-60" />
                         <span className="font-mono">{c.document}</span>
                       </div>
                     )}
                     {c.phone && (
                       <div className="flex items-center gap-2 text-muted-foreground">
-                        <Phone className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                        <IconPhone className="h-3.5 w-3.5 shrink-0 opacity-60" />
                         <span>{c.phone}</span>
                       </div>
                     )}
                     {c.email && (
                       <div className="flex items-center gap-2 text-muted-foreground">
-                        <Mail className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                        <IconMail className="h-3.5 w-3.5 shrink-0 opacity-60" />
                         <span className="truncate">{c.email}</span>
                       </div>
                     )}
@@ -320,12 +299,9 @@ export default function ClientsView() {
                       <p className="text-muted-foreground italic">Sin datos de contacto</p>
                     )}
                   </div>
-                  <div className="flex gap-2 pt-1 border-t">
-                    <Button size="sm" variant="outline" className="h-10 flex-1" onClick={() => openEdit(c)}>
-                      <Pencil className="h-4 w-4 mr-1.5" /> Editar
-                    </Button>
-                    <Button size="icon" variant="outline" className="h-10 w-10 text-destructive shrink-0" title="Eliminar cliente" onClick={() => setDeleteId(c.id)} aria-label="Eliminar cliente">
-                      <Trash2 className="h-4 w-4" />
+                  <div className="pt-1 border-t">
+                    <Button size="sm" variant="outline" className="h-10 w-full" onClick={() => openEdit(c)}>
+                      <IconPencil className="h-4 w-4 mr-1.5" /> Editar cliente
                     </Button>
                   </div>
                 </CardContent>
@@ -340,7 +316,7 @@ export default function ClientsView() {
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto scroll-thin">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-primary" />
+              <IconUsers className="h-5 w-5 text-primary" />
               {editing ? "Editar cliente" : "Nuevo cliente"}
             </DialogTitle>
             <DialogDescription>
@@ -414,27 +390,6 @@ export default function ClientsView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar cliente?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta acción no se puede deshacer. El cliente será eliminado permanentemente.
-              Si tiene ventas asociadas, deberá desvincularlas o anularlas primero.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Eliminar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }

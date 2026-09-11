@@ -29,9 +29,19 @@ import {
 } from "@/components/ui/table"
 import { toast } from "sonner"
 import {
-  Search, Plus, Pencil, Trash2, Package, AlertTriangle, CalendarClock,
-  Filter, Download, Tag, X, Check,
-} from "lucide-react"
+  IconSearch,
+  IconPlus,
+  IconPencil,
+  IconTrash,
+  IconBoxSeam,
+  IconAlertTriangle,
+  IconCalendarTime,
+  IconFilter,
+  IconDownload,
+  IconTag,
+  IconX,
+  IconCheck,
+} from "@tabler/icons-react"
 
 interface Category { id: string; name: string; _count?: { products: number } }
 interface Product {
@@ -56,7 +66,7 @@ interface Product {
 const emptyForm = {
   name: "", barcode: "", sku: "", categoryId: "", description: "",
   cost: "", price: "", stock: "", minStock: "5", unit: "unidad",
-  expirationDate: "", batch: "", location: "",
+  expirationDate: "", batch: "", location: "", active: true,
 }
 
 export default function ProductsView() {
@@ -76,7 +86,6 @@ export default function ProductsView() {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
-  const [deleteId, setDeleteId] = useState<string | null>(null)
   // Modal crear categoría rápida (desde el formulario de producto)
   const [catModalOpen, setCatModalOpen] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState("")
@@ -139,6 +148,7 @@ export default function ProductsView() {
       expirationDate: p.expirationDate ? new Date(p.expirationDate).toISOString().slice(0, 10) : "",
       batch: p.batch ?? "",
       location: p.location ?? "",
+      active: p.active ?? true,
     })
     setOpen(true)
   }
@@ -147,7 +157,7 @@ export default function ProductsView() {
     if (!form.name.trim()) return toast.error("El nombre es obligatorio")
     setSaving(true)
     try {
-      const payload = { ...form, active: true }
+      const payload = { ...form, active: form.active }
       if (editing) {
         await apiFetch(`/api/products/${editing.id}`, { method: "PATCH", body: JSON.stringify(payload) })
         toast.success("Producto actualizado")
@@ -162,20 +172,6 @@ export default function ProductsView() {
       toast.error((e as Error).message)
     } finally {
       setSaving(false)
-    }
-  }
-
-  const confirmDelete = async () => {
-    if (!deleteId) return
-    try {
-      await apiFetch(`/api/products/${deleteId}`, { method: "DELETE" })
-      toast.success("Producto eliminado")
-      load()
-      triggerRefresh()
-    } catch (e) {
-      toast.error((e as Error).message)
-    } finally {
-      setDeleteId(null)
     }
   }
 
@@ -269,7 +265,7 @@ export default function ProductsView() {
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-xl font-bold flex items-center gap-2"><Package className="h-5 w-5 text-primary" /> Inventario de productos</h2>
+            <h2 className="text-xl font-bold flex items-center gap-2"><IconBoxSeam className="h-5 w-5 text-primary" /> Inventario de productos</h2>
             <p className="text-sm text-muted-foreground">
               {filtered.length} productos{canSeeCosts ? ` · Valor en stock: ${formatCurrency(totalStockValue)}` : ""}
               {!canEdit && <span className="ml-2 text-xs text-muted-foreground">· Solo lectura</span>}
@@ -277,34 +273,36 @@ export default function ProductsView() {
           </div>
           {canEdit && (
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={exportCsv}><Download className="h-4 w-4 mr-1" /> Exportar</Button>
-              <Button variant="outline" size="sm" onClick={() => setCatManageOpen(true)}><Tag className="h-4 w-4 mr-1" /> Categorías</Button>
-              <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1" /> Nuevo producto</Button>
+              <Button variant="outline" size="sm" onClick={exportCsv}><IconDownload className="h-4 w-4 mr-1" /> Exportar</Button>
+              <Button variant="outline" size="sm" onClick={() => setCatManageOpen(true)}><IconTag className="h-4 w-4 mr-1" /> Categorías</Button>
+              <Button size="sm" onClick={openNew} data-tour="products-new-btn"><IconPlus className="h-4 w-4 mr-1" /> Nuevo producto</Button>
             </div>
           )}
           {!canEdit && (
-            <Button variant="outline" size="sm" onClick={exportCsv}><Download className="h-4 w-4 mr-1" /> Exportar</Button>
+            <Button variant="outline" size="sm" onClick={exportCsv}><IconDownload className="h-4 w-4 mr-1" /> Exportar</Button>
           )}
         </div>
 
-        <div className="flex flex-col gap-2">
-          <div className="relative w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por nombre o código…" className="pl-9 h-10" />
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3" data-tour="products-search-bar">
+          <div className="relative flex-1">
+            <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por nombre o código…" className="pl-9 h-10 bg-card" />
           </div>
-          <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scroll-thin">
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-[170px] h-10 shrink-0"><Filter className="h-3.5 w-3.5 mr-1" /><SelectValue placeholder="Categoría" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas las categorías</SelectItem>
-                {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Button variant={showLow ? "default" : "outline"} size="sm" className="h-10 shrink-0" onClick={() => setShowLow(!showLow)}>
-              <AlertTriangle className="h-3.5 w-3.5 mr-1" /> Stock bajo
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 scroll-thin">
+            <div className="w-[180px] shrink-0">
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="w-full h-10 bg-card"><IconFilter className="h-3.5 w-3.5 mr-1 text-muted-foreground" /><SelectValue placeholder="Categoría" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las categorías</SelectItem>
+                  {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button variant={showLow ? "default" : "outline"} size="sm" className="h-10 shrink-0 bg-card" onClick={() => setShowLow(!showLow)}>
+              <IconAlertTriangle className="h-3.5 w-3.5 mr-1" /> Stock bajo
             </Button>
-            <Button variant={showExpiring ? "default" : "outline"} size="sm" className="h-10 shrink-0" onClick={() => setShowExpiring(!showExpiring)}>
-              <CalendarClock className="h-3.5 w-3.5 mr-1" /> Por vencer
+            <Button variant={showExpiring ? "default" : "outline"} size="sm" className="h-10 shrink-0 bg-card" onClick={() => setShowExpiring(!showExpiring)}>
+              <IconCalendarTime className="h-3.5 w-3.5 mr-1" /> Por vencer
             </Button>
           </div>
         </div>
@@ -320,21 +318,21 @@ export default function ProductsView() {
               hasActiveFilters ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
-                    <Package className="h-7 w-7" />
+                    <IconBoxSeam className="h-7 w-7" />
                   </div>
                   <p className="text-sm font-medium">No se encontraron productos</p>
                   <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
-                  <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+                  <Button size="sm" variant="outline" onClick={clearFilters}><IconFilter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
-                    <Package className="h-7 w-7" />
+                    <IconBoxSeam className="h-7 w-7" />
                   </div>
                   <p className="text-sm font-medium">Aún no tienes productos</p>
                   <p className="text-xs text-muted-foreground mt-1 mb-4">Crea tu primer producto para empezar a vender</p>
                   {canEdit ? (
-                    <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Crear primer producto</Button>
+                    <Button size="sm" onClick={openNew}><IconPlus className="h-4 w-4 mr-1.5" /> Crear primer producto</Button>
                   ) : (
                     <p className="text-xs text-muted-foreground">Contacta al administrador para crear productos</p>
                   )}
@@ -361,7 +359,12 @@ export default function ProductsView() {
                       return (
                         <TableRow key={p.id}>
                           <TableCell>
-                            <div className="font-medium">{p.name}</div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-medium">{p.name}</span>
+                              {!p.active && (
+                                <Badge variant="secondary" className="text-[10px] text-muted-foreground">Inactivo</Badge>
+                              )}
+                            </div>
                             <div className="text-xs text-muted-foreground">{p.barcode ?? "Sin código"} · {p.unit}</div>
                           </TableCell>
                           <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{p.category?.name ?? "—"}</TableCell>
@@ -388,8 +391,7 @@ export default function ProductsView() {
                           <TableCell className="text-right">
                             {canEdit ? (
                               <div className="flex justify-end gap-1">
-                                <Button size="icon" variant="ghost" className="h-8 w-8" title="Editar producto" onClick={() => openEdit(p)}><Pencil className="h-3.5 w-3.5" /></Button>
-                                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" title="Eliminar producto" onClick={() => setDeleteId(p.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                                <Button size="icon" variant="ghost" className="h-8 w-8" title="Editar producto" onClick={() => openEdit(p)}><IconPencil className="h-3.5 w-3.5" /></Button>
                               </div>
                             ) : (
                               <span className="text-xs text-muted-foreground">—</span>
@@ -415,21 +417,21 @@ export default function ProductsView() {
             {hasActiveFilters ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
-                  <Package className="h-7 w-7" />
+                  <IconBoxSeam className="h-7 w-7" />
                 </div>
                 <p className="text-sm font-medium">No se encontraron productos</p>
                 <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
-                <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+                <Button size="sm" variant="outline" onClick={clearFilters}><IconFilter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
-                  <Package className="h-7 w-7" />
+                  <IconBoxSeam className="h-7 w-7" />
                 </div>
                 <p className="text-sm font-medium">Aún no tienes productos</p>
                 <p className="text-xs text-muted-foreground mt-1 mb-4">Crea tu primer producto para empezar a vender</p>
                 {canEdit ? (
-                  <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Crear primer producto</Button>
+                  <Button size="sm" onClick={openNew}><IconPlus className="h-4 w-4 mr-1.5" /> Crear primer producto</Button>
                 ) : (
                   <p className="text-xs text-muted-foreground">Contacta al administrador para crear productos</p>
                 )}
@@ -446,7 +448,12 @@ export default function ProductsView() {
                 <CardContent className="p-3 space-y-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className="font-medium leading-tight">{p.name}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-medium leading-tight">{p.name}</p>
+                        {!p.active && (
+                          <Badge variant="secondary" className="text-[10px] text-muted-foreground">Inactivo</Badge>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground font-mono">{p.barcode ?? "Sin código"} · {p.unit}</p>
                     </div>
                     {p.category?.name && (
@@ -468,7 +475,7 @@ export default function ProductsView() {
                   </div>
                   {p.expirationDate && (
                     <div className="flex items-center gap-2 flex-wrap">
-                      <CalendarClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <IconCalendarTime className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       <span className="text-xs text-muted-foreground">{formatDate(p.expirationDate)}</span>
                       <Badge
                         variant="outline"
@@ -479,12 +486,9 @@ export default function ProductsView() {
                     </div>
                   )}
                   {canEdit && (
-                    <div className="flex gap-2 pt-1 border-t">
-                      <Button size="sm" variant="outline" className="h-10 flex-1" onClick={() => openEdit(p)}>
-                        <Pencil className="h-4 w-4 mr-1.5" /> Editar
-                      </Button>
-                      <Button size="icon" variant="outline" className="h-10 w-10 text-destructive shrink-0" title="Eliminar producto" onClick={() => setDeleteId(p.id)} aria-label="Eliminar producto">
-                        <Trash2 className="h-4 w-4" />
+                    <div className="pt-1 border-t">
+                      <Button size="sm" variant="outline" className="h-10 w-full" onClick={() => openEdit(p)}>
+                        <IconPencil className="h-4 w-4 mr-1.5" /> Editar
                       </Button>
                     </div>
                   )}
@@ -528,7 +532,7 @@ export default function ProductsView() {
                   onClick={() => setCatModalOpen(true)}
                   title="Crear nueva categoría"
                 >
-                  <Plus className="h-4 w-4" />
+                  <IconPlus className="h-4 w-4" />
                 </Button>
               </div>
             </div>
@@ -549,21 +553,25 @@ export default function ProductsView() {
               <Input type="number" value={form.minStock} onChange={(e) => setForm({ ...form, minStock: e.target.value })} />
             </div>
             <div>
-              <Label>Unidad</Label>
+              <Label>Unidad de medida</Label>
               <Select value={form.unit} onValueChange={(v) => setForm({ ...form, unit: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {["unidad", "caja", "blister", "frasco", "tubo", "botella", "lata", "paquete", "ml", "g", "sobres"].map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                <SelectContent className="max-h-60 overflow-y-auto">
+                  {[
+                    "unidad", "kg", "g", "libra", "litro", "ml", "galón", "metro", "cm", "pulgada",
+                    "caja", "paquete", "bolsa", "botella", "lata", "frasco", "tubo", "blister",
+                    "sobres", "par", "docena", "rollo", "juego", "bulto", "panal", "combo", "servicio"
+                  ].map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label>Fecha de vencimiento</Label>
+              <Label>Fecha de vencimiento <span className="text-xs text-muted-foreground font-normal">(opcional)</span></Label>
               <Input type="date" value={form.expirationDate} onChange={(e) => setForm({ ...form, expirationDate: e.target.value })} />
             </div>
             <div>
-              <Label>Lote</Label>
-              <Input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} placeholder="L1234" />
+              <Label>Lote / Referencia <span className="text-xs text-muted-foreground font-normal">(opcional)</span></Label>
+              <Input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} placeholder="Ej: L1234 / Ref-A" />
             </div>
             <div>
               <Label>Ubicación</Label>
@@ -573,6 +581,20 @@ export default function ProductsView() {
               <Label>Descripción</Label>
               <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
             </div>
+            <div className="md:col-span-2 pt-2 border-t">
+              <label className="flex items-center gap-2 cursor-pointer text-sm font-medium">
+                <input
+                  type="checkbox"
+                  checked={form.active}
+                  onChange={(e) => setForm({ ...form, active: e.target.checked })}
+                  className="h-4 w-4 rounded border-input text-primary focus:ring-primary accent-primary"
+                />
+                <span>Producto activo (disponible en punto de venta y catálogo comercial)</span>
+              </label>
+              <p className="text-xs text-muted-foreground mt-1 ml-6">
+                Desactiva este producto para archivarlo sin alterar el historial contable, ventas pasadas ni compras registradas.
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
@@ -581,24 +603,11 @@ export default function ProductsView() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar producto?</AlertDialogTitle>
-            <AlertDialogDescription>Esta acción no se puede deshacer. El producto se eliminará del inventario.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Eliminar</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       {/* Modal crear categoría rápida (desde el formulario de producto) */}
       <Dialog open={catModalOpen} onOpenChange={setCatModalOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Tag className="h-4 w-4 text-primary" /> Nueva categoría</DialogTitle>
+            <DialogTitle className="flex items-center gap-2"><IconTag className="h-4 w-4 text-primary" /> Nueva categoría</DialogTitle>
             <DialogDescription>Crea una categoría personalizada para organizar tus productos.</DialogDescription>
           </DialogHeader>
           <div className="py-2">
@@ -615,7 +624,7 @@ export default function ProductsView() {
           <DialogFooter>
             <Button variant="outline" onClick={() => { setCatModalOpen(false); setNewCategoryName("") }}>Cancelar</Button>
             <Button onClick={createCategory} disabled={savingCategory}>
-              {savingCategory ? "Creando…" : <><Plus className="h-4 w-4 mr-1" /> Crear</>}
+              {savingCategory ? "Creando…" : <><IconPlus className="h-4 w-4 mr-1" /> Crear</>}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -625,7 +634,7 @@ export default function ProductsView() {
       <Dialog open={catManageOpen} onOpenChange={setCatManageOpen}>
         <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto scroll-thin">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Tag className="h-4 w-4 text-primary" /> Gestionar categorías</DialogTitle>
+            <DialogTitle className="flex items-center gap-2"><IconTag className="h-4 w-4 text-primary" /> Gestionar categorías</DialogTitle>
             <DialogDescription>Crea, edita o elimina las categorías de productos.</DialogDescription>
           </DialogHeader>
           <div className="py-2 space-y-3">
@@ -639,7 +648,7 @@ export default function ProductsView() {
                 onKeyDown={(e) => e.key === "Enter" && createCategory()}
               />
               <Button onClick={createCategory} disabled={savingCategory} className="h-10 shrink-0">
-                <Plus className="h-4 w-4 mr-1" /> Crear
+                <IconPlus className="h-4 w-4 mr-1" /> Crear
               </Button>
             </div>
             <Separator />
@@ -659,11 +668,11 @@ export default function ProductsView() {
                         autoFocus
                         onKeyDown={(e) => e.key === "Enter" && saveEditCategory()}
                       />
-                      <Button size="icon" variant="ghost" className="h-8 w-8 text-emerald-600" title="Guardar" onClick={saveEditCategory}>
-                        <Check className="h-4 w-4" />
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-blue-600" title="Guardar" onClick={saveEditCategory}>
+                        <IconCheck className="h-4 w-4" />
                       </Button>
                       <Button size="icon" variant="ghost" className="h-8 w-8" title="Cancelar" onClick={() => { setEditingCatId(null); setEditCatName("") }}>
-                        <X className="h-4 w-4" />
+                        <IconX className="h-4 w-4" />
                       </Button>
                     </>
                   ) : (
@@ -679,17 +688,19 @@ export default function ProductsView() {
                         title="Editar"
                         onClick={() => { setEditingCatId(c.id); setEditCatName(c.name) }}
                       >
-                        <Pencil className="h-3.5 w-3.5" />
+                        <IconPencil className="h-3.5 w-3.5" />
                       </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-destructive"
-                        title="Eliminar"
-                        onClick={() => setDeleteCatId(c.id)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      {(c._count?.products ?? 0) === 0 && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-destructive"
+                          title="Eliminar categoría vacía"
+                          onClick={() => setDeleteCatId(c.id)}
+                        >
+                          <IconTrash className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                     </>
                   )}
                 </div>

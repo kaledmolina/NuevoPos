@@ -34,9 +34,12 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { requireAdmin, logAudit, getSession } = await import("@/lib/auth")
+  const denied = requireAdmin(req)
+  if (denied) return denied
   try {
     const { id } = await params
     // Verificar si el proveedor tiene compras asociadas antes de borrar
@@ -44,11 +47,22 @@ export async function DELETE(
     if (purchasesCount > 0) {
       return NextResponse.json(
         {
-          error: `No se puede eliminar: el proveedor tiene ${purchasesCount} compra(s) asociada(s).`,
+          error: `Operación bloqueada: El proveedor tiene ${purchasesCount} compra(s) asociada(s). Para preservar la trazabilidad fiscal y contable, el registro no puede ser eliminado.`,
         },
         { status: 409 }
       )
     }
+    const session = getSession(req)
+    try {
+      await logAudit({
+        action: "supplier_delete",
+        entityType: "supplier",
+        entityId: id,
+        userName: session?.name ?? "Sistema",
+        role: session?.role ?? "admin",
+        detail: `Eliminación de proveedor id: ${id}`,
+      })
+    } catch { /* noop */ }
     await db.supplier.delete({ where: { id } })
     return NextResponse.json({ ok: true })
   } catch (e) {

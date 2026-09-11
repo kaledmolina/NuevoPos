@@ -109,14 +109,18 @@ model CreditAccount {
 
 // Movimientos de crédito: ventas a crédito y abonos
 model CreditMovement {
-  id          String   @id @default(cuid())
-  accountId   String
-  account     CreditAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  type        String   // "cargo" (venta a crédito) | "abono" (pago del cliente)
-  amount      Float
-  concept     String
-  saleId      String?  // referencia a la venta si es un cargo
-  createdAt   DateTime @default(now())
+  id               String   @id @default(cuid())
+  accountId        String
+  account          CreditAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  type             String   // "cargo" (venta a crédito) | "abono" (pago del cliente)
+  amount           Float
+  concept          String
+  method           String?  @default("efectivo") // efectivo, credito
+  reportedBy       String?  // Nombre del usuario/cajero que reportó el movimiento/abono
+  previousBalance  Float?   // Saldo antes del movimiento
+  remainingBalance Float?   // Saldo pendiente tras el movimiento
+  saleId           String?  // referencia a la venta si es un cargo
+  createdAt        DateTime @default(now())
 }
 
 model Supplier {

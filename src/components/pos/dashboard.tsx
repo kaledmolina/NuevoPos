@@ -10,9 +10,19 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
-  DollarSign, ShoppingCart, Package, AlertTriangle, CalendarClock,
-  TrendingUp, TrendingDown, Wallet, ArrowRight, Pill, Boxes, Activity,
-} from "lucide-react"
+  IconCurrencyDollar,
+  IconShoppingCart,
+  IconBoxSeam,
+  IconPackage,
+  IconAlertTriangle,
+  IconCalendarTime,
+  IconTrendingUp,
+  IconTrendingDown,
+  IconWallet,
+  IconArrowRight,
+  IconArrowUpRight,
+  IconActivity,
+} from "@tabler/icons-react"
 import {
   Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid,
 } from "recharts"
@@ -67,33 +77,61 @@ export default function DashboardView() {
   }
 
   const stats = [
-    { label: "Ventas de hoy", value: data.totalToday, sub: `${data.countToday} transacciones`, icon: ShoppingCart, tone: "primary" },
-    { label: "Ventas del mes", value: data.totalMonth, sub: "Acumulado mensual", icon: DollarSign, tone: "emerald" },
-    { label: "Valor de inventario", value: data.retailValue, sub: canSeeCosts ? `Costo: ${formatCurrencyCompact(data.stockValue)}` : "Valor de venta", icon: Boxes, tone: "amber" },
-    { label: "Caja actual", value: data.cashBalance, sub: data.cashOpen ? `${data.cashMovements} movimientos` : "Caja cerrada", icon: Wallet, tone: "teal" },
+    { label: "Ventas de hoy", value: data.totalToday, sub: `${data.countToday} transacciones`, icon: IconShoppingCart, isHero: true },
+    { label: "Ventas del mes", value: data.totalMonth, sub: "Acumulado mensual", icon: IconCurrencyDollar, isHero: false },
+    { label: "Valor inventario", value: data.retailValue, sub: canSeeCosts ? `Costo: ${formatCurrencyCompact(data.stockValue)}` : "Valor de venta", icon: IconPackage, isHero: false },
+    { label: "Caja actual", value: data.cashBalance, sub: data.cashOpen ? `${data.cashMovements} movimientos` : "Caja cerrada", icon: IconWallet, isHero: false },
   ]
 
   return (
     <div className="p-4 md:p-6 space-y-6">
-      {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 md:gap-4">
+      {/* KPIs estilo Donezo */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {stats.map((s) => {
           const Icon = s.icon
-          return (
-            <Card key={s.label} className="relative overflow-hidden">
-              <CardContent className="p-3 sm:p-4 md:p-5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-[11px] sm:text-xs md:text-sm text-muted-foreground truncate">{s.label}</p>
-                    <p className="text-lg sm:text-xl md:text-2xl font-bold mt-1 truncate">
+          if (s.isHero) {
+            return (
+              <Card key={s.label} className="relative overflow-hidden bg-primary text-primary-foreground border-none rounded-2xl shadow-md">
+                <CardContent className="p-4 sm:p-5 flex flex-col justify-between h-full">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs sm:text-sm font-medium text-primary-foreground/80 truncate">{s.label}</p>
+                    <div className="h-8 w-8 rounded-full bg-white/15 flex items-center justify-center text-white shrink-0">
+                      <IconArrowUpRight className="h-4 w-4" />
+                    </div>
+                  </div>
+                  <div className="mt-4">
+                    <p className="text-2xl sm:text-3xl font-extrabold tracking-tight truncate">
                       <span className="sm:hidden">{formatCurrencyCompact(s.value)}</span>
                       <span className="hidden sm:inline">{formatCurrency(s.value)}</span>
                     </p>
-                    <p className="text-[10px] sm:text-[11px] md:text-xs text-muted-foreground mt-1 truncate">{s.sub}</p>
+                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/20 text-white px-2.5 py-0.5 text-[10px] font-semibold">
+                      <Icon className="h-3 w-3" />
+                      <span>{s.sub}</span>
+                    </div>
                   </div>
-                  <div className="shrink-0 rounded-xl bg-primary/10 p-2 sm:p-2.5 text-primary">
-                    <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
+                </CardContent>
+              </Card>
+            )
+          }
+
+          return (
+            <Card key={s.label} className="relative overflow-hidden bg-card text-card-foreground border border-border/80 rounded-2xl shadow-xs hover:border-primary/40 transition-colors">
+              <CardContent className="p-4 sm:p-5 flex flex-col justify-between h-full">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground truncate">{s.label}</p>
+                  <div className="h-8 w-8 rounded-full border border-border/80 bg-muted/40 flex items-center justify-center text-muted-foreground shrink-0">
+                    <IconArrowUpRight className="h-4 w-4" />
                   </div>
+                </div>
+                <div className="mt-4">
+                  <p className="text-2xl sm:text-3xl font-extrabold tracking-tight truncate">
+                    <span className="sm:hidden">{formatCurrencyCompact(s.value)}</span>
+                    <span className="hidden sm:inline">{formatCurrency(s.value)}</span>
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-1.5 truncate flex items-center gap-1">
+                    <Icon className="h-3.5 w-3.5 text-muted-foreground/70" />
+                    <span>{s.sub}</span>
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -105,7 +143,7 @@ export default function DashboardView() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <AlertCard
           title="Stock bajo"
-          icon={AlertTriangle}
+          icon={IconAlertTriangle}
           tone="amber"
           count={data.lowStock.length}
           items={data.lowStock.map((p) => `${p.name} (${p.stock}/${p.minStock})`)}
@@ -113,7 +151,7 @@ export default function DashboardView() {
         />
         <AlertCard
           title="Por vencer (30 días)"
-          icon={CalendarClock}
+          icon={IconCalendarTime}
           tone="orange"
           count={data.expiringSoon.length}
           items={data.expiringSoon.map((p) => `${p.name} — ${expirationStatus(p.expirationDate).label}`)}
@@ -121,7 +159,7 @@ export default function DashboardView() {
         />
         <AlertCard
           title="Productos vencidos"
-          icon={AlertTriangle}
+          icon={IconAlertTriangle}
           tone="red"
           count={data.expired.length}
           items={data.expired.map((p) => `${p.name} — vencido hace ${Math.abs(daysUntil(p.expirationDate) ?? 0)}d`)}
@@ -131,9 +169,9 @@ export default function DashboardView() {
 
       {/* Gráfico + Top productos */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card className="lg:col-span-2">
+        <Card className="lg:col-span-2 rounded-2xl shadow-xs border-border/80">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base"><Activity className="h-4 w-4 text-primary" /> Ventas últimos 7 días</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-base font-bold"><IconActivity className="h-4 w-4 text-primary" /> Ventas últimos 7 días</CardTitle>
             <CardDescription>Tendencia de ingresos por día</CardDescription>
           </CardHeader>
           <CardContent>
@@ -142,27 +180,27 @@ export default function DashboardView() {
                 <AreaChart data={data.salesByDay}>
                   <defs>
                     <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="oklch(0.55 0.13 162)" stopOpacity={0.4} />
-                      <stop offset="100%" stopColor="oklch(0.55 0.13 162)" stopOpacity={0} />
+                      <stop offset="0%" stopColor="oklch(0.58 0.19 262)" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="oklch(0.58 0.19 262)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted/60" />
                   <XAxis dataKey="date" className="text-xs" tickLine={false} axisLine={false} />
                   <YAxis className="text-xs" tickLine={false} axisLine={false} width={50} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                   <Tooltip
                     formatter={(v: number) => formatCurrency(v)}
-                    contentStyle={{ borderRadius: 12, border: "1px solid var(--border)", fontSize: 12 }}
+                    contentStyle={{ borderRadius: 12, border: "1px solid var(--border)", fontSize: 12, backgroundColor: "var(--card)" }}
                   />
-                  <Area type="monotone" dataKey="total" stroke="oklch(0.55 0.13 162)" strokeWidth={2} fill="url(#g1)" />
+                  <Area type="monotone" dataKey="total" stroke="oklch(0.58 0.19 262)" strokeWidth={2.5} fill="url(#g1)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="rounded-2xl shadow-xs border-border/80">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base"><TrendingUp className="h-4 w-4 text-primary" /> Top productos del mes</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-base font-bold"><IconTrendingUp className="h-4 w-4 text-primary" /> Top productos del mes</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {data.topProducts.length === 0 && (
@@ -186,34 +224,34 @@ export default function DashboardView() {
 
       {/* Finanzas resumen + ventas recientes */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card>
+        <Card className="rounded-2xl shadow-xs border-border/80">
           <CardHeader>
-            <CardTitle className="text-base">Flujo del mes</CardTitle>
+            <CardTitle className="text-base font-bold">Flujo del mes</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex items-center justify-between rounded-lg bg-emerald-500/10 p-3">
-              <span className="flex items-center gap-2 text-sm"><TrendingUp className="h-4 w-4 text-emerald-600" /> Ingresos</span>
-              <span className="font-semibold text-emerald-700">{formatCurrency(data.incomeMonth)}</span>
+            <div className="flex items-center justify-between rounded-xl bg-primary/10 p-3">
+              <span className="flex items-center gap-2 text-sm font-medium"><IconTrendingUp className="h-4 w-4 text-primary" /> Ingresos</span>
+              <span className="font-bold text-primary">{formatCurrency(data.incomeMonth)}</span>
             </div>
-            <div className="flex items-center justify-between rounded-lg bg-red-500/10 p-3">
-              <span className="flex items-center gap-2 text-sm"><TrendingDown className="h-4 w-4 text-red-600" /> Egresos</span>
-              <span className="font-semibold text-red-700">{formatCurrency(data.expenseMonth)}</span>
+            <div className="flex items-center justify-between rounded-xl bg-rose-500/10 p-3">
+              <span className="flex items-center gap-2 text-sm font-medium"><IconTrendingDown className="h-4 w-4 text-rose-600" /> Egresos</span>
+              <span className="font-bold text-rose-700">{formatCurrency(data.expenseMonth)}</span>
             </div>
-            <div className="flex items-center justify-between rounded-lg border p-3">
+            <div className="flex items-center justify-between rounded-xl border border-border/80 p-3 bg-card">
               <span className="text-sm font-medium">Balance neto</span>
-              <span className={`font-bold ${data.incomeMonth - data.expenseMonth >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+              <span className={`font-bold ${data.incomeMonth - data.expenseMonth >= 0 ? "text-primary" : "text-rose-700"}`}>
                 {formatCurrency(data.incomeMonth - data.expenseMonth)}
               </span>
             </div>
-            <Button variant="outline" size="sm" className="w-full" onClick={() => setView("finance")}>
-              Ver ingresos y egresos <ArrowRight className="h-4 w-4" />
+            <Button variant="outline" size="sm" className="w-full rounded-xl" onClick={() => setView("finance")}>
+              Ver ingresos y egresos <IconArrowRight className="h-4 w-4" />
             </Button>
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-2">
+        <Card className="lg:col-span-2 rounded-2xl shadow-xs border-border/80">
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">Ventas recientes</CardTitle>
+            <CardTitle className="text-base font-bold">Ventas recientes</CardTitle>
             <Button variant="ghost" size="sm" onClick={() => setView("sales")}>Ver todas</Button>
           </CardHeader>
           <CardContent className="space-y-1 max-h-80 overflow-y-auto scroll-thin">
@@ -224,7 +262,7 @@ export default function DashboardView() {
               <div key={s.id} className="flex items-center justify-between gap-3 py-2 border-b last:border-0">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    <Pill className="h-4 w-4" />
+                    <IconBoxSeam className="h-4 w-4" />
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium">{s.invoiceNumber}</p>
@@ -241,8 +279,8 @@ export default function DashboardView() {
       {/* Inventario resumen */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="flex items-center gap-2 text-base"><Package className="h-4 w-4 text-primary" /> Inventario</CardTitle>
-          <Button variant="ghost" size="sm" onClick={() => setView("products")}>Gestionar <ArrowRight className="h-4 w-4" /></Button>
+          <CardTitle className="flex items-center gap-2 text-base"><IconBoxSeam className="h-4 w-4 text-primary" /> Inventario</CardTitle>
+          <Button variant="ghost" size="sm" onClick={() => setView("products")}>Gestionar <IconArrowRight className="h-4 w-4" /></Button>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
@@ -313,7 +351,7 @@ function AlertCard({
         )}
         {count > 0 && (
           <Button variant="ghost" size="sm" className="mt-2 -ml-2 text-xs" onClick={onAction}>
-            Ver detalles <ArrowRight className="h-3 w-3" />
+            Ver detalles <IconArrowRight className="h-3 w-3" />
           </Button>
         )}
       </CardContent>

@@ -82,7 +82,7 @@ const STATUS_LABEL: Record<string, string> = {
 function StatusBadge({ status }: { status: string }) {
   if (status === "recibida") {
     return (
-      <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800">
+      <Badge className="bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800">
         {STATUS_LABEL[status] ?? status}
       </Badge>
     )
@@ -293,7 +293,7 @@ export default function PurchasesView() {
             {purchases.length} compras registradas · Total del período: {formatCurrency(periodTotal)}
           </p>
         </div>
-        <Button size="sm" onClick={openNew}>
+        <Button size="sm" onClick={openNew} data-tour="purchases-new-btn">
           <Plus className="h-4 w-4 mr-1" /> Nueva compra
         </Button>
       </div>

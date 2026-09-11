@@ -15,15 +15,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { toast } from "sonner"
 import {
-  Search, Plus, Pencil, Trash2, Building2, Contact, Phone, FileText, Filter,
-} from "lucide-react"
+  IconSearch, IconPlus, IconPencil, IconBuilding, IconId, IconPhone, IconFileText, IconFilter,
+} from "@tabler/icons-react"
 
 interface Supplier {
   id: string
@@ -52,7 +49,6 @@ export default function SuppliersView() {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
-  const [deleteId, setDeleteId] = useState<string | null>(null)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -110,20 +106,6 @@ export default function SuppliersView() {
     }
   }
 
-  const confirmDelete = async () => {
-    if (!deleteId) return
-    try {
-      await apiFetch(`/api/suppliers/${deleteId}`, { method: "DELETE" })
-      toast.success("Proveedor eliminado")
-      load()
-      triggerRefresh()
-    } catch (e) {
-      toast.error((e as Error).message)
-    } finally {
-      setDeleteId(null)
-    }
-  }
-
   return (
     <div className="p-4 md:p-6 space-y-4">
       {/* Header / filtros */}
@@ -131,20 +113,20 @@ export default function SuppliersView() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold flex items-center gap-2">
-              <Building2 className="h-5 w-5 text-primary" /> Proveedores
+              <IconBuilding className="h-5 w-5 text-primary" /> Proveedores
             </h2>
             <p className="text-sm text-muted-foreground">
               {suppliers.length} proveedor(es) · {totalPurchases} compra(s) registradas
             </p>
           </div>
           <Button size="sm" onClick={openNew}>
-            <Plus className="h-4 w-4 mr-1" /> Nuevo proveedor
+            <IconPlus className="h-4 w-4 mr-1" /> Nuevo proveedor
           </Button>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -169,20 +151,20 @@ export default function SuppliersView() {
               hasActiveFilters ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
-                    <Building2 className="h-7 w-7" />
+                    <IconBuilding className="h-7 w-7" />
                   </div>
                   <p className="text-sm font-medium">No se encontraron proveedores</p>
                   <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
-                  <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+                  <Button size="sm" variant="outline" onClick={clearFilters}><IconFilter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
-                    <Building2 className="h-7 w-7" />
+                    <IconBuilding className="h-7 w-7" />
                   </div>
                   <p className="text-sm font-medium">Aún no hay proveedores</p>
                   <p className="text-xs text-muted-foreground mt-1 mb-4">Registra tu primer proveedor para asociarlo a las compras</p>
-                  <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Agregar primer proveedor</Button>
+                  <Button size="sm" onClick={openNew}><IconPlus className="h-4 w-4 mr-1.5" /> Agregar primer proveedor</Button>
                 </div>
               )
             ) : (
@@ -205,8 +187,8 @@ export default function SuppliersView() {
                         <TableRow key={s.id}>
                           <TableCell>
                             <div className="font-medium flex items-center gap-2">
-                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                                <Building2 className="h-4 w-4" />
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
+                                <IconBuilding className="h-4 w-4" />
                               </span>
                               <div className="min-w-0">
                                 <p className="truncate">{s.name}</p>
@@ -228,7 +210,7 @@ export default function SuppliersView() {
                           <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
                             {s.contactName ? (
                               <span className="inline-flex items-center gap-1.5">
-                                <Contact className="h-3.5 w-3.5 opacity-60" />
+                                <IconId className="h-3.5 w-3.5 opacity-60" />
                                 {s.contactName}
                               </span>
                             ) : "—"}
@@ -244,10 +226,7 @@ export default function SuppliersView() {
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-1">
                               <Button size="icon" variant="ghost" className="h-8 w-8" title="Editar proveedor" onClick={() => openEdit(s)} aria-label="Editar proveedor">
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" title="Eliminar proveedor" onClick={() => setDeleteId(s.id)} aria-label="Eliminar proveedor">
-                                <Trash2 className="h-3.5 w-3.5" />
+                                <IconPencil className="h-3.5 w-3.5" />
                               </Button>
                             </div>
                           </TableCell>
@@ -271,20 +250,20 @@ export default function SuppliersView() {
             {hasActiveFilters ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
-                  <Building2 className="h-7 w-7" />
+                  <IconBuilding className="h-7 w-7" />
                 </div>
                 <p className="text-sm font-medium">No se encontraron proveedores</p>
                 <p className="text-xs text-muted-foreground mt-1 mb-4">Prueba con otros filtros de búsqueda</p>
-                <Button size="sm" variant="outline" onClick={clearFilters}><Filter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
+                <Button size="sm" variant="outline" onClick={clearFilters}><IconFilter className="h-4 w-4 mr-1.5" /> Limpiar filtros</Button>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
-                  <Building2 className="h-7 w-7" />
+                  <IconBuilding className="h-7 w-7" />
                 </div>
                 <p className="text-sm font-medium">Aún no hay proveedores</p>
                 <p className="text-xs text-muted-foreground mt-1 mb-4">Registra tu primer proveedor para asociarlo a las compras</p>
-                <Button size="sm" onClick={openNew}><Plus className="h-4 w-4 mr-1.5" /> Agregar primer proveedor</Button>
+                <Button size="sm" onClick={openNew}><IconPlus className="h-4 w-4 mr-1.5" /> Agregar primer proveedor</Button>
               </div>
             )}
           </div>
@@ -296,8 +275,8 @@ export default function SuppliersView() {
                 <CardContent className="p-3 space-y-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2 min-w-0 flex-1">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                        <Building2 className="h-4 w-4" />
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
+                        <IconBuilding className="h-4 w-4" />
                       </span>
                       <div className="min-w-0">
                         <p className="font-semibold leading-tight truncate">{s.name}</p>
@@ -310,19 +289,19 @@ export default function SuppliersView() {
                   <div className="space-y-1 text-xs">
                     {s.document && (
                       <div className="flex items-center gap-2 text-muted-foreground">
-                        <FileText className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                        <IconFileText className="h-3.5 w-3.5 shrink-0 opacity-60" />
                         <span className="font-mono">{s.document}</span>
                       </div>
                     )}
                     {s.contactName && (
                       <div className="flex items-center gap-2 text-muted-foreground">
-                        <Contact className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                        <IconId className="h-3.5 w-3.5 shrink-0 opacity-60" />
                         <span className="truncate">{s.contactName}</span>
                       </div>
                     )}
                     {s.phone && (
                       <div className="flex items-center gap-2 text-muted-foreground">
-                        <Phone className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                        <IconPhone className="h-3.5 w-3.5 shrink-0 opacity-60" />
                         <span>{s.phone}</span>
                       </div>
                     )}
@@ -330,12 +309,9 @@ export default function SuppliersView() {
                       <p className="text-muted-foreground italic">Sin datos de contacto</p>
                     )}
                   </div>
-                  <div className="flex gap-2 pt-1 border-t">
-                    <Button size="sm" variant="outline" className="h-10 flex-1" onClick={() => openEdit(s)}>
-                      <Pencil className="h-4 w-4 mr-1.5" /> Editar
-                    </Button>
-                    <Button size="icon" variant="outline" className="h-10 w-10 text-destructive shrink-0" title="Eliminar proveedor" onClick={() => setDeleteId(s.id)} aria-label="Eliminar proveedor">
-                      <Trash2 className="h-4 w-4" />
+                  <div className="pt-1 border-t">
+                    <Button size="sm" variant="outline" className="h-10 w-full" onClick={() => openEdit(s)}>
+                      <IconPencil className="h-4 w-4 mr-1.5" /> Editar
                     </Button>
                   </div>
                 </CardContent>
@@ -350,7 +326,7 @@ export default function SuppliersView() {
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto scroll-thin">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5 text-primary" />
+              <IconBuilding className="h-5 w-5 text-primary" />
               {editing ? "Editar proveedor" : "Nuevo proveedor"}
             </DialogTitle>
             <DialogDescription>
@@ -432,27 +408,6 @@ export default function SuppliersView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar proveedor?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta acción no se puede deshacer. El proveedor será eliminado permanentemente.
-              Si tiene compras asociadas, deberá eliminarlas o anularlas primero.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Eliminar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }

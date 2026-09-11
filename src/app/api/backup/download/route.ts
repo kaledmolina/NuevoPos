@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
     const backupName = String(searchParams.get("name") ?? "").trim()
-    if (!backupName || !/^backup-[\w.-]+\.db$/.test(backupName)) {
+    if (!backupName || !/^(backup|upload|pre-restore)-[\w.-]+\.db$/.test(backupName)) {
       return NextResponse.json({ error: "Nombre de backup inválido" }, { status: 400 })
     }
     const dbPath = getDatabasePath()

@@ -19,8 +19,8 @@ export async function POST(req: NextRequest) {
     if (!backupName) {
       return NextResponse.json({ error: "Debes especificar el nombre del backup" }, { status: 400 })
     }
-    // Validar que el nombre sea seguro (solo backup-*.db)
-    if (!/^backup-[\w.-]+\.db$/.test(backupName)) {
+    // Validar que el nombre sea seguro
+    if (!/^(backup|upload|pre-restore)-[\w.-]+\.db$/.test(backupName)) {
       return NextResponse.json({ error: "Nombre de backup inválido" }, { status: 400 })
     }
 

@@ -61,21 +61,28 @@ export async function DELETE(
   if (denied) return denied
   try {
     const { id } = await params
-    await db.product.delete({ where: { id } })
+    const salesCount = await db.saleItem.count({ where: { productId: id } })
+    const purchasesCount = await db.purchaseItem.count({ where: { productId: id } })
     const session = getSession(req)
+
+    // Soft delete: Desactivar producto para proteger integridad histórica y contable
+    await db.product.update({ where: { id }, data: { active: false } })
     try {
       await logAudit({
-        action: "product_delete",
+        action: "product_deactivate",
         entityType: "product",
         entityId: id,
         userName: session?.name ?? "Sistema",
         role: session?.role ?? "admin",
-        detail: "Producto eliminado",
+        detail: `Producto desactivado/archivado (protegido contra borrado físico, ${salesCount} ventas y ${purchasesCount} compras)`,
       })
     } catch {
       // noop: logging failure must not break the operation
     }
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({
+      ok: true,
+      message: "Producto desactivado y archivado. Los registros contables e historial permanecen protegidos.",
+    })
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })
   }

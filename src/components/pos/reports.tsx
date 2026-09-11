@@ -57,15 +57,15 @@ const METHOD_LABEL: Record<string, string> = {
   credito: "Crédito",
 }
 
-// Paleta esmeralda (farmacia) — alineada con --chart-1..5
+// Paleta moderna (Índigo/Azul) — alineada con --chart-1..5
 const CHART_COLORS = [
-  "oklch(0.55 0.13 162)", // emerald primary
-  "oklch(0.65 0.15 200)", // teal
-  "oklch(0.7 0.16 130)",  // lime
-  "oklch(0.72 0.17 80)",  // amber
-  "oklch(0.62 0.2 25)",   // red-orange
-  "oklch(0.7 0.13 50)",   // soft orange
-  "oklch(0.62 0.03 165)", // gris-verde (Otros)
+  "oklch(0.55 0.20 260)", // indigo primary
+  "oklch(0.65 0.15 220)", // blue
+  "oklch(0.70 0.16 290)", // purple
+  "oklch(0.72 0.17 60)",  // amber
+  "oklch(0.62 0.20 25)",  // red-orange
+  "oklch(0.65 0.18 200)", // sky
+  "oklch(0.60 0.05 260)", // slate
 ]
 
 const RANGE_LABEL: Record<string, string> = {
@@ -129,14 +129,14 @@ export default function ReportsView() {
       value: formatCurrency(data.totalProfit),
       sub: "Margen sobre costo",
       icon: TrendingUp,
-      tone: "emerald" as const,
+      tone: "blue" as const,
     },
     {
       label: "# Ventas",
       value: formatNumber(data.salesCount),
       sub: `En ${data.range} días`,
       icon: ShoppingCart,
-      tone: "teal" as const,
+      tone: "indigo" as const,
     },
     {
       label: "Ticket promedio",
@@ -157,14 +157,14 @@ export default function ReportsView() {
       value: formatCurrency(netCash),
       sub: `${formatCurrency(data.totalIncome)} / ${formatCurrency(data.totalExpenses)}`,
       icon: Wallet,
-      tone: netCash >= 0 ? ("emerald" as const) : ("red" as const),
+      tone: netCash >= 0 ? ("blue" as const) : ("red" as const),
     },
   ]
 
   const toneMap: Record<string, string> = {
     primary: "bg-primary/10 text-primary",
-    emerald: "bg-emerald-500/10 text-emerald-600",
-    teal: "bg-teal-500/10 text-teal-600",
+    blue: "bg-blue-500/10 text-blue-600",
+    indigo: "bg-indigo-500/10 text-indigo-600",
     amber: "bg-amber-500/10 text-amber-600",
     orange: "bg-orange-500/10 text-orange-600",
     red: "bg-red-500/10 text-red-600",
@@ -183,23 +183,25 @@ export default function ReportsView() {
             <BarChart3 className="h-5 w-5 text-primary" /> Reportes
           </h2>
           <p className="text-sm text-muted-foreground">
-            Análisis de tu droguería · {RANGE_LABEL[range]}
+            Análisis y rendimiento de tu negocio · {RANGE_LABEL[range]}
           </p>
         </div>
-        <Select value={range} onValueChange={setRange}>
-          <SelectTrigger className="w-[180px] h-9">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="7">Últimos 7 días</SelectItem>
-            <SelectItem value="30">Últimos 30 días</SelectItem>
-            <SelectItem value="90">Últimos 90 días</SelectItem>
-          </SelectContent>
-        </Select>
+        <div data-tour="reports-period-selector">
+          <Select value={range} onValueChange={setRange}>
+            <SelectTrigger className="w-[180px] h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7">Últimos 7 días</SelectItem>
+              <SelectItem value="30">Últimos 30 días</SelectItem>
+              <SelectItem value="90">Últimos 90 días</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* ---------- KPIs ---------- */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4" data-tour="reports-kpi-grid">
         {kpis.map((k) => {
           const Icon = k.icon
           return (
@@ -243,8 +245,8 @@ export default function ReportsView() {
                 <AreaChart data={data.salesByDay} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="gradSales" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="oklch(0.55 0.13 162)" stopOpacity={0.45} />
-                      <stop offset="100%" stopColor="oklch(0.55 0.13 162)" stopOpacity={0} />
+                      <stop offset="0%" stopColor="oklch(0.58 0.19 262)" stopOpacity={0.45} />
+                      <stop offset="100%" stopColor="oklch(0.58 0.19 262)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
@@ -271,15 +273,15 @@ export default function ReportsView() {
                       background: "var(--popover)",
                       color: "var(--popover-foreground)",
                     }}
-                    cursor={{ stroke: "oklch(0.55 0.13 162)", strokeWidth: 1, strokeDasharray: "4 4" }}
+                    cursor={{ stroke: "oklch(0.58 0.19 262)", strokeWidth: 1, strokeDasharray: "4 4" }}
                   />
                   <Area
                     type="monotone"
                     dataKey="total"
-                    stroke="oklch(0.55 0.13 162)"
+                    stroke="oklch(0.58 0.19 262)"
                     strokeWidth={2.5}
                     fill="url(#gradSales)"
-                    dot={{ r: 3, fill: "oklch(0.55 0.13 162)", strokeWidth: 0 }}
+                    dot={{ r: 3, fill: "oklch(0.58 0.19 262)", strokeWidth: 0 }}
                     activeDot={{ r: 5 }}
                   />
                 </AreaChart>
@@ -456,7 +458,7 @@ export default function ReportsView() {
                         <TableCell className="text-right font-semibold text-sm">
                           {formatCurrency(p.total)}
                         </TableCell>
-                        <TableCell className="text-right text-sm text-emerald-600 hidden sm:table-cell">
+                        <TableCell className="text-right text-sm text-blue-600 hidden sm:table-cell">
                           {formatCurrency(p.profit)}
                         </TableCell>
                       </TableRow>
@@ -538,7 +540,7 @@ export default function ReportsView() {
               icon={Boxes}
               label="Unidades en stock"
               value={formatNumber(data.inventorySummary.stockUnits)}
-              tone="teal"
+              tone="sky"
             />
             <SummaryTile
               icon={DollarSign}
@@ -550,7 +552,7 @@ export default function ReportsView() {
               icon={TrendingUp}
               label="Valor en venta"
               value={formatCurrency(data.inventorySummary.stockRetailValue)}
-              tone="emerald"
+              tone="blue"
             />
           </div>
 
@@ -577,10 +579,10 @@ export default function ReportsView() {
 
           <div className="mt-4 flex items-center justify-between rounded-lg border bg-muted/30 p-3">
             <div className="flex items-center gap-2 text-sm">
-              <ArrowUpRight className="h-4 w-4 text-emerald-600" />
+              <ArrowUpRight className="h-4 w-4 text-blue-600" />
               <span className="text-muted-foreground">Margen potencial de inventario</span>
             </div>
-            <span className="font-bold text-emerald-700">
+            <span className="font-bold text-blue-700">
               {formatCurrency(data.inventorySummary.stockRetailValue - data.inventorySummary.stockCostValue)}
             </span>
           </div>
@@ -610,13 +612,13 @@ function SummaryTile({
   icon: React.ElementType
   label: string
   value: string
-  tone: "primary" | "teal" | "amber" | "emerald"
+  tone: "primary" | "sky" | "amber" | "blue"
 }) {
   const toneMap: Record<string, string> = {
     primary: "bg-primary/10 text-primary",
-    teal: "bg-teal-500/10 text-teal-600",
+    sky: "bg-sky-500/10 text-sky-600",
     amber: "bg-amber-500/10 text-amber-600",
-    emerald: "bg-emerald-500/10 text-emerald-600",
+    blue: "bg-blue-500/10 text-blue-600",
   }
   return (
     <div className="rounded-xl border bg-card p-4">

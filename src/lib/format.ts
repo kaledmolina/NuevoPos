@@ -83,3 +83,18 @@ export function nextInvoiceNumber(last?: string | null): string {
   const num = parseInt(last.slice(prefix.length), 10)
   return `${prefix}${String(num + 1).padStart(4, "0")}`
 }
+
+// Tiempo relativo legible: "hace unos segundos", "hace 3 min", etc.
+export function formatRelativeTime(date: Date | string | null | undefined): string {
+  if (!date) return "—"
+  const d = typeof date === "string" ? new Date(date) : date
+  const now = new Date()
+  const diffSec = Math.floor((now.getTime() - d.getTime()) / 1000)
+  if (diffSec < 45) return "hace unos segundos"
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 60) return `hace ${diffMin} min`
+  const diffHours = Math.floor(diffMin / 60)
+  if (diffHours < 24) return `hace ${diffHours} h`
+  return formatDate(d)
+}
+

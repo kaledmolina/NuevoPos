@@ -122,6 +122,19 @@ export async function DELETE(
       )
     }
 
+    // Proteger transacciones de cajas ya cerradas
+    if (existing.cashSessionId) {
+      const sess = await db.cashSession.findUnique({ where: { id: existing.cashSessionId } })
+      if (sess && sess.status === "cerrada") {
+        return NextResponse.json(
+          {
+            error: "Operación bloqueada: Este movimiento pertenece a un arqueo de caja ya cerrado y auditado. Los registros contables cerrados no pueden ser eliminados.",
+          },
+          { status: 409 }
+        )
+      }
+    }
+
     await db.transaction.delete({ where: { id } })
 
     // Eliminar el movimiento equivalente en caja si existe (por reference)

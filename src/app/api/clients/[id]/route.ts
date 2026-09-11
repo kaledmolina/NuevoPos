@@ -34,21 +34,43 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { requireAdmin, logAudit, getSession } = await import("@/lib/auth")
+  const denied = requireAdmin(req)
+  if (denied) return denied
   try {
     const { id } = await params
-    // Verificar si el cliente tiene ventas asociadas antes de borrar
-    const salesCount = await db.sale.count({ where: { clientId: id } })
-    if (salesCount > 0) {
+    const client = await db.client.findUnique({
+      where: { id },
+      include: { creditAccount: true, _count: { select: { sales: true } } },
+    })
+    if (!client) return NextResponse.json({ error: "Cliente no encontrado" }, { status: 404 })
+    if (client.isGeneric) {
+      return NextResponse.json({ error: "El cliente genérico no puede ser eliminado" }, { status: 403 })
+    }
+    if (client._count.sales > 0 || (client.creditAccount && client.creditAccount.balance > 0)) {
       return NextResponse.json(
         {
-          error: `No se puede eliminar: el cliente tiene ${salesCount} venta(s) asociada(s). Desvincule o anule las ventas primero.`,
+          error: "Operación bloqueada por seguridad: Este cliente posee historial de ventas o saldo de crédito pendiente. Para preservar la integridad contable, el registro no puede ser eliminado.",
         },
         { status: 409 }
       )
     }
+
+    const session = getSession(req)
+    try {
+      await logAudit({
+        action: "client_delete",
+        entityType: "client",
+        entityId: id,
+        userName: session?.name ?? "Sistema",
+        role: session?.role ?? "admin",
+        detail: `Intento de eliminación de cliente: ${client.name}`,
+      })
+    } catch { /* noop */ }
+
     await db.client.delete({ where: { id } })
     return NextResponse.json({ ok: true })
   } catch (e) {

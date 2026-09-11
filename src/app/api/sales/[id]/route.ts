@@ -41,36 +41,64 @@ export async function PATCH(
         })
       }
 
-      // 2. Reversar caja: eliminar la transacción de venta original.
-      const deleted = await tx.cashTransaction.deleteMany({
-        where: { reference: sale.id },
-      })
-      if (deleted.count === 0 && sale.cashSessionId) {
-        await tx.cashTransaction.deleteMany({
-          where: { cashSessionId: sale.cashSessionId, concept: `Venta ${sale.invoiceNumber}` },
-        })
-      }
+      // 2. Reversar caja:
+      // Si la venta fue en efectivo, registrar egreso por devolución del dinero al cliente
+      // de modo que en el arqueo de caja quede la trazabilidad exacta: (+Venta -Devolución = $0 neto).
+      if (sale.paymentMethod === "efectivo") {
+        const targetSession = sale.cashSessionId
+          ? await tx.cashSession.findUnique({ where: { id: sale.cashSessionId } })
+          : null
 
-      // 3. Si la venta fue en efectivo y la caja sigue abierta, registrar egreso (reintegro)
-      if (sale.paymentMethod === "efectivo" && sale.cashSessionId) {
-        const sessionStillOpen = await tx.cashSession.findUnique({
-          where: { id: sale.cashSessionId },
-        })
-        if (sessionStillOpen && sessionStillOpen.status === "abierta") {
+        const activeSession = (targetSession && targetSession.status === "abierta")
+          ? targetSession
+          : await tx.cashSession.findFirst({ where: { status: "abierta" } })
+
+        if (activeSession) {
           await tx.cashTransaction.create({
             data: {
-              cashSessionId: sale.cashSessionId,
+              cashSessionId: activeSession.id,
               type: "egreso",
               amount: sale.total,
-              concept: `Anulación venta ${sale.invoiceNumber}`,
+              concept: `Anulación y reintegro venta #${sale.invoiceNumber}`,
               method: "efectivo",
               reference: sale.id,
             },
           })
         }
+      } else if (sale.paymentMethod !== "credito") {
+        // Si fue tarjeta o transferencia, eliminar la transacción del arqueo para no alterar totales electrónicos
+        await tx.cashTransaction.deleteMany({
+          where: { reference: sale.id },
+        })
       }
 
-      // 4. Marcar la venta como anulada
+      // 4. Si la venta fue a crédito, reversar el saldo en la cuenta del cliente
+      if (sale.paymentMethod === "credito" && sale.clientId) {
+        const creditAccount = await tx.creditAccount.findUnique({ where: { clientId: sale.clientId } })
+        if (creditAccount) {
+          const prevBal = creditAccount.balance
+          const nextBal = Math.max(0, prevBal - sale.total)
+          await tx.creditAccount.update({
+            where: { id: creditAccount.id },
+            data: { balance: { decrement: sale.total } },
+          })
+          await tx.creditMovement.create({
+            data: {
+              accountId: creditAccount.id,
+              type: "abono",
+              amount: sale.total,
+              concept: `Anulación venta a crédito #${sale.invoiceNumber}`,
+              method: "credito",
+              reportedBy: sess?.name ?? "admin",
+              previousBalance: prevBal,
+              remainingBalance: nextBal,
+              saleId: sale.id,
+            },
+          })
+        }
+      }
+
+      // 5. Marcar la venta como anulada
       await tx.sale.update({ where: { id }, data: { status: "anulada" } })
       return sale
     })

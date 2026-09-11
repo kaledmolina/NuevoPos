@@ -23,6 +23,12 @@ export async function GET(req: NextRequest) {
     ]
   }
   if (categoryId) where.categoryId = categoryId
+  const activeParam = searchParams.get("active")
+  if (activeParam === "1") {
+    where.active = true
+  } else if (activeParam === "0") {
+    where.active = false
+  }
 
   let products = await db.product.findMany({
     where,

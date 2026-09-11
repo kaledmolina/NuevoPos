@@ -77,7 +77,7 @@ export default function SetupChecklist() {
       done: state.hasProduct,
       icon: Package,
       title: "Registra un producto",
-      desc: "Con precio, stock y vencimiento",
+      desc: "Con precio, stock y categoría",
       action: () => setView("products"),
       actionLabel: "Nuevo producto",
     },
@@ -109,7 +109,7 @@ export default function SetupChecklist() {
             </div>
             <div>
               <h3 className="font-bold text-sm sm:text-base">
-                {completed ? "¡Configuración completa! 🎉" : "Configura tu droguería"}
+                {completed ? "¡Configuración completa! 🎉" : "Configura tu negocio"}
               </h3>
               <p className="text-xs text-muted-foreground">
                 {completed ? "Ya puedes operar el sistema con normalidad." : `${completedCount} de 4 pasos completados`}
@@ -162,7 +162,7 @@ export default function SetupChecklist() {
 
         {completed && (
           <div className="mt-3 flex items-center justify-between">
-            <p className="text-xs text-emerald-600 font-medium">✓ Todo listo para vender</p>
+            <p className="text-xs text-blue-600 font-medium">✓ Todo listo para vender</p>
             <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={dismiss}>Ocultar</Button>
           </div>
         )}

@@ -1,28 +1,47 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireAdmin, getSession, logAudit } from "@/lib/auth"
+import { getDatabasePath } from "@/lib/db"
+import fs from "fs"
+import path from "path"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
 
-// POST /api/reset — borra TODOS los datos de prueba y deja el sistema limpio.
-// Solo mantiene los usuarios (admin y vendedor) para poder seguir accediendo.
-// Solo admin puede ejecutarlo. Requiere confirmación con el nombre de la tienda.
+// POST /api/reset — Puesta a punto: Limpia datos de prueba / demo y deja el sistema listo para producción.
+// Crea automáticamente un backup preventivo antes de eliminar datos de prueba.
+// Conserva las cuentas de usuario (admin y vendedor) y configuraciones básicas.
 export async function POST(req: NextRequest) {
   const denied = requireAdmin(req)
   if (denied) return denied
   const session = getSession(req)
+
   try {
     const body = await req.json().catch(() => ({}))
-    // Doble confirmación: el cliente debe enviar { confirm: "BORRAR" }
-    if (body.confirm !== "BORRAR") {
+    const confirmText = String(body.confirm ?? "").trim().toUpperCase()
+
+    if (confirmText !== "BORRAR" && confirmText !== "BORRAR DEMO" && confirmText !== "LIMPIAR DEMO") {
       return NextResponse.json(
-        { error: "Confirmación requerida. Envía { confirm: 'BORRAR' } para confirmar." },
+        { error: "Confirmación requerida. Debe confirmar escribiendo 'BORRAR' o 'BORRAR DEMO'." },
         { status: 400 }
       )
     }
 
-    // Borrar en orden respetando las relaciones
+    // 1. Crear respaldo preventivo automático antes de cualquier eliminación
+    try {
+      const dbPath = getDatabasePath()
+      if (fs.existsSync(dbPath)) {
+        const backupDir = path.join(path.dirname(dbPath), "backups")
+        if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true })
+        const ts = new Date().toISOString().replace(/[:.]/g, "-")
+        const backupPath = path.join(backupDir, `backup-pre-limpieza-demo-${ts}.db`)
+        fs.copyFileSync(dbPath, backupPath)
+      }
+    } catch (errBackup) {
+      console.warn("Advertencia: No se pudo generar copia automática previa al reset:", errBackup)
+    }
+
+    // 2. Limpiar registros de prueba en orden respetando claves foráneas
     await db.creditMovement.deleteMany()
     await db.creditAccount.deleteMany()
     await db.cashTransaction.deleteMany()
@@ -37,39 +56,26 @@ export async function POST(req: NextRequest) {
     await db.category.deleteMany()
     await db.client.deleteMany()
     await db.supplier.deleteMany()
-    await db.auditLog.deleteMany()
-    await db.setting.deleteMany()
 
-    // Restaurar settings por defecto
-    await db.setting.createMany({
-      data: [
-        { key: "store_name", value: "Droguería La Salud" },
-        { key: "store_nit", value: "" },
-        { key: "store_phone", value: "" },
-        { key: "store_address", value: "" },
-        { key: "tax_rate", value: "0" },
-        { key: "currency", value: "COP" },
-      ],
-    })
-
-    // Recrear el cliente genérico
+    // 3. Recrear el Cliente Genérico para que el POS pueda seguir facturando ventas rápidas
     await db.client.create({
       data: { name: "Cliente Genérico", isGeneric: true },
     })
 
+    // 4. Registrar auditoría inmutable de la puesta a punto
     try {
       await logAudit({
-        action: "system_reset",
+        action: "demo_data_reset",
         entityType: "system",
         userName: session?.name ?? "admin",
         role: session?.role ?? "admin",
-        detail: "Sistema reseteado: todos los datos de prueba eliminados",
+        detail: "Datos de demostración y pruebas purgados por el administrador. Sistema listo para facturación real. Respaldo previo creado.",
       })
     } catch { /* noop */ }
 
     return NextResponse.json({
       ok: true,
-      message: "Sistema reseteado. Se eliminaron todos los datos de prueba. Los usuarios se conservaron.",
+      message: "Datos de prueba eliminados exitosamente. El sistema está limpio y listo para empezar a registrar ventas reales. Se guardó una copia de respaldo previa.",
     })
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })

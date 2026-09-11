@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useAppStore } from "@/lib/store"
 import { type Role, ROLE_CONFIG } from "@/lib/permissions"
 import { apiFetch } from "@/lib/api"
@@ -8,9 +8,34 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
-import { Pill, Shield, ShoppingCart, ArrowRight, Check, KeyRound, Lock, Info, Loader2, User, BookOpen } from "lucide-react"
+import {
+  Shield, ShoppingCart, ArrowRight, Check, KeyRound, Lock, Info,
+  Loader2, User, BookOpen, Store, Pill, Hammer, Shirt, ShoppingBag,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { ThemeToggle } from "@/components/theme-toggle"
+
+function getRubroIcon(rubro: string) {
+  switch (rubro?.toLowerCase()) {
+    case "tienda":
+    case "minimarket":
+    case "abarrotes":
+      return Store
+    case "ferreteria":
+    case "materiales":
+      return Hammer
+    case "ropa":
+    case "boutique":
+    case "calzado":
+      return Shirt
+    case "drogueria":
+    case "farmacia":
+      return Pill
+    default:
+      return ShoppingBag
+  }
+}
 
 export default function LoginScreen() {
   const login = useAppStore((s) => s.login)
@@ -19,6 +44,17 @@ export default function LoginScreen() {
   const [name, setName] = useState("")
   const [pin, setPin] = useState("")
   const [loading, setLoading] = useState(false)
+  const [storeName, setStoreName] = useState("Sistema POS")
+  const [storeRubro, setStoreRubro] = useState("drogueria")
+
+  useEffect(() => {
+    apiFetch<Record<string, string>>("/api/settings")
+      .then((s) => {
+        if (s.store_name) setStoreName(s.store_name)
+        if (s.store_rubro) setStoreRubro(s.store_rubro)
+      })
+      .catch(() => {})
+  }, [])
 
   const selectRole = (r: Role) => {
     setRole(r)
@@ -40,7 +76,7 @@ export default function LoginScreen() {
     setLoading(true)
     try {
       await login(name.trim(), pin.trim())
-      toast.success(`Bienvenido`)
+      toast.success(`Bienvenido al sistema`)
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
@@ -48,22 +84,29 @@ export default function LoginScreen() {
     }
   }
 
+  const StoreIcon = getRubroIcon(storeRubro)
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-gradient-to-br from-emerald-50 via-white to-teal-50">
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-gradient-to-br from-background via-muted/30 to-background relative">
+      {/* Botón flotante para cambiar tema */}
+      <div className="absolute top-4 right-4 z-20">
+        <ThemeToggle />
+      </div>
+
       <div className="w-full max-w-md">
         {/* Encabezado */}
         <div className="text-center mb-6">
           <div className="inline-flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-xl shadow-primary/25 mb-4">
-            <Pill className="h-8 w-8 sm:h-10 sm:w-10" />
+            <StoreIcon className="h-8 w-8 sm:h-10 sm:w-10" />
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Droguería La Salud</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{storeName}</h1>
           <p className="text-sm sm:text-base text-foreground/70 mt-2 flex items-center justify-center gap-1.5 font-medium">
-            <Lock className="h-3.5 w-3.5" /> Sistema POS · Acceso restringido
+            <Lock className="h-3.5 w-3.5" /> Sistema POS · Acceso Seguro
           </p>
         </div>
 
         {/* Tarjeta principal del formulario */}
-        <Card className="shadow-lg border-border/60">
+        <Card className="shadow-lg border-border/80 rounded-2xl">
           <CardContent className="p-5 sm:p-7 space-y-6">
             {/* Paso 1: Rol */}
             <div className="space-y-3">
@@ -131,7 +174,7 @@ export default function LoginScreen() {
                     type="password"
                     inputMode="numeric"
                     value={pin}
-                    onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                    onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 8))}
                     placeholder="••••"
                     autoComplete="current-password"
                     className="h-12 pl-10 text-base tracking-[0.4em]"
@@ -149,14 +192,14 @@ export default function LoginScreen() {
                 {loading ? (
                   <><Loader2 className="h-5 w-5 mr-2 animate-spin" /> Verificando…</>
                 ) : (
-                  <>Ingresar <ArrowRight className="h-4 w-4 ml-2" /></>
+                  <>Ingresar al POS <ArrowRight className="h-4 w-4 ml-2" /></>
                 )}
               </Button>
             </div>
           </CardContent>
         </Card>
 
-        {/* Credenciales demo — sutil, debajo del formulario */}
+        {/* Credenciales demo */}
         <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
           <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
           <div className="text-xs text-foreground/70 space-y-1.5 w-full">
@@ -179,20 +222,20 @@ export default function LoginScreen() {
                 <p className="text-muted-foreground">vendedor / <span className="font-mono">0000</span></p>
               </button>
             </div>
-            <p className="text-[10px] text-muted-foreground text-center pt-0.5">Toca para rellenar automáticamente</p>
+            <p className="text-[10px] text-muted-foreground text-center pt-0.5">Toca una tarjeta para autocompletar</p>
           </div>
         </div>
 
-        {/* Permisos del rol seleccionado — colapsable sutil */}
+        {/* Permisos del rol seleccionado */}
         {role && (
           <div className="mt-3 rounded-xl border bg-card px-4 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-              {ROLE_CONFIG[role].label} puede:
+              {ROLE_CONFIG[role].label} tiene acceso a:
             </p>
             <div className="flex flex-wrap gap-x-4 gap-y-1">
               {(role === "admin"
-                ? ["Inventario", "Compras", "Clientes", "Proveedores", "Finanzas", "Reportes", "Anular ventas"]
-                : ["Vender", "Abrir/caja", "Arqueo", "Ver ventas", "Inventario (lectura)"]
+                ? ["Inventario", "Compras", "Clientes", "Proveedores", "Finanzas", "Reportes", "Backups", "Anular ventas"]
+                : ["Punto de Venta", "Apertura de caja", "Arqueo de turno", "Ver ventas", "Consultar productos"]
               ).map((p) => (
                 <span key={p} className="flex items-center gap-1 text-xs text-foreground/70">
                   <Check className="h-3 w-3 text-primary shrink-0" /> {p}
@@ -209,7 +252,7 @@ export default function LoginScreen() {
             onClick={() => setShowLanding(true)}
             className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 font-medium transition-colors"
           >
-            <BookOpen className="h-4 w-4" /> Ver guía del sistema
+            <BookOpen className="h-4 w-4" /> Conoce todas las funciones y tipos de negocio
           </button>
         </div>
       </div>
