@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { daysUntil } from "@/lib/format"
+import { requireBranchAccess } from "@/lib/branch"
 
 export const dynamic = "force-dynamic"
 
@@ -8,9 +9,14 @@ export const dynamic = "force-dynamic"
 // GET /api/reports?range=7|30|90 (días, por defecto 30)
 export async function GET(req: NextRequest) {
   try {
+    const branchAccess = await requireBranchAccess(req)
+    if (branchAccess instanceof NextResponse) return branchAccess
+    const { branchId } = branchAccess
+
     const { searchParams } = new URL(req.url)
     const rawRange = Number(searchParams.get("range") ?? 30)
     const days = [7, 30, 90].includes(rawRange) ? rawRange : 30
+    const branchFilter = branchId ? { branchId } : {}
 
     // Ventana de tiempo: desde hace (days-1) días a las 00:00 hasta hoy 23:59:59
     const end = new Date()
@@ -22,20 +28,20 @@ export async function GET(req: NextRequest) {
     // Cargamos todo lo necesario en paralelo
     const [sales, saleItems, purchases, transactions, products] = await Promise.all([
       db.sale.findMany({
-        where: { createdAt: { gte: start, lte: end }, status: "completada" },
+        where: { createdAt: { gte: start, lte: end }, status: "completada", ...branchFilter },
         include: { client: true },
       }),
       db.saleItem.findMany({
-        where: { sale: { createdAt: { gte: start, lte: end }, status: "completada" } },
+        where: { sale: { createdAt: { gte: start, lte: end }, status: "completada", ...branchFilter } },
         include: { product: { include: { category: true } } },
       }),
       db.purchase.findMany({
-        where: { createdAt: { gte: start, lte: end } },
+        where: { createdAt: { gte: start, lte: end }, ...branchFilter },
       }),
       db.transaction.findMany({
-        where: { date: { gte: start, lte: end } },
+        where: { date: { gte: start, lte: end }, ...branchFilter },
       }),
-      db.product.findMany(),
+      db.product.findMany({ where: branchFilter }),
     ])
 
     // ---------- KPIs principales ----------

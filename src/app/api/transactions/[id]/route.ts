@@ -11,6 +11,7 @@ export async function PATCH(
 ) {
   const denied = requireAdmin(req)
   if (denied) return denied
+  const session = getSession(req)
   try {
     const { id } = await params
     const body = await req.json()
@@ -21,6 +22,17 @@ export async function PATCH(
         { error: "Movimiento no encontrado" },
         { status: 404 }
       )
+    }
+
+    if (session && existing.branchId) {
+      const { canUserAccessBranch } = await import("@/lib/branch")
+      const hasAccess = await canUserAccessBranch(session.uid, existing.branchId)
+      if (!hasAccess) {
+        return NextResponse.json(
+          { error: "Acceso denegado: No tienes autorización para modificar movimientos de esta sede." },
+          { status: 403 }
+        )
+      }
     }
 
     const data: Record<string, unknown> = {}
@@ -85,7 +97,6 @@ export async function PATCH(
       data,
     })
 
-    const session = getSession(req)
     try {
       await logAudit({
         action: "transaction_update",
@@ -122,6 +133,18 @@ export async function DELETE(
       )
     }
 
+    const session = getSession(req)
+    if (session && existing.branchId) {
+      const { canUserAccessBranch } = await import("@/lib/branch")
+      const hasAccess = await canUserAccessBranch(session.uid, existing.branchId)
+      if (!hasAccess) {
+        return NextResponse.json(
+          { error: "Acceso denegado: No tienes autorización para eliminar movimientos de esta sede." },
+          { status: 403 }
+        )
+      }
+    }
+
     // Proteger transacciones de cajas ya cerradas
     if (existing.cashSessionId) {
       const sess = await db.cashSession.findUnique({ where: { id: existing.cashSessionId } })
@@ -144,7 +167,6 @@ export async function DELETE(
       })
     }
 
-    const session = getSession(req)
     try {
       await logAudit({
         action: "transaction_delete",

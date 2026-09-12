@@ -1,13 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireAuth, getSession, logAudit } from "@/lib/auth"
+import { getSession, logAudit } from "@/lib/auth"
+import { requireBranchAccess } from "@/lib/branch"
 
 export const dynamic = "force-dynamic"
 
-// Sesión de caja abierta actualmente
-export async function GET() {
+// Sesión de caja abierta actualmente en la sede
+export async function GET(req: NextRequest) {
+  const branchAccess = await requireBranchAccess(req)
+  if (branchAccess instanceof NextResponse) return branchAccess
+  const { branchId } = branchAccess
+
   const session = await db.cashSession.findFirst({
-    where: { status: "abierta" },
+    where: {
+      status: "abierta",
+      ...(branchId ? { branchId } : {}),
+    },
     include: { transactions: { orderBy: { createdAt: "desc" } } },
     orderBy: { openedAt: "desc" },
   })
@@ -16,26 +24,33 @@ export async function GET() {
 
 // Abrir caja
 export async function POST(req: NextRequest) {
-  const auth = requireAuth(req)
-  if (auth instanceof NextResponse) return auth
+  const branchAccess = await requireBranchAccess(req)
+  if (branchAccess instanceof NextResponse) return branchAccess
+  const { branchId, session: authSession } = branchAccess
+
   try {
     const body = await req.json()
-    const existing = await db.cashSession.findFirst({ where: { status: "abierta" } })
+    const existing = await db.cashSession.findFirst({
+      where: {
+        status: "abierta",
+        ...(branchId ? { branchId } : {}),
+      },
+    })
     if (existing) {
       return NextResponse.json(
-        { error: "Ya hay una caja abierta. Ciérrala primero." },
+        { error: "Ya hay una caja abierta en esta sede. Ciérrala primero." },
         { status: 400 }
       )
     }
     const session = await db.cashSession.create({
       data: {
+        branchId: branchId || null,
         openingAmount: Number(body.openingAmount) || 0,
         status: "abierta",
-        openedBy: body.openedBy || "Cajero",
+        openedBy: body.openedBy || authSession.name || "Cajero",
       },
       include: { transactions: true },
     })
-    const authSession = getSession(req)
     try {
       await logAudit({
         action: "cash_open",

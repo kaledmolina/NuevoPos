@@ -21,6 +21,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "La sesión ya está cerrada" }, { status: 400 })
     }
 
+    if (session.branchId) {
+      const { canUserAccessBranch } = await import("@/lib/branch")
+      const hasAccess = await canUserAccessBranch(auth.session.uid, session.branchId)
+      if (!hasAccess) {
+        return NextResponse.json(
+          { error: "Acceso denegado: No tienes autorización para cerrar la caja de esta sede." },
+          { status: 403 }
+        )
+      }
+    }
+
     // Calcular monto esperado: apertura + ingresos(efectivo) - egresos(efectivo) + ventas efectivo
     let expected = session.openingAmount
     for (const t of session.transactions) {

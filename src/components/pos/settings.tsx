@@ -57,6 +57,7 @@ import {
   IconCalendarTime,
   IconReceipt2,
   IconUserCheck,
+  IconUsers,
   IconEye,
   IconEyeOff,
   IconUser,
@@ -742,6 +743,28 @@ export default function SettingsView() {
 
         {/* ==================== PESTAÑA 2: SEGURIDAD & AUDITORÍA ==================== */}
         <TabsContent value="security" className="space-y-4 sm:space-y-5">
+          {/* Banner de Acceso a Gestión de Personal y Sedes */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 sm:p-4 rounded-2xl border bg-primary/5 border-primary/20">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <IconUsers className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-xs sm:text-sm font-bold text-foreground">Gestión Completa de Personal & Sedes</p>
+                <p className="text-[11px] sm:text-xs text-muted-foreground">
+                  Registra múltiples vendedores, administradores adicionales y gestiona hasta 3 sedes físicas.
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => setView("personal")}
+              className="h-8 rounded-xl text-xs font-semibold gap-1.5 shadow-xs shrink-0 self-start sm:self-auto"
+            >
+              <IconUsers className="h-3.5 w-3.5" /> Administrar Personal & Sedes
+            </Button>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* PIN Admin */}
             <Card className="rounded-2xl shadow-xs border-border/80 overflow-hidden flex flex-col">

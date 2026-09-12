@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic"
 
 // GET /api/purchases/[id] — detalle de una compra
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -21,6 +21,19 @@ export async function GET(
     if (!purchase) {
       return NextResponse.json({ error: "Compra no encontrada" }, { status: 404 })
     }
+
+    const session = getSession(req)
+    if (session && purchase.branchId) {
+      const { canUserAccessBranch } = await import("@/lib/branch")
+      const hasAccess = await canUserAccessBranch(session.uid, purchase.branchId)
+      if (!hasAccess) {
+        return NextResponse.json(
+          { error: "Acceso denegado: No tienes autorización para consultar compras de esta sede." },
+          { status: 403 }
+        )
+      }
+    }
+
     return NextResponse.json(purchase)
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })
@@ -34,6 +47,7 @@ export async function PATCH(
 ) {
   const denied = requireAdmin(req)
   if (denied) return denied
+  const session = getSession(req)
   try {
     const { id } = await params
     const body = await req.json().catch(() => ({}))
@@ -44,6 +58,17 @@ export async function PATCH(
     })
     if (!purchase) {
       return NextResponse.json({ error: "Compra no encontrada" }, { status: 404 })
+    }
+
+    if (session && purchase.branchId) {
+      const { canUserAccessBranch } = await import("@/lib/branch")
+      const hasAccess = await canUserAccessBranch(session.uid, purchase.branchId)
+      if (!hasAccess) {
+        return NextResponse.json(
+          { error: "Acceso denegado: No tienes autorización para gestionar compras de esta sede." },
+          { status: 403 }
+        )
+      }
     }
 
     if (body.status === "anulada" && purchase.status !== "anulada") {

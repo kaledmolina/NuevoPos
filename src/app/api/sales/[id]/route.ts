@@ -28,6 +28,16 @@ export async function PATCH(
       })
       if (!sale) throw new Error("Venta no encontrada")
       if (sale.status === "anulada") throw new Error("La venta ya está anulada")
+
+      // Seguridad: Validar que el usuario tenga acceso a la sede de la venta
+      if (sess && sale.branchId) {
+        const { canUserAccessBranch } = await import("@/lib/branch")
+        const hasAccess = await canUserAccessBranch(sess.uid, sale.branchId)
+        if (!hasAccess) {
+          throw new Error("Acceso denegado: No tienes autorización para anular ventas de esta sede.")
+        }
+      }
+
       if (body.status !== "anulada") return sale
 
       invoiceNumber = sale.invoiceNumber
@@ -43,7 +53,7 @@ export async function PATCH(
 
       // 2. Reversar caja:
       // Si la venta fue en efectivo, registrar egreso por devolución del dinero al cliente
-      // de modo que en el arqueo de caja quede la trazabilidad exacta: (+Venta -Devolución = $0 neto).
+      // en la caja abierta DE ESTA MISMA SEDE
       if (sale.paymentMethod === "efectivo") {
         const targetSession = sale.cashSessionId
           ? await tx.cashSession.findUnique({ where: { id: sale.cashSessionId } })
@@ -51,7 +61,12 @@ export async function PATCH(
 
         const activeSession = (targetSession && targetSession.status === "abierta")
           ? targetSession
-          : await tx.cashSession.findFirst({ where: { status: "abierta" } })
+          : await tx.cashSession.findFirst({
+              where: {
+                status: "abierta",
+                ...(sale.branchId ? { branchId: sale.branchId } : {}),
+              },
+            })
 
         if (activeSession) {
           await tx.cashTransaction.create({

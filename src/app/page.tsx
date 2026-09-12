@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api"
@@ -48,6 +48,9 @@ import {
   IconTrash,
   IconAlertTriangle,
   IconLoader2,
+  IconLock,
+  IconCrown,
+  IconMail,
 } from "@tabler/icons-react"
 import { cn } from "@/lib/utils"
 
@@ -68,6 +71,8 @@ import CreditView from "@/components/pos/credit"
 import BackupManager from "@/components/pos/backup-manager"
 import SettingsView from "@/components/pos/settings"
 import ReportsView from "@/components/pos/reports"
+import StaffManager from "@/components/pos/staff-manager"
+import SuperadminPanel from "@/components/pos/superadmin-panel"
 import { ThemeToggle } from "@/components/theme-toggle"
 
 interface NavItem { key: ViewKey; label: string; icon: React.ElementType }
@@ -108,6 +113,7 @@ const NAV: NavGroup[] = [
     label: "Sistema",
     items: [
       { key: "reports", label: "Reportes", icon: IconChartBar },
+      { key: "personal", label: "Personal & Sedes", icon: IconUsers },
       { key: "settings", label: "Configuración", icon: IconSettings },
     ],
   },
@@ -158,6 +164,31 @@ export default function Home() {
   const sidebarOpen = useAppStore((s) => s.sidebarOpen)
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen)
   const cartCount = useAppStore((s) => s.cart.reduce((n, c) => n + c.quantity, 0))
+
+  const branches = useAppStore((s) => s.branches)
+  const activeBranch = useAppStore((s) => s.activeBranch)
+  const setActiveBranch = useAppStore((s) => s.setActiveBranch)
+  const isPrimaryAdmin = useAppStore((s) => s.isPrimaryAdmin)
+  const allowedBranchIds = useAppStore((s) => s.allowedBranchIds)
+  const tenantName = useAppStore((s) => s.tenantName)
+  const tenantOwnerName = useAppStore((s) => s.tenantOwnerName)
+  const tenantOwnerEmail = useAppStore((s) => s.tenantOwnerEmail)
+
+  // Sedes autorizadas para el usuario activo
+
+  const userBranches = useMemo(() => {
+    const activeOnly = branches.filter((b) => b.active)
+    if (isPrimaryAdmin) return activeOnly
+    if (!allowedBranchIds || allowedBranchIds.length === 0) return activeOnly
+    return activeOnly.filter((b) => allowedBranchIds.includes(b.id))
+  }, [branches, isPrimaryAdmin, allowedBranchIds])
+
+  // Asegurar que la sede activa pertenezca a las sedes autorizadas del usuario
+  useEffect(() => {
+    if (userBranches.length > 0 && activeBranch && !userBranches.some((b) => b.id === activeBranch.id)) {
+      setActiveBranch(userBranches[0])
+    }
+  }, [userBranches, activeBranch, setActiveBranch])
 
   const [storeName, setStoreName] = useState("Sistema POS")
   const [storeRubro, setStoreRubro] = useState("drogueria")
@@ -319,7 +350,19 @@ export default function Home() {
   }
 
   const perms = ROLE_CONFIG[role]
-  const allowedGroups = NAV.map((g) => ({
+
+  const superadminGroup: NavGroup = {
+    label: "Superadmin SaaS",
+    items: [
+      { key: "superadmin", label: "Panel Superadmin", icon: IconCrown },
+    ],
+  }
+
+  const allowedGroups = (
+    role === "superadmin"
+      ? [superadminGroup, ...NAV]
+      : NAV
+  ).map((g) => ({
     ...g,
     items: g.items.filter((it) => canAccessView(role, it.key)),
   })).filter((g) => g.items.length > 0)
@@ -327,6 +370,7 @@ export default function Home() {
   const StoreIcon = getRubroIcon(storeRubro)
 
   const TITLES: Record<ViewKey, { title: string; subtitle: string }> = {
+    superadmin: { title: "Panel Superadministrador SaaS", subtitle: "Control global de plataforma, aprobación de negocios y ranking de ventas" },
     dashboard: { title: "Panel principal", subtitle: `Resumen general de tu ${getRubroLabel(storeRubro).toLowerCase()}` },
     pos: { title: "Punto de venta", subtitle: "Registra ventas y cobra de forma rápida" },
     products: { title: "Inventario de productos", subtitle: "Gestiona catálogo, precios, stock y categorías" },
@@ -338,6 +382,7 @@ export default function Home() {
     finance: { title: "Ingresos y egresos", subtitle: "Control de movimientos financieros y gastos" },
     credit: { title: "Cuentas por cobrar", subtitle: "Créditos otorgados y abonos de clientes" },
     reports: { title: "Reportes y estadísticas", subtitle: "Análisis de ventas, utilidad y rendimiento" },
+    personal: { title: "Personal y Sedes", subtitle: "Gestión de colaboradores, credenciales PIN y sucursales físicas" },
     settings: { title: "Configuración del sistema", subtitle: "Datos de la tienda, seguridad, backups y reseteo" },
   }
 
@@ -458,19 +503,32 @@ export default function Home() {
 
       {/* Footer del sidebar */}
       <div className="border-t border-sidebar-border/70 p-3 space-y-2 bg-sidebar shrink-0">
-        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-sidebar-accent/60 text-sidebar-foreground">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <Avatar className="h-7 w-7 shrink-0">
-              <AvatarFallback className={cn("text-[11px] font-bold", role === "admin" ? "bg-primary text-primary-foreground" : "bg-slate-700 text-white")}>
-                {initials}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold truncate text-sidebar-foreground">{userName}</p>
-              <p className="text-[10px] text-muted-foreground capitalize">{perms?.label ?? role}</p>
+        <div className="px-2.5 py-2 rounded-xl bg-sidebar-accent/60 text-sidebar-foreground space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <Avatar className="h-7 w-7 shrink-0">
+                <AvatarFallback className={cn("text-[11px] font-bold", role === "admin" ? "bg-primary text-primary-foreground" : "bg-slate-700 text-white")}>
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold truncate text-sidebar-foreground">{userName}</p>
+                <p className="text-[10px] text-muted-foreground capitalize">{perms?.label ?? role}</p>
+              </div>
             </div>
+            <ThemeToggle variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground" />
           </div>
-          <ThemeToggle variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground" />
+
+          {(tenantOwnerEmail || tenantOwnerName) && role !== "superadmin" && (
+            <div className="pt-1.5 border-t border-sidebar-border/50 text-[10px] text-muted-foreground leading-tight">
+              <span className="text-[9px] uppercase font-bold text-muted-foreground/70 block">Pertenece a:</span>
+              <p className="font-semibold text-sidebar-foreground truncate">{tenantOwnerName || "Admin Principal"}</p>
+              <p className="text-primary truncate flex items-center gap-1 mt-0.5 font-medium">
+                <IconMail className="h-2.5 w-2.5 shrink-0" />
+                {tenantOwnerEmail}
+              </p>
+            </div>
+          )}
         </div>
         <Button
           variant="ghost"
@@ -531,6 +589,111 @@ export default function Home() {
             </button>
           )}
 
+          {/* Selector de Sede Activa (Multi-Sede hasta 3 sedes) */}
+          {userBranches.length <= 1 && role !== "admin" ? (
+            <div
+              className="flex items-center gap-1.5 sm:gap-2 rounded-xl border bg-card/60 px-2 sm:px-2.5 py-1.5 text-left shadow-xs shrink-0 max-w-[170px] sm:max-w-[240px] select-none cursor-default"
+              title={`Sede asignada: ${activeBranch?.name ?? "Sede Principal"} (Pertenece a: ${activeBranch?.tenant?.ownerEmail || tenantOwnerEmail || "Admin Principal"})`}
+            >
+              <IconBuildingStore className="h-4 w-4 text-primary shrink-0" />
+              <div className="min-w-0 flex-1 hidden sm:block">
+                <p className="text-[9px] text-muted-foreground uppercase font-semibold leading-none truncate flex items-center gap-1">
+                  Sede Asignada <IconLock className="h-2.5 w-2.5" />
+                </p>
+                <p className="text-xs font-bold truncate leading-tight text-foreground">{activeBranch?.name ?? "Sede Principal"}</p>
+                {(activeBranch?.tenant?.ownerEmail || tenantOwnerEmail) && (
+                  <p className="text-[10px] text-primary truncate leading-tight flex items-center gap-1 mt-0.5 font-medium">
+                    <IconMail className="h-2.5 w-2.5 shrink-0" />
+                    {activeBranch?.tenant?.ownerEmail || tenantOwnerEmail}
+                  </p>
+                )}
+              </div>
+              <span className="sm:hidden text-xs font-bold truncate max-w-[70px]">{activeBranch?.name ?? "Sede"}</span>
+            </div>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="flex items-center gap-1.5 sm:gap-2 rounded-xl border bg-card/80 hover:bg-muted/80 px-2 sm:px-2.5 py-1.5 transition-colors text-left shadow-xs shrink-0 max-w-[170px] sm:max-w-[240px]"
+                  title={`Sede activa: ${activeBranch?.name ?? "Sede Principal"} (Pertenece a: ${activeBranch?.tenant?.ownerEmail || tenantOwnerEmail || "Admin Principal"})`}
+                >
+                  <IconBuildingStore className="h-4 w-4 text-primary shrink-0" />
+                  <div className="min-w-0 flex-1 hidden sm:block">
+                    <p className="text-[9px] text-muted-foreground uppercase font-semibold leading-none truncate">Sede Activa</p>
+                    <p className="text-xs font-bold truncate leading-tight text-foreground">{activeBranch?.name ?? "Sede Principal"}</p>
+                    {(activeBranch?.tenant?.ownerEmail || tenantOwnerEmail) && (
+                      <p className="text-[10px] text-primary truncate leading-tight flex items-center gap-1 mt-0.5 font-medium">
+                        <IconMail className="h-2.5 w-2.5 shrink-0" />
+                        {activeBranch?.tenant?.ownerEmail || tenantOwnerEmail}
+                      </p>
+                    )}
+                  </div>
+                  <span className="sm:hidden text-xs font-bold truncate max-w-[70px]">{activeBranch?.name ?? "Sede"}</span>
+                  <IconChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64 rounded-xl">
+                <DropdownMenuLabel className="text-xs font-semibold flex items-center justify-between pb-1">
+                  <span>Sedes Autorizadas</span>
+                  <span className="text-[10px] text-muted-foreground font-normal">
+                    ({userBranches.length} {userBranches.length === 1 ? "sede" : "sedes"})
+                  </span>
+                </DropdownMenuLabel>
+
+                {/* Bloque de pertenencia del Negocio / Admin Principal */}
+                {(tenantOwnerEmail || tenantOwnerName) && role !== "superadmin" && (
+                  <div className="mx-1 mb-1.5 p-2 rounded-lg bg-primary/5 border border-primary/15 text-[11px] space-y-0.5">
+                    <p className="text-[9px] uppercase font-bold text-muted-foreground flex items-center gap-1">
+                      <IconShieldCheck className="h-3 w-3 text-primary" /> Admin Principal
+                    </p>
+                    <p className="font-semibold text-foreground truncate">{tenantOwnerName || "Admin Principal"}</p>
+                    <p className="text-[10px] text-primary truncate flex items-center gap-1 font-medium">
+                      <IconMail className="h-2.5 w-2.5 shrink-0" />
+                      {tenantOwnerEmail}
+                    </p>
+                  </div>
+                )}
+                <DropdownMenuSeparator />
+                {userBranches.map((b) => (
+                  <DropdownMenuItem
+                    key={b.id}
+                    onClick={() => {
+                      if (activeBranch?.id === b.id) return
+                      setActiveBranch(b)
+                      toast.success(`Sede activa: ${b.name}`)
+                    }}
+                    className={cn(
+                      "flex items-center justify-between text-xs py-2 cursor-pointer rounded-lg",
+                      activeBranch?.id === b.id && "bg-muted font-bold text-primary"
+                    )}
+                  >
+                    <div className="flex items-center gap-2 truncate min-w-0 flex-1">
+                      <IconBuildingStore className="h-4 w-4 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-semibold">{b.name}</p>
+                        <p className="text-[10px] text-muted-foreground truncate">
+                          {b.tenant?.ownerEmail || tenantOwnerEmail || "Admin Principal"}
+                        </p>
+                      </div>
+                    </div>
+                    {b.isMain && <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-primary/30 shrink-0">Principal</Badge>}
+                  </DropdownMenuItem>
+                ))}
+                {role === "admin" && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => handleSetView("personal")}
+                      className="text-xs font-semibold text-primary cursor-pointer rounded-lg"
+                    >
+                      <IconSettings className="h-3.5 w-3.5 mr-2" /> Administrar Sedes ({branches.length}/3)
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
           {/* Botón selector de tema claro/oscuro */}
           <ThemeToggle />
 
@@ -550,18 +713,39 @@ export default function Home() {
                 <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground hidden sm:block mr-1" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 rounded-xl">
-              <DropdownMenuLabel className="flex items-center gap-2">
-                <IconShieldCheck className={cn("h-4 w-4", role === "admin" ? "text-primary" : "text-muted-foreground")} />
-                <div>
-                  <p className="text-sm font-semibold">{userName}</p>
-                  <p className="text-xs text-muted-foreground font-normal">{perms.label}</p>
+            <DropdownMenuContent align="end" className="w-64 rounded-xl">
+              <DropdownMenuLabel className="flex items-start gap-2.5 p-2.5">
+                <Avatar className="h-8 w-8 shrink-0 mt-0.5">
+                  <AvatarFallback className={cn("text-xs font-bold", role === "admin" ? "bg-primary text-primary-foreground" : "bg-slate-700 text-white")}>
+                    {initials}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div>
+                    <p className="text-sm font-bold text-foreground truncate">{userName}</p>
+                    <p className="text-xs text-muted-foreground font-normal capitalize">{perms.label}</p>
+                  </div>
+                  {(tenantOwnerEmail || tenantOwnerName) && role !== "superadmin" && (
+                    <div className="pt-1.5 border-t border-border/60 text-[11px] space-y-0.5">
+                      <p className="text-[9px] uppercase font-bold text-muted-foreground">Pertenece a:</p>
+                      <p className="font-semibold text-foreground truncate">{tenantOwnerName || "Admin Principal"}</p>
+                      <p className="text-[10px] text-primary truncate flex items-center gap-1 font-medium">
+                        <IconMail className="h-3 w-3 shrink-0" />
+                        {tenantOwnerEmail}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => useAppStore.getState().startTour()}>
                 <IconHelp className="h-4 w-4 mr-2 text-primary" /> Tour Guiado
               </DropdownMenuItem>
+              {role === "admin" && (
+                <DropdownMenuItem onClick={() => handleSetView("personal")}>
+                  <IconUsers className="h-4 w-4 mr-2 text-primary" /> Personal & Sedes
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => handleSetView("settings")}>
                 <IconSettings className="h-4 w-4 mr-2" /> Configuración
               </DropdownMenuItem>
@@ -583,6 +767,7 @@ export default function Home() {
               transition={{ duration: 0.18, ease: "easeOut" }}
               className="min-h-full w-full min-w-0 flex flex-col"
             >
+              {view === "superadmin" && <SuperadminPanel />}
               {view === "dashboard" && (
                 <>
                   <SetupChecklist />
@@ -599,6 +784,7 @@ export default function Home() {
               {view === "finance" && <FinanceView />}
               {view === "credit" && <CreditView />}
               {view === "reports" && <ReportsView />}
+              {view === "personal" && <StaffManager />}
               {view === "settings" && <SettingsView />}
             </motion.div>
           </AnimatePresence>

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { nextInvoiceNumber } from "@/lib/format"
-import { requireAuth, logAudit } from "@/lib/auth"
+import { requireAuth, getSession, logAudit } from "@/lib/auth"
+import { resolveBranchId, requireBranchAccess } from "@/lib/branch"
 
 export const dynamic = "force-dynamic"
 
@@ -148,7 +149,12 @@ export async function GET(req: NextRequest) {
   const to = searchParams.get("to")
   const status = searchParams.get("status")
 
+  const branchId = await resolveBranchId(req)
+
   const where: Record<string, unknown> = {}
+  if (branchId) {
+    where.branchId = branchId
+  }
   if (status) {
     where.status = status
   }
@@ -184,9 +190,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = requireAuth(req)
-  if (auth instanceof NextResponse) return auth
-  const session = auth.session
+  const branchAccess = await requireBranchAccess(req)
+  if (branchAccess instanceof NextResponse) return branchAccess
+  const { branchId, session } = branchAccess
+
   try {
     const body = await req.json()
     const { items, clientId, paymentMethod, amountReceived, discount, notes } = body as {
@@ -207,9 +214,9 @@ export async function POST(req: NextRequest) {
     const total = Math.max(0, subtotal - disc)
     const tax = 0
 
-    // Transacción atómica: validación de stock + creación + descuento + caja
+    // Transacción atómica: validación de stock + pertenencia de sede + creación + descuento + caja
     const sale = await db.$transaction(async (tx) => {
-      // Validar stock DENTRO de la transacción (lock en SQLite)
+      // Validar stock y sede de los productos DENTRO de la transacción (lock en SQLite)
       const productIds = items.map((i) => i.productId)
       const products = await tx.product.findMany({ where: { id: { in: productIds } } })
       if (products.length !== productIds.length) {
@@ -217,6 +224,10 @@ export async function POST(req: NextRequest) {
       }
       for (const it of items) {
         const p = products.find((pr) => pr.id === it.productId)!
+        // Seguridad estricta: No se permite vender productos que pertenezcan a otra sede
+        if (p.branchId && p.branchId !== branchId) {
+          throw new Error(`El producto "${p.name}" pertenece a otra sede y no puede ser vendido en la sede activa.`)
+        }
         if (it.quantity > p.stock) {
           throw new Error(`Stock insuficiente para ${p.name}. Disponible: ${p.stock}`)
         }
@@ -227,26 +238,37 @@ export async function POST(req: NextRequest) {
 
       const lastSale = await tx.sale.findFirst({ orderBy: { invoiceNumber: "desc" } })
       const invoiceNumber = nextInvoiceNumber(lastSale?.invoiceNumber)
-      const openSession = await tx.cashSession.findFirst({ where: { status: "abierta" } })
+      const openSession = await tx.cashSession.findFirst({
+        where: {
+          status: "abierta",
+          ...(branchId ? { branchId } : {}),
+        },
+      })
 
-      // Validación de crédito
+      // Validación de cliente y crédito
       let creditAccount: { id: string; balance: number; creditLimit: number; active: boolean } | null = null
-      if (paymentMethod === "credito") {
-        if (!clientId) {
-          throw new Error("Las ventas a crédito requieren un cliente (no se permite cliente genérico)")
-        }
+      if (paymentMethod === "credito" && !clientId) {
+        throw new Error("Las ventas a crédito requieren un cliente (no se permite cliente genérico)")
+      }
+      if (clientId) {
         const client = await tx.client.findUnique({ where: { id: clientId } })
         if (!client) throw new Error("Cliente no encontrado")
-        if (client.isGeneric) {
-          throw new Error("No se permite venta a crédito al cliente genérico. Registra al cliente primero.")
+        // Seguridad: el cliente debe pertenecer a esta sede o ser el cliente genérico del sistema
+        if (!client.isGeneric && client.branchId && client.branchId !== branchId) {
+          throw new Error("El cliente seleccionado pertenece a otra sede.")
         }
-        creditAccount = await tx.creditAccount.findUnique({ where: { clientId } })
-        if (!creditAccount || !creditAccount.active) {
-          throw new Error("El cliente no tiene cuenta de crédito activa. El admin debe otorgarle crédito primero.")
-        }
-        const newBalance = creditAccount.balance + total
-        if (newBalance > creditAccount.creditLimit) {
-          throw new Error(`Crédito insuficiente. Saldo actual: $${creditAccount.balance.toLocaleString("es-CO")}, Límite: $${creditAccount.creditLimit.toLocaleString("es-CO")}. Faltan $${(newBalance - creditAccount.creditLimit).toLocaleString("es-CO")}.`)
+        if (paymentMethod === "credito") {
+          if (client.isGeneric) {
+            throw new Error("No se permite venta a crédito al cliente genérico. Registra al cliente primero.")
+          }
+          creditAccount = await tx.creditAccount.findUnique({ where: { clientId } })
+          if (!creditAccount || !creditAccount.active) {
+            throw new Error("El cliente no tiene cuenta de crédito activa. El admin debe otorgarle crédito primero.")
+          }
+          const newBalance = creditAccount.balance + total
+          if (newBalance > creditAccount.creditLimit) {
+            throw new Error(`Crédito insuficiente. Saldo actual: $${creditAccount.balance.toLocaleString("es-CO")}, Límite: $${creditAccount.creditLimit.toLocaleString("es-CO")}. Faltan $${(newBalance - creditAccount.creditLimit).toLocaleString("es-CO")}.`)
+          }
         }
       }
 
@@ -255,6 +277,7 @@ export async function POST(req: NextRequest) {
         data: {
           invoiceNumber,
           clientId: clientId || null,
+          branchId: branchId || null,
           subtotal,
           tax,
           discount: disc,
@@ -344,7 +367,9 @@ export async function POST(req: NextRequest) {
       msg.includes("no encontrado") ||
       msg.includes("crédito") ||
       msg.includes("Crédito") ||
-      msg.includes("genérico")
+      msg.includes("genérico") ||
+      msg.includes("sede") ||
+      msg.includes("Sede")
     ) {
       return NextResponse.json({ error: msg }, { status: 400 })
     }

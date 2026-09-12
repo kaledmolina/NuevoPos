@@ -12,12 +12,19 @@ datasource db {
 
 // Usuarios del sistema con rol y PIN hasheado (login server-side)
 model User {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  role      String   // admin | vendedor
-  pinHash   String   // HMAC del PIN con AUTH_SECRET
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
+  id               String   @id @default(cuid())
+  name             String   @unique
+  email            String?  @unique
+  role             String   // superadmin | admin | vendedor
+  pinHash          String   // HMAC del PIN con AUTH_SECRET
+  isPrimary        Boolean  @default(false) // Admin principal inmutable
+  allowedBranchIds String   @default("[]")  // IDs de sedes permitidas en formato JSON string
+  tenantId         String?  // Relación con su Tenant / Negocio (null para Superadmin global)
+  tenant           Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  @@index([tenantId])
 }
 
 // Log de auditoría: registra quién hizo qué y cuándo
@@ -48,6 +55,7 @@ model Product {
   barcode        String?        // código de barras
   categoryId     String?
   category       Category?      @relation(fields: [categoryId], references: [id])
+  branchId       String?        // Sede a la que pertenece el producto
   description    String?
   cost           Float          @default(0) // último precio de compra
   price          Float          @default(0) // precio de venta
@@ -63,6 +71,9 @@ model Product {
   saleItems      SaleItem[]
   purchaseItems  PurchaseItem[]
   batches        ProductBatch[]
+
+  @@index([branchId])
+  @@index([active])
 }
 
 // Lotes individuales por producto (para gestionar múltiples vencimientos)
@@ -87,11 +98,14 @@ model Client {
   email     String?
   address   String?
   notes     String?
+  branchId  String?  // Sede a la que pertenece el cliente
   isGeneric Boolean  @default(false) // marca el cliente genérico (no puede comprar a crédito)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   sales     Sale[]
   creditAccount CreditAccount?
+
+  @@index([branchId])
 }
 
 // Cuenta de crédito por cliente (cuentas por cobrar)
@@ -132,6 +146,7 @@ model Supplier {
   address     String?
   contactName String?
   notes       String?
+  branchId    String?   // Sede a la que pertenece el proveedor
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   purchases   Purchase[]
@@ -143,6 +158,7 @@ model Sale {
   invoiceNumber String     @unique
   clientId      String?
   client        Client?    @relation(fields: [clientId], references: [id])
+  branchId      String?    // Sede en la que se realizó la venta
   subtotal      Float
   tax           Float      @default(0)
   discount      Float      @default(0)
@@ -155,6 +171,10 @@ model Sale {
   notes         String?
   createdAt     DateTime   @default(now())
   items         SaleItem[]
+
+  @@index([branchId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model SaleItem {
@@ -175,6 +195,7 @@ model Purchase {
   reference  String?         // factura del proveedor
   supplierId String?
   supplier   Supplier?       @relation(fields: [supplierId], references: [id])
+  branchId   String?         // Sede donde se recibió la compra
   subtotal   Float
   tax        Float           @default(0)
   total      Float
@@ -182,6 +203,8 @@ model Purchase {
   notes      String?
   createdAt  DateTime        @default(now())
   items      PurchaseItem[]
+
+  @@index([branchId])
 }
 
 model PurchaseItem {
@@ -200,6 +223,7 @@ model PurchaseItem {
 // Caja y arqueo
 model CashSession {
   id            String           @id @default(cuid())
+  branchId      String?          // Sede a la que pertenece la sesión de caja
   openingAmount Float
   closingAmount Float?
   expectedAmount Float?
@@ -211,6 +235,8 @@ model CashSession {
   closedBy      String?
   notes         String?
   transactions  CashTransaction[]
+
+  @@index([branchId])
 }
 
 model CashTransaction {
@@ -228,6 +254,7 @@ model CashTransaction {
 // Ingresos y egresos generales
 model Transaction {
   id            String   @id @default(cuid())
+  branchId      String?  // Sede a la que pertenece la transacción
   type          String   // ingreso, egreso
   category      String
   amount        Float
@@ -245,3 +272,44 @@ model Setting {
   key   String @unique
   value String
 }
+
+// Multi-Sedes (sucursales físicas, máx 3 sedes por negocio)
+model Branch {
+  id        String   @id @default(cuid())
+  name      String
+  code      String?
+  address   String?
+  phone     String?
+  isMain    Boolean  @default(false)
+  active    Boolean  @default(true)
+  tenantId  String?  // Negocio / Empresa al que pertenece la sede
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+// SaaS Multi-Tenancy: Empresas / Negocios registrados
+model Tenant {
+  id          String    @id @default(cuid())
+  name        String    // Nombre del negocio / droguería
+  slug        String?   @unique
+  rubro       String    @default("drogueria")
+  ownerName   String    // Nombre del Administrador Principal
+  ownerEmail  String    @unique // Correo del Administrador Principal
+  ownerPhone  String?
+  status      String    @default("pendiente") // "pendiente" | "aprobado" | "inactivo"
+  maxBranches Int       @default(3)
+  approvedAt  DateTime?
+  approvedBy  String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  users       User[]
+  branches    Branch[]
+
+  @@index([status])
+  @@index([rubro])
+}
+

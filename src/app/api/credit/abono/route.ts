@@ -25,6 +25,17 @@ export async function POST(req: NextRequest) {
     })
     if (!account) return NextResponse.json({ error: "El cliente no tiene cuenta de crédito" }, { status: 404 })
 
+    if (session && account.client.branchId) {
+      const { canUserAccessBranch } = await import("@/lib/branch")
+      const hasAccess = await canUserAccessBranch(session.uid, account.client.branchId)
+      if (!hasAccess) {
+        return NextResponse.json(
+          { error: "Acceso denegado: No tienes autorización para gestionar créditos de esta sede." },
+          { status: 403 }
+        )
+      }
+    }
+
     const reporter = (typeof reportedBy === "string" && reportedBy.trim() !== "")
       ? reportedBy.trim()
       : (session?.name || "Administrador")
@@ -53,8 +64,13 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      // Si la caja está abierta y el pago es en efectivo, registrar ingreso en arqueo de caja
-      const openSession = await tx.cashSession.findFirst({ where: { status: "abierta" } })
+      // Si la caja de esta sede está abierta y el pago es en efectivo, registrar ingreso en arqueo de caja
+      const openSession = await tx.cashSession.findFirst({
+        where: {
+          status: "abierta",
+          ...(account.client.branchId ? { branchId: account.client.branchId } : {}),
+        },
+      })
       if (openSession && paymentMethod === "efectivo") {
         await tx.cashTransaction.create({
           data: {

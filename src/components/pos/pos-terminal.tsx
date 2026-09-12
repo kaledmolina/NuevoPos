@@ -68,6 +68,7 @@ export default function PosTerminal() {
   const updateCartQty = useAppStore((s) => s.updateCartQty)
   const removeFromCart = useAppStore((s) => s.removeFromCart)
   const clearCart = useAppStore((s) => s.clearCart)
+  const refreshKey = useAppStore((s) => s.refreshKey)
   const triggerRefresh = useAppStore((s) => s.triggerRefresh)
   const setView = useAppStore((s) => s.setView)
 
@@ -129,7 +130,7 @@ export default function PosTerminal() {
       .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [load, refreshKey])
 
   // Escaneo por código de barras exacto
   useEffect(() => {
@@ -326,19 +327,19 @@ export default function PosTerminal() {
 
   // Contenido del carrito (reutilizado en desktop panel + mobile drawer)
   const CartBody = (
-    <CardContent className="flex-1 flex flex-col min-h-0 p-0 overflow-y-auto scroll-thin">
-      {/* Items del carrito */}
-      <div className="px-3 sm:px-4 py-2 shrink-0">
+    <CardContent className="flex-1 flex flex-col min-h-0 p-0 overflow-hidden">
+      {/* Items del carrito (área scrollable dedicada) */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-2 scroll-thin">
         {cart.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-            <IconScan className="h-8 w-8 mb-2 opacity-40" />
+          <div className="flex flex-col items-center justify-center py-4 sm:py-6 text-muted-foreground">
+            <IconScan className="h-7 w-7 mb-1.5 opacity-40" />
             <p className="text-sm font-medium">El carrito está vacío</p>
             <p className="text-xs text-muted-foreground/80 mt-0.5">Selecciona o escanea productos para comenzar</p>
             {heldCarts.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
-                className="mt-3 text-xs gap-1.5 border-primary/30 text-primary"
+                className="mt-2.5 text-xs gap-1.5 border-primary/30 text-primary"
                 onClick={() => setQueueOpen(true)}
               >
                 <IconClock className="h-3.5 w-3.5" /> Hay {heldCarts.length} venta(s) en espera
@@ -346,7 +347,7 @@ export default function PosTerminal() {
             )}
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <AnimatePresence initial={false}>
               {cart.map((it) => (
                 <motion.div
@@ -369,13 +370,13 @@ export default function PosTerminal() {
                     <Button
                       size="icon"
                       variant="outline"
-                      className="h-8 w-8 rounded-lg active:scale-95"
+                      className="h-7 w-7 rounded-lg active:scale-95"
                       onClick={() => updateCartQty(it.productId, it.quantity - 1)}
                     >
-                      <IconMinus className="h-3.5 w-3.5" />
+                      <IconMinus className="h-3 w-3" />
                     </Button>
                     <Input
-                      className="h-8 w-11 text-center px-0 text-sm font-bold"
+                      className="h-7 w-10 text-center px-0 text-xs font-bold"
                       value={it.quantity}
                       onChange={(e) => {
                         const v = Math.max(0, Math.min(parseInt(e.target.value) || 0, it.stock))
@@ -385,22 +386,22 @@ export default function PosTerminal() {
                     <Button
                       size="icon"
                       variant="outline"
-                      className="h-8 w-8 rounded-lg active:scale-95"
+                      className="h-7 w-7 rounded-lg active:scale-95"
                       onClick={() => updateCartQty(it.productId, Math.min(it.quantity + 1, it.stock))}
                     >
-                      <IconPlus className="h-3.5 w-3.5" />
+                      <IconPlus className="h-3 w-3" />
                     </Button>
                   </div>
-                  <div className="w-20 text-right shrink-0">
-                    <p className="text-sm font-bold text-foreground">{formatCurrency(it.price * it.quantity)}</p>
+                  <div className="w-16 text-right shrink-0">
+                    <p className="text-xs font-bold text-foreground">{formatCurrency(it.price * it.quantity)}</p>
                   </div>
                   <Button
                     size="icon"
                     variant="ghost"
-                    className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
                     onClick={() => removeFromCart(it.productId)}
                   >
-                    <IconX className="h-4 w-4" />
+                    <IconX className="h-3.5 w-3.5" />
                   </Button>
                 </motion.div>
               ))}
@@ -410,7 +411,7 @@ export default function PosTerminal() {
       </div>
 
       {/* Métodos de Pago y Datos de Venta */}
-      <div className="border-t p-3 sm:p-4 space-y-3 shrink-0 bg-muted/10">
+      <div className="border-t p-3 space-y-2.5 shrink-0 bg-muted/10">
         {/* Selector de Método de Pago por Chips Directos (1 solo toque) */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
@@ -878,13 +879,13 @@ export default function PosTerminal() {
       </div>
 
       {/* Carrito — panel lateral desktop */}
-      <div className="hidden lg:flex lg:w-[360px] xl:w-[400px] shrink-0">
-        <Card className="flex flex-col w-full h-[calc(100vh-8.5rem)] min-h-[520px]">
-          <CardHeader className="pb-3">
+      <div className="hidden lg:flex lg:w-[380px] xl:w-[420px] shrink-0 self-start sticky top-2">
+        <Card className="flex flex-col w-full py-3 gap-0 shadow-sm border-border/80 min-h-[620px] max-h-[calc(100vh-5rem)]">
+          <CardHeader className="px-4 py-2.5 border-b shrink-0">
             <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-base">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
                 <IconShoppingCart className="h-4 w-4 text-primary" /> Venta actual
-                {cartCount > 0 && <Badge className="ml-1">{cartCount}</Badge>}
+                {cartCount > 0 && <Badge className="ml-1 px-1.5 py-0">{cartCount}</Badge>}
               </CardTitle>
               {CartHeaderActions}
             </div>

@@ -28,14 +28,46 @@ export interface HeldCart {
   createdAt: string
 }
 
+export interface BranchItem {
+  id: string
+  name: string
+  code?: string | null
+  address?: string | null
+  phone?: string | null
+  isMain: boolean
+  active: boolean
+  createdAt: string
+  updatedAt?: string
+  tenant?: {
+    id: string
+    name: string
+    ownerName: string
+    ownerEmail: string
+    ownerPhone?: string | null
+  } | null
+}
+
 interface AppState {
   // Autenticación (sesión validada server-side vía cookie httpOnly)
   hydrated: boolean
   role: Role | null
   userName: string | null
+  userEmail: string | null
+  isPrimaryAdmin: boolean
+  tenantId: string | null
+  tenantName: string | null
+  tenantOwnerName: string | null
+  tenantOwnerEmail: string | null
+  allowedBranchIds: string[]
   hydrate: () => Promise<void>
   login: (name: string, pin: string) => Promise<void>
   logout: () => Promise<void>
+
+  // Multi-Sedes (máximo 3 sedes)
+  branches: BranchItem[]
+  activeBranch: BranchItem | null
+  setActiveBranch: (b: BranchItem) => void
+  fetchBranches: () => Promise<BranchItem[]>
 
   // Landing page (vista educativa antes del login)
   showLanding: boolean
@@ -92,20 +124,111 @@ function getSavedView(role: Role | null): ViewKey {
 
 export const useAppStore = create<AppState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       hydrated: false,
       role: null,
       userName: null,
+      userEmail: null,
+      isPrimaryAdmin: false,
+      tenantId: null,
+      tenantName: null,
+      tenantOwnerName: null,
+      tenantOwnerEmail: null,
+      allowedBranchIds: [],
+
+      branches: [],
+      activeBranch: null,
+
+      fetchBranches: async () => {
+        try {
+          const res = await apiFetch<{ ok: boolean; branches: BranchItem[] }>("/api/branches")
+          if (res.ok && Array.isArray(res.branches)) {
+            const list = res.branches.filter((b) => b.active)
+            const currentActive = get().activeBranch
+            let selected = list.find((b) => b.id === currentActive?.id)
+            if (!selected) {
+              // Intentar leer de localStorage
+              if (typeof window !== "undefined") {
+                const savedId = localStorage.getItem("pos_active_branch_id")
+                selected = list.find((b) => b.id === savedId)
+              }
+            }
+            if (!selected) {
+              selected = list.find((b) => b.isMain) || list[0] || null
+            }
+            set({ branches: res.branches, activeBranch: selected })
+            if (selected && typeof window !== "undefined") {
+              localStorage.setItem("pos_active_branch_id", selected.id)
+            }
+            return res.branches
+          }
+        } catch {
+          /* noop */
+        }
+        return []
+      },
+
+      setActiveBranch: (b: BranchItem) => {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("pos_active_branch_id", b.id)
+        }
+        set((s) => ({
+          activeBranch: b,
+          cart: [], // Limpiar carrito de la sede previa para evitar mezclas
+          refreshKey: s.refreshKey + 1, // Refresca todas las vistas y componentes de inmediato
+        }))
+      },
 
       // Consulta al servidor quién es el usuario actual (cookie httpOnly)
       hydrate: async () => {
         try {
-          const data = await apiFetch<{ user: { name: string; role: Role } | null }>("/api/auth/me")
-          if (data.user) {
-            const initialView = getSavedView(data.user.role)
+          const [authData, branchList] = await Promise.all([
+            apiFetch<{
+              user: {
+                name: string
+                role: Role
+                email?: string | null
+                isPrimary?: boolean
+                tenantId?: string | null
+                tenantName?: string | null
+                tenantOwnerName?: string | null
+                tenantOwnerEmail?: string | null
+                allowedBranchIds?: string[]
+              } | null
+            }>("/api/auth/me"),
+            get().fetchBranches(),
+          ])
+          if (authData.user) {
+            const initialView = getSavedView(authData.user.role)
+            const allowedIds = authData.user.allowedBranchIds || []
+            const isFullAccess = authData.user.role === "superadmin" || authData.user.isPrimary
+            const userBranches = isFullAccess
+              ? branchList
+              : branchList.filter((b) => allowedIds.includes(b.id))
+
+            let selected = userBranches.find((b) => b.id === get().activeBranch?.id)
+            if (!selected && typeof window !== "undefined") {
+              const savedId = localStorage.getItem("pos_active_branch_id")
+              selected = userBranches.find((b) => b.id === savedId)
+            }
+            if (!selected) {
+              selected = userBranches.find((b) => b.isMain) || userBranches[0] || null
+            }
+            if (selected && typeof window !== "undefined") {
+              localStorage.setItem("pos_active_branch_id", selected.id)
+            }
+
             set({
-              role: data.user.role,
-              userName: data.user.name,
+              role: authData.user.role,
+              userName: authData.user.name,
+              userEmail: authData.user.email ?? null,
+              isPrimaryAdmin: Boolean(authData.user.isPrimary),
+              tenantId: authData.user.tenantId ?? null,
+              tenantName: authData.user.tenantName ?? null,
+              tenantOwnerName: authData.user.tenantOwnerName ?? null,
+              tenantOwnerEmail: authData.user.tenantOwnerEmail ?? null,
+              allowedBranchIds: allowedIds,
+              activeBranch: selected,
               view: initialView,
               hydrated: true,
             })
@@ -114,19 +237,63 @@ export const useAppStore = create<AppState>()(
         } catch {
           /* noop */
         }
-        set({ hydrated: true, role: null, userName: null })
+        set({
+          hydrated: true,
+          role: null,
+          userName: null,
+          userEmail: null,
+          isPrimaryAdmin: false,
+          tenantId: null,
+          tenantName: null,
+          tenantOwnerName: null,
+          tenantOwnerEmail: null,
+          allowedBranchIds: [],
+        })
       },
 
       // Login: valida PIN contra la BD; el servidor setea la cookie firmada
       login: async (name, pin) => {
-        const data = await apiFetch<{ ok: boolean; user: { name: string; role: Role } }>("/api/auth/login", {
+        const data = await apiFetch<{
+          ok: boolean
+          user: {
+            name: string
+            role: Role
+            email?: string | null
+            isPrimary?: boolean
+            tenantId?: string | null
+            tenantName?: string | null
+            tenantOwnerName?: string | null
+            tenantOwnerEmail?: string | null
+            allowedBranchIds?: string[]
+          }
+        }>("/api/auth/login", {
           method: "POST",
           body: JSON.stringify({ name, pin }),
         })
         const initialView = getSavedView(data.user.role)
+        const branchList = await get().fetchBranches()
+        const allowedIds = data.user.allowedBranchIds || []
+        const isFullAccess = data.user.role === "superadmin" || data.user.isPrimary
+        const userBranches = isFullAccess
+          ? branchList
+          : branchList.filter((b) => allowedIds.includes(b.id))
+
+        let selected = userBranches.find((b) => b.isMain) || userBranches[0] || null
+        if (selected && typeof window !== "undefined") {
+          localStorage.setItem("pos_active_branch_id", selected.id)
+        }
+
         set({
           role: data.user.role,
           userName: data.user.name,
+          userEmail: data.user.email ?? null,
+          isPrimaryAdmin: Boolean(data.user.isPrimary),
+          tenantId: data.user.tenantId ?? null,
+          tenantName: data.user.tenantName ?? null,
+          tenantOwnerName: data.user.tenantOwnerName ?? null,
+          tenantOwnerEmail: data.user.tenantOwnerEmail ?? null,
+          allowedBranchIds: allowedIds,
+          activeBranch: selected,
           view: initialView,
           cart: [],
           sidebarOpen: false,
@@ -150,6 +317,13 @@ export const useAppStore = create<AppState>()(
         set({
           role: null,
           userName: null,
+          userEmail: null,
+          isPrimaryAdmin: false,
+          tenantId: null,
+          tenantName: null,
+          tenantOwnerName: null,
+          tenantOwnerEmail: null,
+          allowedBranchIds: [],
           view: "dashboard",
           cart: [],
           heldCarts: [],

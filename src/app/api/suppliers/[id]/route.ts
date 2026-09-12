@@ -7,8 +7,24 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { getSession } = await import("@/lib/auth")
+  const session = getSession(req)
   try {
     const { id } = await params
+    const existing = await db.supplier.findUnique({ where: { id } })
+    if (!existing) return NextResponse.json({ error: "Proveedor no encontrado" }, { status: 404 })
+
+    if (session && existing.branchId) {
+      const { canUserAccessBranch } = await import("@/lib/branch")
+      const hasAccess = await canUserAccessBranch(session.uid, existing.branchId)
+      if (!hasAccess) {
+        return NextResponse.json(
+          { error: "Acceso denegado: No tienes autorización para modificar proveedores de esta sede." },
+          { status: 403 }
+        )
+      }
+    }
+
     const body = await req.json()
 
     const data: Record<string, unknown> = {}
@@ -40,8 +56,23 @@ export async function DELETE(
   const { requireAdmin, logAudit, getSession } = await import("@/lib/auth")
   const denied = requireAdmin(req)
   if (denied) return denied
+  const session = getSession(req)
   try {
     const { id } = await params
+    const existing = await db.supplier.findUnique({ where: { id } })
+    if (!existing) return NextResponse.json({ error: "Proveedor no encontrado" }, { status: 404 })
+
+    if (session && existing.branchId) {
+      const { canUserAccessBranch } = await import("@/lib/branch")
+      const hasAccess = await canUserAccessBranch(session.uid, existing.branchId)
+      if (!hasAccess) {
+        return NextResponse.json(
+          { error: "Acceso denegado: No tienes autorización para eliminar proveedores de esta sede." },
+          { status: 403 }
+        )
+      }
+    }
+
     // Verificar si el proveedor tiene compras asociadas antes de borrar
     const purchasesCount = await db.purchase.count({ where: { supplierId: id } })
     if (purchasesCount > 0) {
@@ -52,7 +83,6 @@ export async function DELETE(
         { status: 409 }
       )
     }
-    const session = getSession(req)
     try {
       await logAudit({
         action: "supplier_delete",

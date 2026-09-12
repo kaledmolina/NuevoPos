@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireAdmin, getSession, logAudit } from "@/lib/auth"
 import { formatCurrency } from "@/lib/format"
+import { requireBranchAccess, verifyEntityBranchAccess } from "@/lib/branch"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -10,7 +11,13 @@ export const runtime = "nodejs"
 export async function GET(req: NextRequest) {
   const denied = requireAdmin(req)
   if (denied) return denied
+
+  const branchAccess = await requireBranchAccess(req)
+  if (branchAccess instanceof NextResponse) return branchAccess
+  const { branchId } = branchAccess
+
   const accounts = await db.creditAccount.findMany({
+    where: branchId ? { client: { branchId } } : {},
     include: {
       client: true,
       _count: { select: { movements: true } },
@@ -38,6 +45,8 @@ export async function POST(req: NextRequest) {
   const denied = requireAdmin(req)
   if (denied) return denied
   const session = getSession(req)
+  if (!session) return NextResponse.json({ error: "No autenticado" }, { status: 401 })
+
   try {
     const body = await req.json()
     const { clientId, creditLimit, active } = body
@@ -47,6 +56,15 @@ export async function POST(req: NextRequest) {
     const client = await db.client.findUnique({ where: { id: clientId } })
     if (!client) return NextResponse.json({ error: "Cliente no encontrado" }, { status: 404 })
     if (client.isGeneric) return NextResponse.json({ error: "No se puede otorgar crédito al cliente genérico" }, { status: 400 })
+
+    // Validar acceso a la sede del cliente
+    const hasAccess = await verifyEntityBranchAccess(session.uid, client.branchId)
+    if (!hasAccess) {
+      return NextResponse.json(
+        { error: "Acceso denegado: No puedes gestionar crédito de clientes de otra sede." },
+        { status: 403 }
+      )
+    }
 
     const limit = Number(creditLimit) || 0
     // Upsert: si ya existe, actualiza el límite; si no, crea

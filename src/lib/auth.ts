@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
 
-export type Role = "admin" | "vendedor"
+export type Role = "superadmin" | "admin" | "vendedor"
 
 const FALLBACK_SECRET = "drogueria-pos-dev-fallback-secret"
 const SECRET = process.env.AUTH_SECRET || FALLBACK_SECRET
@@ -25,10 +25,11 @@ export function verifyPin(pin: string, hash: string): boolean {
 }
 
 // --- Firma de sesión (token tipo JWT简化: payload.base64.firma) ---
-interface SessionPayload {
+export interface SessionPayload {
   role: Role
   name: string
   uid: string
+  tenantId?: string | null
   iat: number
 }
 
@@ -48,7 +49,7 @@ function verify(token: string): SessionPayload | null {
     const payload = JSON.parse(Buffer.from(data, "base64url").toString())
     // expiración
     if (Date.now() - (payload.iat || 0) > MAX_AGE_SECONDS * 1000) return null
-    if (payload.role !== "admin" && payload.role !== "vendedor") return null
+    if (payload.role !== "admin" && payload.role !== "vendedor" && payload.role !== "superadmin") return null
     return payload as SessionPayload
   } catch {
     return null
@@ -91,13 +92,28 @@ export function clearSessionCookie(res: NextResponse): NextResponse {
   return res
 }
 
-// --- Guardia de admin ---
+// --- Guardia de superadmin (Control SaaS global) ---
+export function requireSuperAdmin(req: NextRequest): NextResponse | null {
+  const session = getSession(req)
+  if (!session) {
+    return NextResponse.json({ error: "No autenticado" }, { status: 401 })
+  }
+  if (session.role !== "superadmin") {
+    return NextResponse.json(
+      { error: "Acceso exclusivo para el Superadministrador" },
+      { status: 403 }
+    )
+  }
+  return null
+}
+
+// --- Guardia de admin (Permite admin y superadmin) ---
 export function requireAdmin(req: NextRequest): NextResponse | null {
   const session = getSession(req)
   if (!session) {
     return NextResponse.json({ error: "No autenticado" }, { status: 401 })
   }
-  if (session.role !== "admin") {
+  if (session.role !== "admin" && session.role !== "superadmin") {
     return NextResponse.json(
       { error: "Acción reservada para el administrador" },
       { status: 403 }
@@ -169,3 +185,29 @@ export function checkRateLimit(name: string): { allowed: boolean; remaining: num
 export function resetRateLimit(name: string) {
   loginAttempts.delete(name.toLowerCase())
 }
+
+// --- Rate limiting para auto-registro SaaS ---
+// Previene spam y flooding de creación masiva de negocios
+const registerAttempts = new Map<string, { count: number; firstAttempt: number }>()
+const MAX_REGISTER_ATTEMPTS = 5
+const REGISTER_WINDOW_MS = 15 * 60 * 1000 // 15 minutos
+
+export function checkRegisterRateLimit(ipOrKey: string): { allowed: boolean; remaining: number; retryAfterMs: number } {
+  const key = (ipOrKey || "anonymous").toLowerCase().trim()
+  const now = Date.now()
+  const entry = registerAttempts.get(key)
+  if (!entry || now - entry.firstAttempt > REGISTER_WINDOW_MS) {
+    registerAttempts.set(key, { count: 1, firstAttempt: now })
+    return { allowed: true, remaining: MAX_REGISTER_ATTEMPTS - 1, retryAfterMs: 0 }
+  }
+  if (entry.count >= MAX_REGISTER_ATTEMPTS) {
+    return { allowed: false, remaining: 0, retryAfterMs: REGISTER_WINDOW_MS - (now - entry.firstAttempt) }
+  }
+  entry.count += 1
+  return { allowed: true, remaining: MAX_REGISTER_ATTEMPTS - entry.count, retryAfterMs: 0 }
+}
+
+export function resetRegisterRateLimit(ipOrKey: string) {
+  registerAttempts.delete((ipOrKey || "anonymous").toLowerCase().trim())
+}
+

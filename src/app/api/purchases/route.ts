@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireAdmin, getSession, logAudit } from "@/lib/auth"
+import { resolveBranchId, requireBranchAccess } from "@/lib/branch"
 
 export const dynamic = "force-dynamic"
 
@@ -10,8 +11,13 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
     const q = searchParams.get("q")?.trim()
+    const branchId = await resolveBranchId(req)
 
     const where: Record<string, unknown> = {}
+    if (branchId) {
+      where.branchId = branchId
+    }
+
     if (q) {
       where.OR = [
         { reference: { contains: q } },
@@ -81,6 +87,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const branchAccess = await requireBranchAccess(req)
+    if (branchAccess instanceof NextResponse) return branchAccess
+    const { branchId } = branchAccess
+
     const productIds = items.map((i) => i.productId)
     const products = await db.product.findMany({ where: { id: { in: productIds } } })
     if (products.length !== new Set(productIds).size) {
@@ -90,6 +100,29 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Seguridad: Verificar que todos los productos pertenezcan a esta sede
+    for (const p of products) {
+      if (p.branchId && p.branchId !== branchId) {
+        return NextResponse.json(
+          { error: `El producto "${p.name}" pertenece a otra sede y no puede registrarse en compras de esta sede.` },
+          { status: 400 }
+        )
+      }
+    }
+
+    const cleanSupplierId =
+      supplierId && supplierId !== "none" ? supplierId : null
+
+    if (cleanSupplierId) {
+      const sup = await db.supplier.findUnique({ where: { id: cleanSupplierId } })
+      if (sup && sup.branchId && sup.branchId !== branchId) {
+        return NextResponse.json(
+          { error: `El proveedor "${sup.name}" pertenece a otra sede.` },
+          { status: 400 }
+        )
+      }
+    }
+
     const subtotal = items.reduce(
       (s, it) => s + Number(it.quantity) * Number(it.unitCost),
       0
@@ -97,15 +130,13 @@ export async function POST(req: NextRequest) {
     const tax = 0 // droguería simplificado sin IVA
     const total = subtotal
 
-    const cleanSupplierId =
-      supplierId && supplierId !== "none" ? supplierId : null
-
     // Crear compra + actualizar productos atómicamente
     const purchase = await db.$transaction(async (tx) => {
       const created = await tx.purchase.create({
         data: {
           reference: reference?.trim() || null,
           supplierId: cleanSupplierId,
+          branchId: branchId || null,
           notes: notes?.trim() || null,
           subtotal,
           tax,

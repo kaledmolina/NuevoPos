@@ -7,8 +7,24 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { getSession } = await import("@/lib/auth")
+  const session = getSession(req)
   try {
     const { id } = await params
+    const existing = await db.client.findUnique({ where: { id } })
+    if (!existing) return NextResponse.json({ error: "Cliente no encontrado" }, { status: 404 })
+
+    if (session && existing.branchId) {
+      const { canUserAccessBranch } = await import("@/lib/branch")
+      const hasAccess = await canUserAccessBranch(session.uid, existing.branchId)
+      if (!hasAccess) {
+        return NextResponse.json(
+          { error: "Acceso denegado: No tienes autorización para modificar clientes de esta sede." },
+          { status: 403 }
+        )
+      }
+    }
+
     const body = await req.json()
 
     const data: Record<string, unknown> = {}
@@ -40,6 +56,7 @@ export async function DELETE(
   const { requireAdmin, logAudit, getSession } = await import("@/lib/auth")
   const denied = requireAdmin(req)
   if (denied) return denied
+  const session = getSession(req)
   try {
     const { id } = await params
     const client = await db.client.findUnique({
@@ -47,6 +64,17 @@ export async function DELETE(
       include: { creditAccount: true, _count: { select: { sales: true } } },
     })
     if (!client) return NextResponse.json({ error: "Cliente no encontrado" }, { status: 404 })
+
+    if (session && client.branchId) {
+      const { canUserAccessBranch } = await import("@/lib/branch")
+      const hasAccess = await canUserAccessBranch(session.uid, client.branchId)
+      if (!hasAccess) {
+        return NextResponse.json(
+          { error: "Acceso denegado: No tienes autorización para eliminar clientes de esta sede." },
+          { status: 403 }
+        )
+      }
+    }
     if (client.isGeneric) {
       return NextResponse.json({ error: "El cliente genérico no puede ser eliminado" }, { status: 403 })
     }
@@ -59,7 +87,6 @@ export async function DELETE(
       )
     }
 
-    const session = getSession(req)
     try {
       await logAudit({
         action: "client_delete",

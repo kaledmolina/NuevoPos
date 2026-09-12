@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireAdmin, getSession, logAudit } from "@/lib/auth"
+import { verifyEntityBranchAccess } from "@/lib/branch"
 
 export const dynamic = "force-dynamic"
 
@@ -10,8 +11,21 @@ export async function PATCH(
 ) {
   const denied = requireAdmin(req)
   if (denied) return denied
+  const session = getSession(req)
   try {
     const { id } = await params
+    const existing = await db.product.findUnique({ where: { id } })
+    if (!existing) {
+      return NextResponse.json({ error: "Producto no encontrado" }, { status: 404 })
+    }
+
+    if (session && !(await verifyEntityBranchAccess(session.uid, existing.branchId))) {
+      return NextResponse.json(
+        { error: "Acceso denegado: No tienes autorización para modificar productos de esta sede." },
+        { status: 403 }
+      )
+    }
+
     const body = await req.json()
     const data: Record<string, unknown> = {}
     const fields = [
@@ -34,7 +48,6 @@ export async function PATCH(
       data,
       include: { category: true },
     })
-    const session = getSession(req)
     try {
       await logAudit({
         action: "product_update",
@@ -59,11 +72,23 @@ export async function DELETE(
 ) {
   const denied = requireAdmin(req)
   if (denied) return denied
+  const session = getSession(req)
   try {
     const { id } = await params
+    const existing = await db.product.findUnique({ where: { id } })
+    if (!existing) {
+      return NextResponse.json({ error: "Producto no encontrado" }, { status: 404 })
+    }
+
+    if (session && !(await verifyEntityBranchAccess(session.uid, existing.branchId))) {
+      return NextResponse.json(
+        { error: "Acceso denegado: No tienes autorización para desactivar productos de esta sede." },
+        { status: 403 }
+      )
+    }
+
     const salesCount = await db.saleItem.count({ where: { productId: id } })
     const purchasesCount = await db.purchaseItem.count({ where: { productId: id } })
-    const session = getSession(req)
 
     // Soft delete: Desactivar producto para proteger integridad histórica y contable
     await db.product.update({ where: { id }, data: { active: false } })

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireAdmin, getSession, logAudit } from "@/lib/auth"
+import { resolveBranchId, requireBranchAccess } from "@/lib/branch"
 
 export const dynamic = "force-dynamic"
 
@@ -14,7 +15,21 @@ export async function GET(req: NextRequest) {
   const pageSize = Math.min(100, Number(searchParams.get("pageSize") ?? 50))
   const paginate = searchParams.get("paginate") === "1"
 
+  const session = getSession(req)
+  let branchId = ""
+  if (session) {
+    const branchAccess = await requireBranchAccess(req)
+    if (branchAccess instanceof NextResponse) return branchAccess
+    branchId = branchAccess.branchId
+  } else {
+    branchId = await resolveBranchId(req)
+  }
+
   const where: Record<string, unknown> = {}
+  if (branchId) {
+    where.branchId = branchId
+  }
+
   if (q) {
     where.OR = [
       { name: { contains: q } },
@@ -63,6 +78,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const denied = requireAdmin(req)
   if (denied) return denied
+  const branchAccess = await requireBranchAccess(req)
+  if (branchAccess instanceof NextResponse) return branchAccess
+  const { branchId, session } = branchAccess
   try {
     const body = await req.json()
     const product = await db.product.create({
@@ -71,6 +89,7 @@ export async function POST(req: NextRequest) {
         barcode: body.barcode || null,
         sku: body.sku || body.barcode || null,
         categoryId: body.categoryId || null,
+        branchId: branchId || null,
         description: body.description || null,
         cost: Number(body.cost) || 0,
         price: Number(body.price) || 0,
@@ -84,7 +103,6 @@ export async function POST(req: NextRequest) {
       },
       include: { category: true },
     })
-    const session = getSession(req)
     try {
       await logAudit({
         action: "product_create",

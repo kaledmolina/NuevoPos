@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireAdmin } from "@/lib/auth"
+import { requireBranchAccess, verifyEntityBranchAccess } from "@/lib/branch"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -9,6 +10,10 @@ export const runtime = "nodejs"
 export async function GET(req: NextRequest) {
   const denied = requireAdmin(req)
   if (denied) return denied
+
+  const branchAccess = await requireBranchAccess(req)
+  if (branchAccess instanceof NextResponse) return branchAccess
+  const { branchId, session } = branchAccess
 
   const { searchParams } = new URL(req.url)
   const accountId = searchParams.get("accountId")
@@ -19,9 +24,13 @@ export async function GET(req: NextRequest) {
   if (!targetAccountId && clientId) {
     const acc = await db.creditAccount.findUnique({
       where: { clientId },
-      select: { id: true },
+      select: { id: true, client: { select: { branchId: true } } },
     })
     if (!acc) return NextResponse.json({ error: "Cuenta de crédito no encontrada" }, { status: 404 })
+    const hasAccess = await verifyEntityBranchAccess(session.uid, acc.client.branchId)
+    if (!hasAccess) {
+      return NextResponse.json({ error: "Acceso denegado: cuenta de otra sede" }, { status: 403 })
+    }
     targetAccountId = acc.id
   }
 
@@ -32,7 +41,9 @@ export async function GET(req: NextRequest) {
     const from = searchParams.get("from")
     const to = searchParams.get("to")
 
-    const where: Record<string, unknown> = {}
+    const where: Record<string, unknown> = {
+      account: { client: { branchId } },
+    }
     if (type) where.type = type
     if (method) where.method = method
     if (from || to) {
@@ -85,6 +96,11 @@ export async function GET(req: NextRequest) {
 
   if (!account) {
     return NextResponse.json({ error: "Cuenta no encontrada" }, { status: 404 })
+  }
+
+  const hasAccess = await verifyEntityBranchAccess(session.uid, account.client.branchId)
+  if (!hasAccess) {
+    return NextResponse.json({ error: "Acceso denegado: cuenta de otra sede" }, { status: 403 })
   }
 
   return NextResponse.json({

@@ -1,35 +1,44 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { daysUntil } from "@/lib/format"
+import { requireBranchAccess } from "@/lib/branch"
 
 export const dynamic = "force-dynamic"
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const branchAccess = await requireBranchAccess(req)
+  if (branchAccess instanceof NextResponse) return branchAccess
+  const { branchId } = branchAccess
+
   const now = new Date()
   const startToday = new Date(now)
   startToday.setHours(0, 0, 0, 0)
   const startMonth = new Date(now.getFullYear(), now.getMonth(), 1)
 
+  const branchFilter = branchId ? { branchId } : {}
+
   const [salesToday, salesMonth, products, salesAll, openSession, transactionsMonth] =
     await Promise.all([
       db.sale.findMany({
-        where: { createdAt: { gte: startToday }, status: "completada" },
+        where: { createdAt: { gte: startToday }, status: "completada", ...branchFilter },
       }),
       db.sale.findMany({
-        where: { createdAt: { gte: startMonth }, status: "completada" },
+        where: { createdAt: { gte: startMonth }, status: "completada", ...branchFilter },
       }),
-      db.product.findMany(),
+      db.product.findMany({
+        where: branchFilter,
+      }),
       db.sale.findMany({
-        where: { status: "completada" },
+        where: { status: "completada", ...branchFilter },
         orderBy: { createdAt: "desc" },
         take: 5,
         include: { client: true, items: true },
       }),
       db.cashSession.findFirst({
-        where: { status: "abierta" },
+        where: { status: "abierta", ...branchFilter },
         include: { transactions: true },
       }),
-      db.transaction.findMany({ where: { date: { gte: startMonth } } }),
+      db.transaction.findMany({ where: { date: { gte: startMonth }, ...branchFilter } }),
     ])
 
   const totalToday = salesToday.reduce((s, x) => s + x.total, 0)
@@ -85,7 +94,7 @@ export async function GET() {
       : 0
     void total
     const daySales = await db.sale.findMany({
-      where: { createdAt: { gte: d, lt: next }, status: "completada" },
+      where: { createdAt: { gte: d, lt: next }, status: "completada", ...branchFilter },
     })
     days.push({
       date: d.toLocaleDateString("es-CO", { weekday: "short", day: "2-digit" }),
@@ -95,7 +104,7 @@ export async function GET() {
 
   // Top productos vendidos (mes)
   const monthSaleItems = await db.saleItem.findMany({
-    where: { sale: { createdAt: { gte: startMonth }, status: "completada" } },
+    where: { sale: { createdAt: { gte: startMonth }, status: "completada", ...branchFilter } },
     include: { product: true },
   })
   const topMap = new Map<string, { name: string; qty: number; total: number }>()

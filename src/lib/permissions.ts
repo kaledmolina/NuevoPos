@@ -1,8 +1,9 @@
 // Definición de roles y permisos para el sistema POS de droguería
-
-export type Role = "admin" | "vendedor"
+ 
+export type Role = "superadmin" | "admin" | "vendedor"
 
 export type ViewKey =
+  | "superadmin"
   | "dashboard"
   | "pos"
   | "products"
@@ -14,6 +15,7 @@ export type ViewKey =
   | "finance"
   | "credit"
   | "reports"
+  | "personal"
   | "settings"
 
 export interface RoleConfig {
@@ -31,10 +33,38 @@ export interface RoleConfig {
 }
 
 export const ROLE_CONFIG: Record<Role, RoleConfig> = {
+  superadmin: {
+    label: "Superadministrador",
+    description: "Control total de la plataforma SaaS: aprobación de registros, inhabilitación y ranking de ventas.",
+    views: [
+      "superadmin",
+      "dashboard",
+      "pos",
+      "products",
+      "purchases",
+      "clients",
+      "suppliers",
+      "sales",
+      "cash",
+      "finance",
+      "credit",
+      "reports",
+      "personal",
+      "settings",
+    ],
+    canEditProducts: true,
+    canManagePurchases: true,
+    canManageClients: true,
+    canManageSuppliers: true,
+    canManageFinance: true,
+    canAnnulSales: true,
+    canSeeCosts: true,
+    canSeedData: true,
+  },
   admin: {
     label: "Administrador",
     description: "Acceso completo: inventario, compras, finanzas, reportes y configuración.",
-    views: ["dashboard", "pos", "products", "purchases", "clients", "suppliers", "sales", "cash", "finance", "credit", "reports", "settings"],
+    views: ["dashboard", "pos", "products", "purchases", "clients", "suppliers", "sales", "cash", "finance", "credit", "reports", "personal", "settings"],
     canEditProducts: true,
     canManagePurchases: true,
     canManageClients: true,
@@ -60,9 +90,11 @@ export const ROLE_CONFIG: Record<Role, RoleConfig> = {
 }
 
 export function canAccessView(role: Role, view: ViewKey): boolean {
-  return ROLE_CONFIG[role].views.includes(view)
+  return ROLE_CONFIG[role]?.views.includes(view) ?? false
 }
 
 export function defaultViewFor(role: Role): ViewKey {
+  if (role === "superadmin") return "superadmin"
   return role === "admin" ? "dashboard" : "pos"
 }
+

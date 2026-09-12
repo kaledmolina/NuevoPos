@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireAdmin, getSession, logAudit } from "@/lib/auth"
+import { resolveBranchId, requireBranchAccess } from "@/lib/branch"
 
 export const dynamic = "force-dynamic"
 
@@ -13,8 +14,12 @@ export async function GET(req: NextRequest) {
     const from = searchParams.get("from")
     const to = searchParams.get("to")
     const q = searchParams.get("q")?.trim()
+    const branchId = await resolveBranchId(req)
 
     const where: Record<string, unknown> = {}
+    if (branchId) {
+      where.branchId = branchId
+    }
 
     if (type === "ingreso" || type === "egreso") {
       where.type = type
@@ -58,6 +63,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const denied = requireAdmin(req)
   if (denied) return denied
+  const branchAccess = await requireBranchAccess(req)
+  if (branchAccess instanceof NextResponse) return branchAccess
+  const { branchId, session } = branchAccess
   try {
     const body = await req.json()
 
@@ -97,15 +105,19 @@ export async function POST(req: NextRequest) {
       date = new Date()
     }
 
-    // Si hay caja abierta, asociar el movimiento a la sesión actual
+    // Si hay caja abierta en esta sede, asociar el movimiento a la sesión actual
     let cashSessionId: string | null = null
     const openSession = await db.cashSession.findFirst({
-      where: { status: "abierta" },
+      where: {
+        status: "abierta",
+        ...(branchId ? { branchId } : {}),
+      },
     })
     if (openSession) cashSessionId = openSession.id
 
     const transaction = await db.transaction.create({
       data: {
+        branchId: branchId || null,
         type,
         category,
         amount,
