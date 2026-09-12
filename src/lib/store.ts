@@ -36,6 +36,7 @@ export interface BranchItem {
   phone?: string | null
   isMain: boolean
   active: boolean
+  tenantId?: string | null
   createdAt: string
   updatedAt?: string
   tenant?: {

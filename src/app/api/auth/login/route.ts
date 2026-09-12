@@ -79,6 +79,23 @@ export async function POST(req: NextRequest) {
           )
         }
       }
+      // Validación de estado del Administrador Principal si es un colaborador
+      if (!user.isPrimary && user.tenantId) {
+        const primaryAdmin = await db.user.findFirst({
+          where: { tenantId: user.tenantId, isPrimary: true },
+          select: { active: true, name: true },
+        })
+        if (primaryAdmin && !primaryAdmin.active) {
+          return NextResponse.json(
+            {
+              error: `El Administrador Principal de tu sede se encuentra inactivo. El acceso de los colaboradores ha sido inhabilitado.`,
+              code: "TENANT_ADMIN_INACTIVE",
+            },
+            { status: 403 }
+          )
+        }
+      }
+
       if (!user.active) {
         return NextResponse.json(
           { error: "Tu usuario ha sido desactivado. Consulta con tu Administrador.", code: "USER_INACTIVE" },

@@ -15,10 +15,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "No autenticado" }, { status: 401 })
     }
 
+    const { searchParams } = new URL(req.url)
+    const tenantIdParam = searchParams.get("tenantId")
+
     const branchWhere: Record<string, unknown> = {}
     if (session.role !== "superadmin") {
       if (session.tenantId) {
         branchWhere.tenantId = session.tenantId
+      }
+    } else if (tenantIdParam) {
+      if (tenantIdParam === "superadmin" || tenantIdParam === "null") {
+        branchWhere.tenantId = null
+      } else if (tenantIdParam !== "all") {
+        branchWhere.tenantId = tenantIdParam
       }
     }
 
@@ -115,21 +124,25 @@ export async function POST(req: NextRequest) {
   if (denied) return denied
 
   const session = getSession(req)
-  const tenantFilter = session?.tenantId ? { tenantId: session.tenantId } : {}
 
   try {
+    const body = await req.json()
+    const targetTenantId = session?.role === "superadmin" && body.tenantId !== undefined
+      ? (body.tenantId === "superadmin" || body.tenantId === "null" ? null : body.tenantId)
+      : (session?.tenantId || null)
+    const tenantFilter = targetTenantId ? { tenantId: targetTenantId } : { tenantId: null }
+
     const count = await db.branch.count({ where: tenantFilter })
     if (count >= MAX_BRANCHES) {
       return NextResponse.json(
         {
-          error: `Se ha alcanzado el límite máximo permitido de ${MAX_BRANCHES} sedes para tu negocio.`,
+          error: `Se ha alcanzado el límite máximo permitido de ${MAX_BRANCHES} sedes para este negocio.`,
           code: "MAX_LIMIT_REACHED",
         },
         { status: 400 }
       )
     }
 
-    const body = await req.json()
     const name = String(body.name ?? "").trim()
     const code = body.code ? String(body.code).trim().toUpperCase() : `SEDE-0${count + 1}`
     const address = body.address ? String(body.address).trim() : null
@@ -172,7 +185,7 @@ export async function POST(req: NextRequest) {
         phone,
         isMain: count === 0, // si es la primera, es principal
         active: true,
-        tenantId: session?.tenantId || null,
+        tenantId: targetTenantId,
       },
     })
 

@@ -83,9 +83,13 @@ export async function PATCH(
           data: { status: "inactivo" },
         })
 
-        // Inhabilitar temporalmente a los usuarios del negocio
+        // Inhabilitar temporalmente a los usuarios del negocio (excepto Superadmin)
         await tx.user.updateMany({
-          where: { tenantId: id },
+          where: {
+            tenantId: id,
+            role: { not: "superadmin" },
+            OR: [{ email: null }, { email: { not: "kaledmoly@gmail.com" } }],
+          },
           data: { active: false },
         })
 

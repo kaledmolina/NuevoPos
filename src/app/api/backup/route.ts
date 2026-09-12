@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { db } from "@/lib/db"
 import { requireAdmin, getSession, logAudit } from "@/lib/auth"
 import { getDatabasePath } from "@/lib/db"
 import fs from "fs"
@@ -9,21 +10,66 @@ export const runtime = "nodejs"
 
 const RETENTION_DAYS = 5
 
-// GET /api/backup — lista los backups disponibles y calcula la vigencia (solo admin)
+// GET /api/backup — lista los backups disponibles según el rol y negocio del usuario
 export async function GET(req: NextRequest) {
   const denied = requireAdmin(req)
   if (denied) return denied
+
+  const session = getSession(req)
+  if (!session) return NextResponse.json({ error: "No autenticado" }, { status: 401 })
+
   try {
     const dbPath = getDatabasePath()
-    const backupDir = path.join(path.dirname(dbPath), "backups")
-    if (!fs.existsSync(backupDir)) {
+    const now = Date.now()
+
+    if (session.role === "superadmin") {
+      // Superadmin: backups globales .db
+      const backupDir = path.join(path.dirname(dbPath), "backups")
+      if (!fs.existsSync(backupDir)) return NextResponse.json([])
+
+      const files = fs
+        .readdirSync(backupDir)
+        .filter((f) => f.endsWith(".db"))
+        .map((f) => {
+          const fp = path.join(backupDir, f)
+          const stat = fs.statSync(fp)
+          const ageMs = now - stat.mtime.getTime()
+          const ageDaysExact = ageMs / (1000 * 60 * 60 * 24)
+          const ageDays = Math.floor(ageDaysExact)
+          const canDelete = ageDaysExact >= RETENTION_DAYS
+          const daysRemaining = Math.max(0, Math.ceil(RETENTION_DAYS - ageDaysExact))
+
+          return {
+            name: f,
+            size: stat.size,
+            createdAt: stat.mtime.toISOString(),
+            canDelete,
+            ageDays,
+            daysRemaining,
+            type: "global_db",
+          }
+        })
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+
+      return NextResponse.json(files)
+    }
+
+    // Admin Regular: backups aislados exclusivos de su Tenant / Negocio
+    const tenantId = session.tenantId
+    if (!tenantId) {
       return NextResponse.json([])
     }
-    const now = Date.now()
-    const files = fs.readdirSync(backupDir)
-      .filter((f) => f.endsWith(".db"))
+
+    const tenantBackupDir = path.join(path.dirname(dbPath), "backups", "tenants", tenantId)
+    if (!fs.existsSync(tenantBackupDir)) {
+      return NextResponse.json([])
+    }
+
+    const files = fs
+      .readdirSync(tenantBackupDir)
+      .filter((f) => f.endsWith(".json"))
       .map((f) => {
-        const fp = path.join(backupDir, f)
+        const fp = path.join(tenantBackupDir, f)
         const stat = fs.statSync(fp)
         const ageMs = now - stat.mtime.getTime()
         const ageDaysExact = ageMs / (1000 * 60 * 60 * 24)
@@ -38,28 +84,165 @@ export async function GET(req: NextRequest) {
           canDelete,
           ageDays,
           daysRemaining,
+          type: "tenant_json",
         }
       })
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+
     return NextResponse.json(files)
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })
   }
 }
 
-// POST /api/backup — genera una copia de la BD SQLite (solo admin)
+// POST /api/backup — genera una copia de seguridad:
+// - Para Admin: exporta ÚNICAMENTE los datos de sus tiendas/sedes (JSON estructurado)
+// - Para Superadmin: genera el respaldo global SQLite (.db)
 export async function POST(req: NextRequest) {
   const denied = requireAdmin(req)
   if (denied) return denied
+
   const session = getSession(req)
+  if (!session) return NextResponse.json({ error: "No autenticado" }, { status: 401 })
+
   try {
     const dbPath = getDatabasePath()
+    const ts = new Date().toISOString().replace(/[:.]/g, "-")
+
+    // CASO 1: Administrador regular de negocio (Aislamiento de Tienda)
+    if (session.role !== "superadmin") {
+      const tenantId = session.tenantId
+      if (!tenantId) {
+        return NextResponse.json(
+          { error: "No tienes un negocio asignado para generar copias de seguridad." },
+          { status: 400 }
+        )
+      }
+
+      const tenant = await db.tenant.findUnique({
+        where: { id: tenantId },
+      })
+
+      const branches = await db.branch.findMany({
+        where: { tenantId },
+      })
+      const branchIds = branches.map((b) => b.id)
+
+      // Extraer datos exclusivos de este tenant y sus sedes
+      const [
+        users,
+        categories,
+        products,
+        clients,
+        suppliers,
+        sales,
+        purchases,
+        cashSessions,
+        transactions,
+      ] = await Promise.all([
+        db.user.findMany({
+          where: { tenantId },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            pinHash: true,
+            isPrimary: true,
+            allowedBranchIds: true,
+            active: true,
+          },
+        }),
+        db.category.findMany(),
+        db.product.findMany({
+          where: { branchId: { in: branchIds } },
+          include: { batches: true },
+        }),
+        db.client.findMany({
+          where: { branchId: { in: branchIds } },
+          include: { creditAccount: { include: { movements: true } } },
+        }),
+        db.supplier.findMany({
+          where: { branchId: { in: branchIds } },
+        }),
+        db.sale.findMany({
+          where: { branchId: { in: branchIds } },
+          include: { items: true },
+        }),
+        db.purchase.findMany({
+          where: { branchId: { in: branchIds } },
+          include: { items: true },
+        }),
+        db.cashSession.findMany({
+          where: { branchId: { in: branchIds } },
+          include: { transactions: true },
+        }),
+        db.transaction.findMany({
+          where: { branchId: { in: branchIds } },
+        }),
+      ])
+
+      const backupPayload = {
+        version: "1.0",
+        type: "tenant_backup",
+        tenantId,
+        tenantName: tenant?.name || "Negocio",
+        tenantSlug: tenant?.slug || "tienda",
+        exportedAt: new Date().toISOString(),
+        branches,
+        users,
+        categories,
+        products,
+        clients,
+        suppliers,
+        sales,
+        purchases,
+        cashSessions,
+        transactions,
+      }
+
+      const tenantDir = path.join(path.dirname(dbPath), "backups", "tenants", tenantId)
+      if (!fs.existsSync(tenantDir)) {
+        fs.mkdirSync(tenantDir, { recursive: true })
+      }
+
+      const fileName = `backup-${tenant?.slug || "tienda"}-${ts}.json`
+      const targetPath = path.join(tenantDir, fileName)
+      fs.writeFileSync(targetPath, JSON.stringify(backupPayload, null, 2), "utf-8")
+
+      const size = fs.statSync(targetPath).size
+
+      try {
+        await logAudit({
+          action: "backup_create",
+          entityType: "tenant",
+          entityId: tenantId,
+          userName: session.name,
+          role: session.role,
+          detail: `Copia de seguridad aislada creada para ${tenant?.name || "tienda"}: ${fileName}`,
+        })
+      } catch {
+        /* noop */
+      }
+
+      return NextResponse.json({
+        ok: true,
+        backup: fileName,
+        size,
+        createdAt: ts,
+        type: "tenant_json",
+        message: `Copia de seguridad de ${tenant?.name || "tu negocio"} generada exitosamente.`,
+      })
+    }
+
+    // CASO 2: Superadministrador (Backup global SQLite .db)
     if (!fs.existsSync(dbPath)) {
       return NextResponse.json({ error: "Base de datos no encontrada" }, { status: 500 })
     }
+
     const backupDir = path.join(path.dirname(dbPath), "backups")
     if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true })
-    const ts = new Date().toISOString().replace(/[:.]/g, "-")
+
     const backupPath = path.join(backupDir, `backup-${ts}.db`)
     fs.copyFileSync(dbPath, backupPath)
 
@@ -68,16 +251,20 @@ export async function POST(req: NextRequest) {
       await logAudit({
         action: "backup_create",
         entityType: "system",
-        userName: session?.name ?? "admin",
-        role: session?.role ?? "admin",
-        detail: `Backup creado: ${path.basename(backupPath)}`,
+        userName: session.name,
+        role: session.role,
+        detail: `Backup global SQLite creado: ${path.basename(backupPath)}`,
       })
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
+
     return NextResponse.json({
       ok: true,
       backup: path.basename(backupPath),
       size,
       createdAt: ts,
+      type: "global_db",
     })
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })
@@ -88,23 +275,36 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const denied = requireAdmin(req)
   if (denied) return denied
+
   const session = getSession(req)
+  if (!session) return NextResponse.json({ error: "No autenticado" }, { status: 401 })
 
   try {
     const { searchParams } = new URL(req.url)
     const purgeOld = searchParams.get("purgeOld") === "1" || searchParams.get("olderThan") === "5"
     const dbPath = getDatabasePath()
-    const backupDir = path.join(path.dirname(dbPath), "backups")
+    const now = Date.now()
+
+    let backupDir: string
+    let extension: string
+
+    if (session.role === "superadmin") {
+      backupDir = path.join(path.dirname(dbPath), "backups")
+      extension = ".db"
+    } else {
+      const tenantId = session.tenantId
+      if (!tenantId) return NextResponse.json({ error: "Negocio no identificado" }, { status: 400 })
+      backupDir = path.join(path.dirname(dbPath), "backups", "tenants", tenantId)
+      extension = ".json"
+    }
 
     if (!fs.existsSync(backupDir)) {
       return NextResponse.json({ error: "No hay directorio de backups" }, { status: 404 })
     }
 
-    const now = Date.now()
-
     // Caso 1: Purgar todas las copias con más de 5 días de antigüedad
     if (purgeOld) {
-      const files = fs.readdirSync(backupDir).filter((f) => f.endsWith(".db"))
+      const files = fs.readdirSync(backupDir).filter((f) => f.endsWith(extension))
       let deletedCount = 0
       for (const f of files) {
         const fp = path.join(backupDir, f)
@@ -114,7 +314,9 @@ export async function DELETE(req: NextRequest) {
           try {
             fs.unlinkSync(fp)
             deletedCount++
-          } catch { /* noop */ }
+          } catch {
+            /* noop */
+          }
         }
       }
 
@@ -122,26 +324,35 @@ export async function DELETE(req: NextRequest) {
         try {
           await logAudit({
             action: "backup_purge_old",
-            entityType: "system",
-            userName: session?.name ?? "admin",
-            role: session?.role ?? "admin",
+            entityType: session.role === "superadmin" ? "system" : "tenant",
+            userName: session.name,
+            role: session.role,
             detail: `Depuración masiva: se eliminaron ${deletedCount} copia(s) con más de ${RETENTION_DAYS} días de antigüedad`,
           })
-        } catch { /* noop */ }
+        } catch {
+          /* noop */
+        }
       }
 
       return NextResponse.json({
         ok: true,
-        message: deletedCount > 0
-          ? `Se eliminaron ${deletedCount} copia(s) de seguridad con más de ${RETENTION_DAYS} días.`
-          : `No se encontraron copias con más de ${RETENTION_DAYS} días de antigüedad. Las copias recientes están vigentes y protegidas.`,
+        message:
+          deletedCount > 0
+            ? `Se eliminaron ${deletedCount} copia(s) de seguridad con más de ${RETENTION_DAYS} días.`
+            : `No se encontraron copias con más de ${RETENTION_DAYS} días de antigüedad. Las copias recientes están protegidas.`,
         deletedCount,
       })
     }
 
     // Caso 2: Eliminar una copia individual específica
     const backupName = String(searchParams.get("name") ?? "").trim()
-    if (!backupName || backupName.includes("..") || backupName.includes("/") || backupName.includes("\\") || !backupName.endsWith(".db")) {
+    if (
+      !backupName ||
+      backupName.includes("..") ||
+      backupName.includes("/") ||
+      backupName.includes("\\") ||
+      !backupName.endsWith(extension)
+    ) {
       return NextResponse.json({ error: "Nombre de backup inválido" }, { status: 400 })
     }
 
@@ -154,7 +365,6 @@ export async function DELETE(req: NextRequest) {
     const ageDaysExact = (now - stat.mtime.getTime()) / (1000 * 60 * 60 * 24)
     const force = searchParams.get("force") === "1"
 
-    // Regla de retención de 5 días
     if (ageDaysExact < RETENTION_DAYS && !force) {
       const remainingDays = Math.ceil(RETENTION_DAYS - ageDaysExact)
       return NextResponse.json(
@@ -170,15 +380,18 @@ export async function DELETE(req: NextRequest) {
     try {
       await logAudit({
         action: "backup_delete",
-        entityType: "system",
-        userName: session?.name ?? "admin",
-        role: session?.role ?? "admin",
+        entityType: session.role === "superadmin" ? "system" : "tenant",
+        userName: session.name,
+        role: session.role,
         detail: `Backup eliminado (antigüedad: ${Math.floor(ageDaysExact)} días): ${backupName}`,
       })
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
 
     return NextResponse.json({ ok: true, message: `Copia de seguridad ${backupName} eliminada exitosamente` })
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })
   }
 }
+

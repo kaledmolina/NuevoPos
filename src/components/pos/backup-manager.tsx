@@ -25,6 +25,8 @@ interface Backup {
 
 export default function BackupManager({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const triggerRefresh = useAppStore((s) => s.triggerRefresh)
+  const role = useAppStore((s) => s.role)
+  const isSuperAdmin = role === "superadmin"
   const [backups, setBackups] = useState<Backup[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
@@ -107,9 +109,13 @@ export default function BackupManager({ open, onOpenChange }: { open: boolean; o
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto scroll-thin">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Database className="h-5 w-5 text-primary" /> Copias de seguridad</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5 text-primary" /> {isSuperAdmin ? "Copias de seguridad del sistema" : "Copias de seguridad de tu negocio"}
+            </DialogTitle>
             <DialogDescription>
-              Crea, restaura o descarga copias de seguridad de tu base de datos. Se conservan los últimos 10 backups.
+              {isSuperAdmin
+                ? "Crea, restaura o descarga copias de seguridad completas de la base de datos SQLite."
+                : "Crea, restaura o descarga copias de seguridad de los datos de tu negocio y sedes aisladas."}
             </DialogDescription>
           </DialogHeader>
 
@@ -189,11 +195,11 @@ export default function BackupManager({ open, onOpenChange }: { open: boolean; o
               <AlertTriangle className="h-5 w-5" /> ¿Restaurar backup?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Se reemplazarán <strong className="text-foreground">todos los datos actuales</strong> con el backup{" "}
+              Se reemplazarán <strong className="text-foreground">{isSuperAdmin ? "todos los datos actuales del sistema" : "los datos actuales de tus sedes"}</strong> con el backup{" "}
               <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">{restoreTarget?.name}</code> del{" "}
               {restoreTarget && formatDateTime(restoreTarget.createdAt)}.
               <br /><br />
-              Antes de restaurar, se creará automáticamente un backup del estado actual por seguridad. Esta acción no se puede deshacer.
+              Antes de restaurar, se creará automáticamente una copia del estado previo por seguridad. Esta acción no se puede deshacer.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

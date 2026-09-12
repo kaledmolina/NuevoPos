@@ -28,28 +28,42 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const allBranches = await db.branch.findMany({ select: { id: true, name: true } })
-    const allBranchIds = allBranches.map((b) => b.id)
+    const { searchParams } = new URL(req.url)
+    const tenantIdParam = searchParams.get("tenantId")
 
     const userFilter: Record<string, unknown> = {}
-    if (session && session.role !== "superadmin" && session.tenantId) {
-      userFilter.tenantId = session.tenantId
+    if (session && session.role !== "superadmin") {
+      if (session.tenantId) {
+        userFilter.tenantId = session.tenantId
+      }
       userFilter.role = { not: "superadmin" }
+    } else if (session?.role === "superadmin" && tenantIdParam) {
+      if (tenantIdParam === "superadmin" || tenantIdParam === "null") {
+        userFilter.tenantId = null
+      } else if (tenantIdParam !== "all") {
+        userFilter.tenantId = tenantIdParam
+      }
     }
+
+    const allBranches = await db.branch.findMany({
+      select: { id: true, name: true, code: true, tenantId: true },
+    })
 
     const rawUsers = await db.user.findMany({
       where: userFilter,
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        isPrimary: true,
-        allowedBranchIds: true,
-        active: true,
-        createdAt: true,
+      include: {
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            ownerName: true,
+            ownerEmail: true,
+          },
+        },
       },
       orderBy: [
+        { tenantId: "asc" },
         { isPrimary: "desc" },
         { role: "asc" },
         { name: "asc" },
@@ -57,16 +71,28 @@ export async function GET(req: NextRequest) {
     })
 
     const users = rawUsers.map((u) => {
+      // Sedes que pertenecen exclusivamente a este usuario / tenant
+      const tenantBranches = allBranches.filter((b) => b.tenantId === u.tenantId)
+      const tenantBranchIds = tenantBranches.map((b) => b.id)
+
       let allowed: string[] = []
       if (u.isPrimary) {
-        allowed = allBranchIds
+        // El administrador principal tiene acceso a todas las sedes de SU PROPIO NEGOCIO (no del sistema global)
+        allowed = tenantBranchIds
       } else {
         try {
-          allowed = JSON.parse(u.allowedBranchIds || "[]")
+          const parsed = JSON.parse(u.allowedBranchIds || "[]")
+          allowed = Array.isArray(parsed) ? parsed.filter((id) => tenantBranchIds.includes(id)) : []
         } catch {
           allowed = []
         }
       }
+
+      // Detalle de nombres y códigos de las sedes asignadas
+      const assignedBranches = tenantBranches
+        .filter((b) => allowed.includes(b.id))
+        .map((b) => ({ id: b.id, name: b.name, code: b.code }))
+
       return {
         id: u.id,
         name: u.name,
@@ -74,6 +100,12 @@ export async function GET(req: NextRequest) {
         role: u.role,
         isPrimary: u.isPrimary,
         allowedBranchIds: allowed,
+        assignedBranches,
+        tenantId: u.tenantId,
+        tenantName: u.tenant?.name || (u.tenantId === null ? "Administración SaaS" : null),
+        tenantOwnerName: u.tenant?.ownerName || (u.isPrimary ? u.name : null),
+        tenantOwnerEmail: u.tenant?.ownerEmail || (u.isPrimary ? u.email : null),
+        tenantBranchCount: tenantBranches.length,
         active: u.active,
         createdAt: u.createdAt,
       }
@@ -93,6 +125,31 @@ export async function POST(req: NextRequest) {
   const session = getSession(req)
 
   try {
+    // Si no es Superadmin, verificar que el negocio y su Administrador Principal estén activos
+    if (session?.tenantId && session.role !== "superadmin") {
+      const tenant = await db.tenant.findUnique({
+        where: { id: session.tenantId },
+        select: { status: true },
+      })
+      if (tenant?.status === "inactivo") {
+        return NextResponse.json(
+          { error: "No es posible crear colaboradores: El negocio se encuentra inhabilitado." },
+          { status: 403 }
+        )
+      }
+
+      const primaryAdmin = await db.user.findFirst({
+        where: { tenantId: session.tenantId, isPrimary: true },
+        select: { active: true },
+      })
+      if (primaryAdmin && !primaryAdmin.active) {
+        return NextResponse.json(
+          { error: "No es posible crear colaboradores: El Administrador Principal está inactivo." },
+          { status: 403 }
+        )
+      }
+    }
+
     const body = await req.json()
     const name = String(body.name ?? "").trim()
     const email = body.email ? String(body.email).trim().toLowerCase() : null
@@ -321,11 +378,63 @@ export async function PUT(req: NextRequest) {
     }
 
     // Estado activo
+    let cascadeMessage: string | null = null
     if (body.active !== undefined) {
       const active = Boolean(body.active)
-      if (targetUser.isPrimary && !active) {
-        return NextResponse.json({ error: "El Administrador Principal no puede ser desactivado." }, { status: 400 })
+
+      // Protección crítica permanente: El Superadministrador del sistema NUNCA puede ser desactivado
+      if ((targetUser.role === "superadmin" || targetUser.email === "kaledmoly@gmail.com") && !active) {
+        return NextResponse.json(
+          { error: "El Superadministrador del sistema está protegido permanentemente y no se puede deshabilitar nunca." },
+          { status: 400 }
+        )
       }
+
+      // Si es un Administrador Principal de una sede / negocio
+      if (targetUser.isPrimary) {
+        // Solo el Superadministrador tiene autorización para activar o desactivar al Administrador Principal
+        if (session?.role !== "superadmin") {
+          return NextResponse.json(
+            { error: "Solo el Superadministrador puede modificar el estado del Administrador Principal." },
+            { status: 403 }
+          )
+        }
+
+        // Cascada automática: Al desactivar al Administrador Principal, desactivar automáticamente a todos sus colaboradores
+        if (!active && targetUser.tenantId) {
+          await db.user.updateMany({
+            where: {
+              tenantId: targetUser.tenantId,
+              role: { not: "superadmin" },
+              OR: [{ email: null }, { email: { not: "kaledmoly@gmail.com" } }],
+            },
+            data: { active: false },
+          })
+          await db.tenant.update({
+            where: { id: targetUser.tenantId },
+            data: { status: "inactivo" },
+          }).catch(() => {})
+
+          cascadeMessage = `Administrador Principal "${targetUser.name}" desactivado. Se desactivaron automáticamente todos sus colaboradores asociados.`
+
+          await logAudit({
+            action: "admin_tenant_cascade_deactivate",
+            entityType: "tenant",
+            entityId: targetUser.tenantId,
+            userName: session?.name || "Superadmin",
+            role: "superadmin",
+            detail: `Admin Principal "${targetUser.name}" inactivado. Se inactivaron automáticamente todos los colaboradores del negocio.`,
+            meta: { tenantId: targetUser.tenantId, adminId: targetUser.id },
+          }).catch(() => {})
+        } else if (active && targetUser.tenantId) {
+          // Si el superadmin reactiva al Administrador Principal, se restaura también el negocio
+          await db.tenant.update({
+            where: { id: targetUser.tenantId },
+            data: { status: "aprobado" },
+          }).catch(() => {})
+        }
+      }
+
       updateData.active = active
     }
 
@@ -355,8 +464,9 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      message: `Colaborador "${updatedUser.name}" actualizado correctamente.`,
+      message: cascadeMessage || `Colaborador "${updatedUser.name}" actualizado correctamente.`,
       user: updatedUser,
+      cascaded: Boolean(cascadeMessage),
     })
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })
@@ -382,9 +492,9 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "Usuario no encontrado." }, { status: 404 })
     }
 
-    if (targetUser.role === "superadmin") {
+    if (targetUser.role === "superadmin" || targetUser.email === "kaledmoly@gmail.com") {
       return NextResponse.json(
-        { error: "El Superadministrador no puede ser desactivado." },
+        { error: "El Superadministrador del sistema está protegido permanentemente y no puede ser desactivado ni eliminado." },
         { status: 403 }
       )
     }
@@ -396,12 +506,29 @@ export async function DELETE(req: NextRequest) {
       )
     }
 
-
     if (targetUser.isPrimary) {
-      return NextResponse.json(
-        { error: "El Administrador Principal del sistema no puede ser eliminado ni desactivado." },
-        { status: 400 }
-      )
+      if (session?.role !== "superadmin") {
+        return NextResponse.json(
+          { error: "El Administrador Principal no puede ser eliminado por un colaborador." },
+          { status: 403 }
+        )
+      }
+
+      // Cascada para Superadmin: inactivar todos los usuarios del negocio
+      if (targetUser.tenantId) {
+        await db.user.updateMany({
+          where: {
+            tenantId: targetUser.tenantId,
+            role: { not: "superadmin" },
+            OR: [{ email: null }, { email: { not: "kaledmoly@gmail.com" } }],
+          },
+          data: { active: false },
+        })
+        await db.tenant.update({
+          where: { id: targetUser.tenantId },
+          data: { status: "inactivo" },
+        }).catch(() => {})
+      }
     }
 
     // Soft delete: cambiar estado a inactivo

@@ -13,6 +13,9 @@ export async function POST(req: NextRequest) {
   if (denied) return denied
 
   const session = getSession(req)
+  if (!session) {
+    return NextResponse.json({ error: "No autenticado" }, { status: 401 })
+  }
 
   try {
     const formData = await req.formData()
@@ -22,6 +25,70 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No se proporcionó ningún archivo" }, { status: 400 })
     }
 
+    if (session.role !== "superadmin") {
+      const tenantId = session.tenantId
+      if (!tenantId) {
+        return NextResponse.json({ error: "No perteneces a ningún negocio" }, { status: 403 })
+      }
+
+      if (!file.name.endsWith(".json")) {
+        return NextResponse.json({ error: "Como administrador de tienda, debes subir un archivo de respaldo .json" }, { status: 400 })
+      }
+
+      // Tamaño máximo para JSON: 20MB
+      const MAX_JSON_SIZE = 20 * 1024 * 1024
+      if (file.size > MAX_JSON_SIZE) {
+        return NextResponse.json({ error: "El archivo supera el tamaño máximo de 20MB" }, { status: 400 })
+      }
+
+      const text = await file.text()
+      let parsed: any
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        return NextResponse.json({ error: "El archivo subido no es un JSON válido" }, { status: 400 })
+      }
+
+      if (parsed.type !== "tenant_backup") {
+        return NextResponse.json({ error: "El archivo no contiene un formato válido de copia de seguridad de tienda" }, { status: 400 })
+      }
+
+      const dbPath = getDatabasePath()
+      const tenantDir = path.join(path.dirname(dbPath), "backups", "tenants", tenantId)
+      if (!fs.existsSync(tenantDir)) {
+        fs.mkdirSync(tenantDir, { recursive: true })
+      }
+
+      const sanitizedBase = path.basename(file.name, ".json").replace(/[^a-zA-Z0-9_-]/g, "_")
+      const ts = new Date().toISOString().replace(/[:.]/g, "-")
+      const backupFileName = `upload-${sanitizedBase}-${ts}.json`
+      const targetPath = path.join(tenantDir, backupFileName)
+
+      fs.writeFileSync(targetPath, text, "utf-8")
+
+      try {
+        await logAudit({
+          action: "backup_upload",
+          entityType: "tenant",
+          entityId: tenantId,
+          userName: session.name,
+          role: session.role,
+          detail: `Copia de seguridad de tienda subida: ${backupFileName}`,
+          meta: { originalName: file.name, size: file.size },
+        })
+      } catch {
+        /* noop */
+      }
+
+      return NextResponse.json({
+        ok: true,
+        backup: backupFileName,
+        size: file.size,
+        message: "Copia de seguridad de tienda subida exitosamente.",
+      })
+    }
+
+    // SUPERADMIN: Subir .db SQLite
     if (!file.name.endsWith(".db")) {
       return NextResponse.json({ error: "El archivo debe tener extensión .db" }, { status: 400 })
     }
@@ -36,7 +103,6 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(arrayBuffer)
 
     // Validar cabecera SQLite (primeros 16 bytes: "SQLite format 3\0")
-    const SQLITE_HEADER = "SQLite format 3\0"
     const headerString = buffer.subarray(0, 16).toString("utf-8")
     if (!headerString.startsWith("SQLite format 3")) {
       return NextResponse.json(
@@ -62,9 +128,9 @@ export async function POST(req: NextRequest) {
       await logAudit({
         action: "backup_upload",
         entityType: "system",
-        userName: session?.name ?? "admin",
-        role: session?.role ?? "admin",
-        detail: `Backup subido exitosamente: ${backupFileName} (${(file.size / 1024).toFixed(1)} KB)`,
+        userName: session?.name ?? "superadmin",
+        role: session?.role ?? "superadmin",
+        detail: `Backup SQLite subido exitosamente: ${backupFileName} (${(file.size / 1024).toFixed(1)} KB)`,
         meta: { originalName: file.name, size: file.size },
       })
     } catch {

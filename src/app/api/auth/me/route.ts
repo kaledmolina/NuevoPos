@@ -42,6 +42,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ user: null })
     }
 
+    if (user.role !== "superadmin") {
+      if (user.tenant?.status === "inactivo") {
+        return NextResponse.json({ user: null })
+      }
+      if (!user.isPrimary && user.tenantId) {
+        const primaryAdmin = await db.user.findFirst({
+          where: { tenantId: user.tenantId, isPrimary: true },
+          select: { active: true },
+        })
+        if (primaryAdmin && !primaryAdmin.active) {
+          return NextResponse.json({ user: null })
+        }
+      }
+    }
+
     const allowedBranchIds = await getUserAllowedBranches(user.id)
 
     // Si el usuario no tiene tenant directo pero es primary, él mismo es el admin

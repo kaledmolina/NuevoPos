@@ -104,8 +104,9 @@ export default function SettingsView() {
   const { theme, setTheme } = useTheme()
   const setView = useAppStore((s) => s.setView)
   const triggerRefresh = useAppStore((s) => s.triggerRefresh)
-  const refreshKey = useAppStore((s) => s.refreshKey)
   const role = useAppStore((s) => s.role)
+  const tenantName = useAppStore((s) => s.tenantName)
+  const refreshKey = useAppStore((s) => s.refreshKey)
 
   // Configuración de la tienda
   const [settingsForm, setSettingsForm] = useState({
@@ -349,12 +350,18 @@ export default function SettingsView() {
     }
   }
 
-  // Subir backup (.db)
+  // Subir backup (.json para tienda o .db para superadmin)
   const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!file.name.endsWith(".db")) {
-      toast.error("El archivo debe ser una base de datos SQLite con extensión .db")
+    const isSuper = role === "superadmin"
+    const expectedExt = isSuper ? ".db" : ".json"
+    if (!file.name.endsWith(expectedExt)) {
+      toast.error(
+        isSuper
+          ? "El archivo debe ser una base de datos SQLite con extensión .db"
+          : "El archivo de respaldo de tienda debe tener formato .json"
+      )
       e.target.value = ""
       return
     }
@@ -464,13 +471,15 @@ export default function SettingsView() {
               <span className="truncate">Backups</span>
             </TabsTrigger>
 
-            <TabsTrigger
-              value="demo"
-              className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
-            >
-              <IconDatabase className="h-4 w-4 shrink-0" />
-              <span className="truncate">Demo</span>
-            </TabsTrigger>
+            {role === "superadmin" && (
+              <TabsTrigger
+                value="demo"
+                className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
+              >
+                <IconDatabase className="h-4 w-4 shrink-0" />
+                <span className="truncate">Demo</span>
+              </TabsTrigger>
+            )}
 
             <TabsTrigger
               value="help"
@@ -1026,9 +1035,15 @@ export default function SettingsView() {
                   <IconDeviceFloppy className="h-4 w-4" />
                 </div>
                 <div>
-                  <CardTitle className="text-sm sm:text-base font-bold">Copias de Seguridad de Base de Datos</CardTitle>
+                  <CardTitle className="text-sm sm:text-base font-bold">
+                    {role === "superadmin"
+                      ? "Copias de Seguridad Globales (Base de Datos SQLite)"
+                      : `Copias de Seguridad de ${tenantName || "Mi Negocio"} (Datos Aislados)`}
+                  </CardTitle>
                   <CardDescription className="text-xs mt-0.5">
-                    Crea respaldos instantáneos, descarga copias de seguridad o restaura con total seguridad
+                    {role === "superadmin"
+                      ? "Respaldos completos del motor SQLite de toda la plataforma SaaS."
+                      : "Respalda y restaura únicamente la información de tus sedes (catálogo, ventas, compras, clientes y cajas)."}
                   </CardDescription>
                 </div>
               </div>
@@ -1036,7 +1051,11 @@ export default function SettingsView() {
             <CardContent className="space-y-4 p-3.5 sm:p-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Button onClick={createBackup} disabled={creatingBackup} className="h-10 font-semibold shadow-xs">
-                  {creatingBackup ? <><IconRefresh className="h-4 w-4 mr-2 animate-spin" /> Creando copia…</> : <><IconDatabase className="h-4 w-4 mr-2" /> Crear nueva copia ahora</>}
+                  {creatingBackup ? (
+                    <><IconRefresh className="h-4 w-4 mr-2 animate-spin" /> Creando copia…</>
+                  ) : (
+                    <><IconDatabase className="h-4 w-4 mr-2" /> {role === "superadmin" ? "Crear backup global (.db)" : "Crear respaldo de mi negocio (.json)"}</>
+                  )}
                 </Button>
                 <Button
                   onClick={() => fileInputRef.current?.click()}
@@ -1044,12 +1063,16 @@ export default function SettingsView() {
                   variant="outline"
                   className="h-10 font-semibold border-dashed"
                 >
-                  {uploadingBackup ? <><IconRefresh className="h-4 w-4 mr-2 animate-spin" /> Subiendo copia…</> : <><IconUpload className="h-4 w-4 mr-2" /> Subir archivo de copia (.db)</>}
+                  {uploadingBackup ? (
+                    <><IconRefresh className="h-4 w-4 mr-2 animate-spin" /> Subiendo copia…</>
+                  ) : (
+                    <><IconUpload className="h-4 w-4 mr-2" /> {role === "superadmin" ? "Subir archivo de copia (.db)" : "Subir archivo de copia (.json)"}</>
+                  )}
                 </Button>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".db"
+                  accept={role === "superadmin" ? ".db" : ".json"}
                   className="hidden"
                   onChange={handleUploadFile}
                 />
@@ -1154,7 +1177,8 @@ export default function SettingsView() {
           </Card>
         </TabsContent>
 
-        {/* ==================== PESTAÑA 4: DATOS DEMO & RESETEO ==================== */}
+        {/* ==================== PESTAÑA 4: DATOS DEMO & RESETEO (SOLO SUPERADMIN) ==================== */}
+        {role === "superadmin" && (
         <TabsContent value="demo" className="space-y-4">
           <Card className="rounded-xl shadow-xs border-border/80 overflow-hidden">
             <CardHeader className="p-3.5 sm:p-4 pb-2 sm:pb-3 border-b bg-muted/20">
@@ -1297,6 +1321,7 @@ export default function SettingsView() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
 
         {/* ==================== PESTAÑA 5: AYUDA & TUTORIAL ==================== */}
         <TabsContent value="help" className="space-y-4">

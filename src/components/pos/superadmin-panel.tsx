@@ -25,7 +25,19 @@ import {
   IconChartBar,
   IconShieldCheck,
   IconBuildingCommunity,
+  IconDatabase,
+  IconTrash,
 } from "@tabler/icons-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
@@ -88,6 +100,43 @@ export default function SuperadminPanel() {
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<"todos" | "pendiente" | "aprobado" | "inactivo">("todos")
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null)
+  const [seedingDemo, setSeedingDemo] = useState(false)
+  const [resettingDemo, setResettingDemo] = useState(false)
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
+
+  const handleGenerateDemo = async () => {
+    setSeedingDemo(true)
+    try {
+      const res = await apiFetch<{ ok: boolean; message: string }>("/api/seed", {
+        method: "POST",
+      })
+      toast.success(res.message || "Datos demo SaaS generados exitosamente")
+      loadData()
+      setTimeout(() => window.location.reload(), 1200)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSeedingDemo(false)
+    }
+  }
+
+  const handleResetDemo = async () => {
+    setResettingDemo(true)
+    try {
+      const res = await apiFetch<{ ok: boolean; message: string }>("/api/reset", {
+        method: "POST",
+        body: JSON.stringify({ confirm: "BORRAR DEMO" }),
+      })
+      toast.success(res.message || "Datos demo limpiados exitosamente")
+      setResetConfirmOpen(false)
+      loadData()
+      setTimeout(() => window.location.reload(), 1200)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setResettingDemo(false)
+    }
+  }
 
   const loadData = useCallback(async () => {
     try {
@@ -176,16 +225,44 @@ export default function SuperadminPanel() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="default"
+            size="sm"
+            onClick={handleGenerateDemo}
+            disabled={seedingDemo || refreshing}
+            className="h-10 px-3.5 rounded-xl text-xs font-semibold gap-1.5 shadow-xs"
+            title="Genera empresas, múltiples sedes, personal y ventas demo"
+          >
+            {seedingDemo ? (
+              <IconRefresh className="h-4 w-4 animate-spin" />
+            ) : (
+              <IconDatabase className="h-4 w-4" />
+            )}
+            Cargar Demo SaaS
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setResetConfirmOpen(true)}
+            disabled={resettingDemo || refreshing}
+            className="h-10 px-3.5 rounded-xl text-xs font-semibold gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
+            title="Purga todas las empresas y datos demo, conservando solo tu Superadmin con una sede vacía"
+          >
+            <IconTrash className="h-4 w-4" />
+            Limpiar Demo (Reset)
+          </Button>
+
           <Button
             variant="outline"
             size="sm"
             onClick={loadData}
             disabled={refreshing}
-            className="h-10 px-4 rounded-xl text-xs font-semibold gap-2"
+            className="h-10 px-3 rounded-xl text-xs font-semibold gap-1.5"
           >
             <IconRefresh className={cn("h-4 w-4", refreshing && "animate-spin text-primary")} />
-            Refrescar Métricas
+            Refrescar
           </Button>
         </div>
       </div>
@@ -645,6 +722,40 @@ export default function SuperadminPanel() {
           </Card>
         </div>
       )}
+      {/* Modal de confirmación para purga de datos demo */}
+      <AlertDialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
+        <AlertDialogContent className="max-w-md rounded-2xl border-destructive/30">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive font-bold">
+              <IconAlertTriangle className="h-5 w-5" /> ¿Purgar datos demo y reiniciar sistema?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-left space-y-2 text-xs leading-relaxed text-muted-foreground">
+              <span className="block">
+                Esta acción eliminará de forma permanente todos los negocios registrados, ventas ficticias, productos, cajas, compras y personal de demostración.
+              </span>
+              <span className="font-semibold text-foreground bg-muted p-2.5 rounded-lg block border border-border">
+                ⚠️ Únicamente se conservará tu cuenta de Superadministrador (kaledmoly@gmail.com) con una sede vacía lista para operar.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resettingDemo}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleResetDemo}
+              disabled={resettingDemo}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 font-semibold"
+            >
+              {resettingDemo ? (
+                <>
+                  <IconRefresh className="h-4 w-4 mr-1.5 animate-spin" /> Purgando…
+                </>
+              ) : (
+                "Sí, purgar todo y reiniciar"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
