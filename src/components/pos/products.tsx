@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, useCallback } from "react"
+import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { apiFetch } from "@/lib/api"
 import { useAppStore } from "@/lib/store"
 import { ROLE_CONFIG } from "@/lib/permissions"
@@ -49,6 +49,9 @@ import {
   IconMapPin,
   IconHash,
   IconReceipt2,
+  IconPhoto,
+  IconUpload,
+  IconLink,
 } from "@tabler/icons-react"
 
 interface Category { id: string; name: string; _count?: { products: number } }
@@ -60,6 +63,7 @@ interface Product {
   categoryId: string | null
   category?: { name: string } | null
   description: string | null
+  image?: string | null
   cost: number
   price: number
   stock: number
@@ -75,7 +79,7 @@ interface Product {
 }
 
 const emptyForm = {
-  name: "", barcode: "", sku: "", categoryId: "", description: "",
+  name: "", barcode: "", sku: "", categoryId: "", description: "", image: "",
   cost: "", price: "", stock: "", minStock: "5", unit: "unidad",
   expirationDate: "", batch: "", location: "", active: true,
 }
@@ -140,19 +144,63 @@ export default function ProductsView() {
     setShowExpiring(false)
   }
 
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [showUrlInput, setShowUrlInput] = useState(false)
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith("image/")) {
+      return toast.error("Solo se admiten archivos de imagen (JPG, PNG, WEBP, etc.)")
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return toast.error("La imagen debe pesar menos de 5MB")
+    }
+
+    setUploadingImage(true)
+    try {
+      const formData = new FormData()
+      formData.append("file", file)
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || "Error al subir la imagen")
+      }
+
+      setForm((prev) => ({ ...prev, image: data.url }))
+      toast.success("Imagen del producto cargada")
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setUploadingImage(false)
+      if (fileInputRef.current) fileInputRef.current.value = ""
+    }
+  }
+
   const openNew = () => {
     setEditing(null)
     setForm(emptyForm)
+    setShowUrlInput(false)
     setOpen(true)
   }
   const openEdit = (p: Product) => {
     setEditing(p)
+    setShowUrlInput(false)
     setForm({
       name: p.name,
       barcode: p.barcode ?? "",
       sku: p.sku ?? "",
       categoryId: p.categoryId ?? "",
       description: p.description ?? "",
+      image: p.image ?? "",
       cost: String(p.cost),
       price: String(p.price),
       stock: String(p.stock),
@@ -523,13 +571,27 @@ export default function ProductsView() {
                       return (
                         <TableRow key={p.id}>
                           <TableCell>
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-medium">{p.name}</span>
-                              {!p.active && (
-                                <Badge variant="secondary" className="text-[10px] text-muted-foreground">Inactivo</Badge>
+                            <div className="flex items-center gap-2.5">
+                              {p.image ? (
+                                <div className="h-9 w-9 rounded-lg border bg-muted/30 overflow-hidden shrink-0 shadow-xs">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={p.image} alt={p.name} className="h-full w-full object-cover" />
+                                </div>
+                              ) : (
+                                <div className="h-9 w-9 rounded-lg border border-dashed bg-muted/10 flex items-center justify-center text-muted-foreground/40 shrink-0">
+                                  <IconPackage className="h-4 w-4" />
+                                </div>
                               )}
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-medium">{p.name}</span>
+                                  {!p.active && (
+                                    <Badge variant="secondary" className="text-[10px] text-muted-foreground">Inactivo</Badge>
+                                  )}
+                                </div>
+                                <div className="text-xs text-muted-foreground">{p.barcode ?? "Sin código"} · {p.unit}</div>
+                              </div>
                             </div>
-                            <div className="text-xs text-muted-foreground">{p.barcode ?? "Sin código"} · {p.unit}</div>
                           </TableCell>
                           <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{p.category?.name ?? "—"}</TableCell>
                           <TableCell className="text-right font-medium">{formatCurrency(p.price)}</TableCell>
@@ -636,15 +698,27 @@ export default function ProductsView() {
             return (
               <Card key={p.id}>
                 <CardContent className="p-3 space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className="font-medium leading-tight">{p.name}</p>
-                        {!p.active && (
-                          <Badge variant="secondary" className="text-[10px] text-muted-foreground">Inactivo</Badge>
-                        )}
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                      {p.image ? (
+                        <div className="h-12 w-12 rounded-xl border bg-muted/30 overflow-hidden shrink-0 shadow-xs">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={p.image} alt={p.name} className="h-full w-full object-cover" />
+                        </div>
+                      ) : (
+                        <div className="h-12 w-12 rounded-xl border border-dashed bg-muted/20 flex items-center justify-center text-muted-foreground/40 shrink-0">
+                          <IconPhoto className="h-5 w-5" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="font-medium leading-tight">{p.name}</p>
+                          {!p.active && (
+                            <Badge variant="secondary" className="text-[10px] text-muted-foreground">Inactivo</Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground font-mono">{p.barcode ?? "Sin código"} · {p.unit}</p>
                       </div>
-                      <p className="text-xs text-muted-foreground font-mono">{p.barcode ?? "Sin código"} · {p.unit}</p>
                     </div>
                     {p.category?.name && (
                       <Badge variant="outline" className="shrink-0 text-[10px]">{p.category.name}</Badge>
@@ -812,6 +886,103 @@ export default function ProductsView() {
               <Label>Ubicación</Label>
               <Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Estante E1" />
             </div>
+            {/* Campo Imagen del Producto */}
+            <div className="md:col-span-2 space-y-2.5 p-3.5 rounded-2xl border border-dashed border-border/80 bg-muted/20">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold flex items-center gap-1.5">
+                  <IconPhoto className="h-4 w-4 text-primary" /> Imagen del Producto <span className="text-muted-foreground font-normal">(opcional)</span>
+                </Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowUrlInput(!showUrlInput)}
+                  className="h-7 text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  <IconLink className="h-3 w-3 mr-1" />
+                  {showUrlInput ? "Ocultar URL manual" : "Ingresar URL de imagen"}
+                </Button>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center gap-3">
+                {/* Preview de la imagen */}
+                <div className="relative h-24 w-24 rounded-xl border bg-card shadow-xs overflow-hidden flex items-center justify-center shrink-0">
+                  {form.image ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={form.image}
+                        alt="Vista previa"
+                        className="h-full w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setForm((prev) => ({ ...prev, image: "" }))}
+                        className="absolute top-1 right-1 h-5 w-5 bg-black/60 hover:bg-black/80 text-white rounded-full flex items-center justify-center transition-colors"
+                        title="Eliminar imagen"
+                      >
+                        <IconX className="h-3 w-3" />
+                      </button>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center text-muted-foreground/60 p-2 text-center">
+                      <IconPhoto className="h-7 w-7 mb-0.5" />
+                      <span className="text-[9px]">Sin foto</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Controles de carga */}
+                <div className="flex-1 space-y-2 w-full">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleImageUpload}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingImage}
+                      className="h-9 rounded-xl text-xs font-semibold gap-1.5 shadow-xs"
+                    >
+                      <IconUpload className="h-3.5 w-3.5" />
+                      {uploadingImage ? "Subiendo..." : form.image ? "Cambiar imagen" : "Subir foto del producto"}
+                    </Button>
+                    {form.image && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setForm((prev) => ({ ...prev, image: "" }))}
+                        className="h-9 text-xs text-destructive hover:bg-destructive/10"
+                      >
+                        <IconTrash className="h-3.5 w-3.5 mr-1" /> Quitar imagen
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Formatos JPG, PNG o WEBP de hasta 5MB. Se optimizará para el catálogo y el punto de venta.
+                  </p>
+
+                  {showUrlInput && (
+                    <div className="pt-1">
+                      <Input
+                        value={form.image}
+                        onChange={(e) => setForm({ ...form, image: e.target.value })}
+                        placeholder="https://ejemplo.com/imagen.jpg o ruta local"
+                        className="h-8 text-xs rounded-lg"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div className="md:col-span-2">
               <Label>Descripción</Label>
               <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
@@ -1007,25 +1178,37 @@ export default function ProductsView() {
           {detailProduct && (
             <>
               {/* Header con gradiente y nombre */}
-              <div className="bg-gradient-to-br from-primary/15 via-primary/5 to-background border-b p-5 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-1">
-                    <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-semibold text-primary border-primary/30 bg-primary/5">
-                      {detailProduct.category?.name ?? "Sin Categoría"}
-                    </Badge>
+              <div className="bg-gradient-to-br from-primary/15 via-primary/5 to-background border-b p-5 space-y-3">
+                <div className="flex items-start gap-4">
+                  {detailProduct.image && (
+                    <div className="h-20 w-20 rounded-xl border bg-card shadow-xs overflow-hidden shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={detailProduct.image}
+                        alt={detailProduct.name}
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-semibold text-primary border-primary/30 bg-primary/5">
+                        {detailProduct.category?.name ?? "Sin Categoría"}
+                      </Badge>
+                      <Badge variant={detailProduct.active ? "default" : "secondary"} className="shrink-0 text-[10px]">
+                        {detailProduct.active ? "Activo" : "Inactivo"}
+                      </Badge>
+                    </div>
                     <DialogTitle className="text-lg font-bold text-foreground leading-tight">
                       {detailProduct.name}
                     </DialogTitle>
+                    {detailProduct.description && (
+                      <DialogDescription className="text-xs text-muted-foreground line-clamp-2">
+                        {detailProduct.description}
+                      </DialogDescription>
+                    )}
                   </div>
-                  <Badge variant={detailProduct.active ? "default" : "secondary"} className="shrink-0 text-[10px]">
-                    {detailProduct.active ? "Activo" : "Inactivo"}
-                  </Badge>
                 </div>
-                {detailProduct.description && (
-                  <DialogDescription className="text-xs text-muted-foreground line-clamp-2">
-                    {detailProduct.description}
-                  </DialogDescription>
-                )}
               </div>
 
               {/* Métricas Financieras del Stock (Total Costo, Total Venta, Ganancia) */}

@@ -52,6 +52,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 
 RUN chmod +x ./docker-entrypoint.sh
+RUN mkdir -p /app/public/uploads/products && chown -R node:node /app/public
 
 USER node
 

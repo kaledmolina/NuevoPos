@@ -30,7 +30,7 @@ export async function PATCH(
     const data: Record<string, unknown> = {}
     const fields = [
       "name", "barcode", "sku", "categoryId", "description", "unit",
-      "batch", "location", "active",
+      "batch", "location", "active", "image",
     ]
     for (const f of fields) {
       if (body[f] !== undefined) data[f] = body[f] === "" ? null : body[f]

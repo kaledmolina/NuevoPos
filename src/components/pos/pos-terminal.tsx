@@ -39,6 +39,7 @@ interface Product {
   stock: number
   unit: string
   barcode: string | null
+  image?: string | null
   categoryId?: string | null
   category?: { id?: string; name: string } | null
   expirationDate: string | null
@@ -902,9 +903,17 @@ export default function PosTerminal() {
                           </Badge>
                         </div>
                       </div>
-                      <p className="text-xs sm:text-sm font-semibold leading-tight line-clamp-2 min-h-[2.5rem] group-hover:text-primary transition-colors">
-                        {p.name}
-                      </p>
+                      <div className="flex gap-2 items-start mb-1">
+                        {p.image && (
+                          <div className="h-10 w-10 rounded-lg border bg-muted/20 overflow-hidden shrink-0 shadow-2xs">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={p.image} alt={p.name} className="h-full w-full object-cover" />
+                          </div>
+                        )}
+                        <p className="text-xs sm:text-sm font-semibold leading-tight line-clamp-2 min-h-[2.5rem] group-hover:text-primary transition-colors flex-1">
+                          {p.name}
+                        </p>
+                      </div>
                       <div className="flex items-end justify-between mt-2">
                         <span className="text-sm sm:text-base font-extrabold text-primary">{formatCurrency(p.price)}</span>
                         <motion.span

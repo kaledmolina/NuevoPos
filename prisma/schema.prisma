@@ -57,6 +57,7 @@ model Product {
   category       Category?      @relation(fields: [categoryId], references: [id])
   branchId       String?        // Sede a la que pertenece el producto
   description    String?
+  image          String?        // URL o imagen del producto
   cost           Float          @default(0) // último precio de compra
   price          Float          @default(0) // precio de venta
   stock          Int            @default(0) // stock total (suma de lotes)

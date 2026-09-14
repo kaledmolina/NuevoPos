@@ -134,6 +134,7 @@ export async function POST(req: NextRequest) {
         categoryId: body.categoryId || null,
         branchId: branchId || null,
         description: body.description || null,
+        image: body.image || null,
         cost: Number(body.cost) || 0,
         price: Number(body.price) || 0,
         stock: Number(body.stock) || 0,

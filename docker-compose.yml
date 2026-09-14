@@ -42,12 +42,17 @@ services:
       - NODE_ENV=production
       - DATABASE_URL=mysql://omnipos_user:omnipos_user_pass_2026@omnipos_db:3306/omnipos_db
       - AUTH_SECRET=omnipos_secret_key_production_2026_xyz
+    volumes:
+      - omnipos_uploads_data:/app/public/uploads
     networks:
       - omnipos_network
 
 volumes:
   omnipos_mysql_data:
     name: omnipos_mysql_data
+    driver: local
+  omnipos_uploads_data:
+    name: omnipos_uploads_data
     driver: local
 
 networks:
