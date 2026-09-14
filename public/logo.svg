@@ -1,29 +1,72 @@
-<?xml version="1.0" encoding="utf-8"?>
-<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
-	 viewBox="0 0 30 30" style="enable-background:new 0 0 30 30;" xml:space="preserve">
-<defs>
-  <style type="text/css">
-    .st194{fill:#2D2D2D;stroke:#FFFFFF;stroke-width:0.6317;stroke-miterlimit:10;}
-    .st23{fill:#FFFFFF;}
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Gradiente de fondo del contenedor -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
 
-    .z-breathe {
-      animation: breathe 2.5s ease-in-out infinite;
-    }
+    <!-- Gradiente primario de la marca (Cyan a Royal Indigo) -->
+    <linearGradient id="primaryBrandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
 
-    @keyframes breathe {
-      0%, 100% { opacity: 0.7; }
-      50% { opacity: 1; }
-    }
-  </style>
-</defs>
+    <!-- Gradiente secundario de crecimiento (Cyan a Esmeralda) -->
+    <linearGradient id="growthGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
 
-<g>
-  <path class="st194" d="M24.51,28.51H5.49c-2.21,0-4-1.79-4-4V5.49c0-2.21,1.79-4,4-4h19.03c2.21,0,4,1.79,4,4v19.03
-    C28.51,26.72,26.72,28.51,24.51,28.51z"/>
-  <g class="z-breathe">
-    <path class="st23" d="M15.47,7.1l-1.3,1.85c-0.2,0.29-0.54,0.47-0.9,0.47h-7.1V7.09C6.16,7.1,15.47,7.1,15.47,7.1z"/>
-    <polygon class="st23" points="24.3,7.1 13.14,22.91 5.7,22.91 16.86,7.1"/>
-    <path class="st23" d="M14.53,22.91l1.31-1.86c0.2-0.29,0.54-0.47,0.9-0.47h7.09v2.33H14.53z"/>
+    <!-- Sombra suave para efecto 3D moderno -->
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#2563eb" flood-opacity="0.35"/>
+    </filter>
+
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#38bdf8" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Contenedor App Icon redondeado (Squircle estilo iOS/macOS) -->
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)"/>
+  
+  <!-- Borde sutil brillante -->
+  <rect width="504" height="504" x="4" y="4" rx="124" fill="none" stroke="url(#primaryBrandGrad)" stroke-width="3" stroke-opacity="0.3"/>
+
+  <g transform="translate(64, 64)" filter="url(#softShadow)">
+    <!-- 1. Toldo / Tienda superior (Canopy) -->
+    <path d="M60 140 Q192 100 324 140 L304 180 Q192 150 80 180 Z" fill="url(#primaryBrandGrad)"/>
+    
+    <!-- Rayas del toldo con estilo geométrico -->
+    <path d="M120 128 L136 172" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-opacity="0.4"/>
+    <path d="M184 120 L192 168" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-opacity="0.4"/>
+    <path d="M248 124 L244 170" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-opacity="0.4"/>
+
+    <!-- 2. Terminal POS Base Isométrica -->
+    <path d="M70 200 L314 200 L340 310 L44 310 Z" fill="#1e293b" stroke="url(#primaryBrandGrad)" stroke-width="8" stroke-linejoin="round"/>
+
+    <!-- Pantalla del terminal -->
+    <polygon points="94,216 290,216 280,260 104,260" fill="#0f172a"/>
+    <!-- Texto simulado en pantalla -->
+    <rect x="120" y="228" width="60" height="8" rx="4" fill="#38bdf8" opacity="0.8"/>
+    <rect x="120" y="242" width="100" height="6" rx="3" fill="#94a3b8" opacity="0.6"/>
+
+    <!-- Teclado numérico táctil de cobro -->
+    <circle cx="114" cy="285" r="7" fill="#334155"/>
+    <circle cx="138" cy="285" r="7" fill="#334155"/>
+    <circle cx="162" cy="285" r="7" fill="#334155"/>
+    <circle cx="186" cy="285" r="7" fill="#334155"/>
+    <rect x="208" y="278" width="40" height="14" rx="7" fill="#2563eb"/>
+
+    <!-- Ranura de tarjeta / recibo -->
+    <rect x="268" y="280" width="46" height="8" rx="4" fill="#64748b"/>
+
+    <!-- 3. Flecha de Crecimiento & Checkmark dinámico (Símbolo de éxito y ventas) -->
+    <path d="M130 250 L200 170 L250 210 L330 90" fill="none" stroke="url(#growthGrad)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+    
+    <!-- Punta de flecha hacia arriba a la derecha -->
+    <polygon points="345,75 338,135 290,105" fill="#10b981" filter="url(#glow)"/>
   </g>
-</g>
 </svg>

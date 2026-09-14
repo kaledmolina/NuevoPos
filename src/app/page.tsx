@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, useMemo } from "react"
+import Image from "next/image"
 import { motion, AnimatePresence } from "framer-motion"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api"
@@ -391,8 +392,15 @@ export default function Home() {
     <div className="flex h-full w-full flex-col overflow-hidden bg-sidebar select-none">
       {/* Header del comercio */}
       <div className="flex items-center gap-3 px-4 py-3.5 border-b border-sidebar-border/70 bg-sidebar shrink-0">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground shrink-0 shadow-xs">
-          <StoreIcon className="h-5 w-5 stroke-[2.2]" />
+        <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 border border-border/60 overflow-hidden shrink-0 shadow-xs ring-1 ring-primary/20">
+          <Image
+            src="/logo.svg"
+            alt="OmniPOS Logo"
+            width={40}
+            height={40}
+            className="h-full w-full object-cover"
+            priority
+          />
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-bold text-sidebar-foreground truncate tracking-tight" title={storeName}>{storeName}</p>

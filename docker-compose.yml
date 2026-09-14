@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  omnipos:
+    image: omnipos:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: omnipos_app
+    restart: unless-stopped
+    ports:
+      - "3005:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/app/db/custom.db
+      - AUTH_SECRET=omnipos_secret_key_production_2026_change_me
+    volumes:
+      # Volumen persistente: garantiza que tus ventas, inventario y usuarios no se borren al actualizar
+      - omnipos_db_data:/app/db
+
+volumes:
+  omnipos_db_data:
+    name: omnipos_db_data
+    driver: local

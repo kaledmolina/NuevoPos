@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import Image from "next/image"
 import { useAppStore } from "@/lib/store"
 import { type Role, ROLE_CONFIG } from "@/lib/permissions"
 import { apiFetch } from "@/lib/api"
@@ -170,8 +171,15 @@ export default function LoginScreen() {
       <div className="w-full max-w-md">
         {/* Encabezado */}
         <div className="text-center mb-6">
-          <div className="inline-flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-xl shadow-primary/25 mb-4">
-            <StoreIcon className="h-8 w-8 sm:h-10 sm:w-10" />
+          <div className="inline-flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-2xl bg-slate-900 border border-border/80 shadow-xl shadow-primary/15 overflow-hidden mb-4 ring-2 ring-primary/25 p-2">
+            <Image
+              src="/logo.svg"
+              alt="Logo del Sistema"
+              width={80}
+              height={80}
+              className="h-full w-full object-contain"
+              priority
+            />
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{storeName}</h1>
           <p className="text-sm sm:text-base text-foreground/70 mt-2 flex items-center justify-center gap-1.5 font-medium">

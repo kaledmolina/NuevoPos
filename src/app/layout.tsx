@@ -36,6 +36,11 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "OmniPOS",
   },
+  icons: {
+    icon: "/logo.svg",
+    shortcut: "/logo.svg",
+    apple: "/logo.svg",
+  },
 };
 
 export default function RootLayout({

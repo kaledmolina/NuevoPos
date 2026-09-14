@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Image from "next/image"
 import { motion, AnimatePresence } from "framer-motion"
 import { useAppStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
@@ -237,8 +238,15 @@ export default function LandingPage() {
       <header className="sticky top-0 z-50 border-b bg-background/85 backdrop-blur-md">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-              <Store className="h-5 w-5" />
+            <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 border border-slate-800 shadow-sm overflow-hidden p-1">
+              <Image
+                src="/logo.svg"
+                alt="OmniPOS"
+                width={36}
+                height={36}
+                className="h-full w-full object-contain"
+                priority
+              />
             </div>
             <div>
               <p className="font-bold text-sm sm:text-base leading-tight">OmniPOS</p>
