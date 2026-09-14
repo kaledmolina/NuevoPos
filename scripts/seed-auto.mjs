@@ -12,7 +12,7 @@ function hashPin(pin) {
 async function main() {
   console.log("🌱 Verificando inicialización de datos y Superadmin...")
 
-  // 1. Verificar si ya existe el Superadmin
+  // 1. Verificar o crear el Superadmin
   let superadmin = await db.user.findFirst({
     where: {
       OR: [
@@ -38,7 +38,6 @@ async function main() {
     })
     console.log("✅ Superadmin creado con éxito.")
   } else {
-    // Asegurar que el PIN esté sincronizado con el AUTH_SECRET actual
     await db.user.update({
       where: { id: superadmin.id },
       data: {
@@ -46,16 +45,17 @@ async function main() {
         active: true,
       },
     })
-    console.log("✅ Superadmin verificado y PIN actualizado.")
+    console.log("✅ Superadmin verificado y PIN actualizado a 9999.")
   }
 
-  // 2. Verificar si hay al menos una sede central o un negocio demo
+  // 2. Verificar si hay al menos una empresa/tenant demo
   const tenantCount = await db.tenant.count()
   if (tenantCount === 0) {
-    console.log("🏢 Inicializando datos iniciales de demostración SaaS...")
+    console.log("🏢 Inicializando datos de demostración limpios (1 Sede, Admin y Vendedor)...")
     const now = new Date()
+    const d = (days) => new Date(now.getTime() + days * 24 * 60 * 60 * 1000)
 
-    // Sede global
+    // Sede global Superadmin
     await db.branch.create({
       data: {
         name: "Sede Central Superadmin",
@@ -68,91 +68,157 @@ async function main() {
       },
     })
 
-    // Tenant Demo: Droguería San Jorge
-    const tenant1 = await db.tenant.create({
+    // 1 Solo Tenant Demo
+    const demoTenant = await db.tenant.create({
       data: {
-        name: "Droguería San Jorge",
-        slug: "drogueria-san-jorge",
+        name: "Droguería & Farmacia La Salud",
+        slug: "drogueria-la-salud-demo",
         rubro: "drogueria",
-        ownerName: "Carlos Restrepo",
-        ownerEmail: "carlos@drogueriasanjorge.com",
+        ownerName: "Administrador Demo",
+        ownerEmail: "admin@demo.com",
         ownerPhone: "+57 300 123 4567",
         status: "aprobado",
         maxBranches: 3,
         approvedAt: now,
         approvedBy: "Superadmin Kaled",
-        notes: "Cadena de droguerías con dos sucursales activas en zona centro y norte.",
+        notes: "Negocio demo oficial preconfigurado para pruebas de clientes y demostraciones.",
       },
     })
 
-    const branch1Centro = await db.branch.create({
+    // 1 Sola Sede Demo
+    const demoBranch = await db.branch.create({
       data: {
-        name: "San Jorge - Sede Centro",
-        code: "DSJ-01",
-        address: "Carrera 5 # 12-40, Centro",
+        name: "Sede Principal Demo",
+        code: "SEDE-01",
+        address: "Carrera 15 # 45-20, Zona Comercial",
         phone: "+57 300 123 4567",
         isMain: true,
         active: true,
-        tenantId: tenant1.id,
+        tenantId: demoTenant.id,
       },
     })
 
-    const branch1Norte = await db.branch.create({
+    // 2 Usuarios Demo: Admin (1234) y Vendedor (0000)
+    const adminUser = await db.user.create({
       data: {
-        name: "San Jorge - Sede Norte",
-        code: "DSJ-02",
-        address: "Calle 85 # 45-20, Norte",
-        phone: "+57 301 987 6543",
-        isMain: false,
-        active: true,
-        tenantId: tenant1.id,
-      },
-    })
-
-    // Usuarios del Tenant 1 (Admin y Vendedor)
-    await db.user.create({
-      data: {
-        name: "carlos_admin",
-        email: "carlos@drogueriasanjorge.com",
+        name: "admin",
+        email: "admin@demo.com",
         role: "admin",
         pinHash: hashPin("1234"),
         isPrimary: true,
-        allowedBranchIds: JSON.stringify([branch1Centro.id, branch1Norte.id]),
-        tenantId: tenant1.id,
+        allowedBranchIds: JSON.stringify([demoBranch.id]),
+        tenantId: demoTenant.id,
         active: true,
       },
     })
 
-    await db.user.create({
+    const vendedorUser = await db.user.create({
       data: {
-        name: "andres_vendedor",
+        name: "vendedor",
+        email: "vendedor@demo.com",
         role: "vendedor",
-        pinHash: hashPin("1111"),
+        pinHash: hashPin("0000"),
         isPrimary: false,
-        allowedBranchIds: JSON.stringify([branch1Centro.id]),
-        tenantId: tenant1.id,
+        allowedBranchIds: JSON.stringify([demoBranch.id]),
+        tenantId: demoTenant.id,
         active: true,
       },
     })
 
-    // Categorías y productos demo
-    const cat = await db.category.create({ data: { name: "Medicamentos & OTC" } })
-    await db.product.create({
+    // Categorías de muestra
+    const [catOTC, catAseo, catPrimerosAux, catVitaminas] = await Promise.all([
+      db.category.create({ data: { name: "Analgésicos & OTC" } }),
+      db.category.create({ data: { name: "Cuidado Personal & Aseo" } }),
+      db.category.create({ data: { name: "Primeros Auxilios" } }),
+      db.category.create({ data: { name: "Vitaminas & Suplementos" } }),
+    ])
+
+    // Productos de muestra
+    const productsData = [
+      { name: "Acetaminofén 500mg x 100 tab", barcode: "7702001001", catId: catOTC.id, cost: 6500, price: 10500, stock: 50, unit: "caja" },
+      { name: "Ibuprofeno 800mg x 20 cap", barcode: "7702001002", catId: catOTC.id, cost: 8200, price: 13900, stock: 35, unit: "caja" },
+      { name: "Alcohol Antiséptico 700ml", barcode: "7702001004", catId: catPrimerosAux.id, cost: 4200, price: 6800, stock: 60, unit: "frasco" },
+      { name: "Gasa Estéril 7.5x7.5 x 100", barcode: "7702001005", catId: catPrimerosAux.id, cost: 5800, price: 9200, stock: 45, unit: "paquete" },
+      { name: "Suero Oral Electrolitos 500ml", barcode: "7702001006", catId: catVitaminas.id, cost: 3500, price: 5800, stock: 70, unit: "botella" },
+      { name: "Protector Solar Facial SPF 50", barcode: "7702001008", catId: catAseo.id, cost: 22000, price: 36000, stock: 20, unit: "tubo" },
+    ]
+
+    const createdProds = []
+    for (const p of productsData) {
+      const prod = await db.product.create({
+        data: {
+          name: p.name,
+          barcode: p.barcode,
+          sku: p.barcode,
+          categoryId: p.catId,
+          cost: p.cost,
+          price: p.price,
+          stock: p.stock,
+          minStock: 10,
+          unit: p.unit,
+          expirationDate: d(365),
+          batch: "L-1001",
+          location: "Estante Principal",
+          branchId: demoBranch.id,
+          active: true,
+        },
+      })
+      createdProds.push(prod)
+    }
+
+    // Cliente de muestra
+    const client = await db.client.create({
       data: {
-        name: "Acetaminofén 500mg x 100 tab",
-        barcode: "7702001001",
-        sku: "7702001001",
-        categoryId: cat.id,
-        cost: 6500,
-        price: 10500,
-        stock: 50,
-        minStock: 10,
-        unit: "caja",
-        branchId: branch1Centro.id,
+        name: "Cliente Mostrador (General)",
+        isGeneric: true,
+        branchId: demoBranch.id,
       },
     })
 
-    console.log("🎉 Datos demo creados exitosamente.")
+    // Sesión de caja abierta
+    const cash = await db.cashSession.create({
+      data: {
+        branchId: demoBranch.id,
+        openingAmount: 150000,
+        status: "abierta",
+        openedBy: vendedorUser.name,
+        notes: "Turno mañana Demo",
+      },
+    })
+
+    // Venta inicial de prueba
+    const p1 = createdProds[0]
+    const total = p1.price * 2
+    await db.sale.create({
+      data: {
+        invoiceNumber: "FAC-001-0001",
+        branchId: demoBranch.id,
+        clientId: client.id,
+        subtotal: total,
+        tax: 0,
+        total: total,
+        paymentMethod: "efectivo",
+        amountReceived: total,
+        change: 0,
+        status: "completada",
+        cashSessionId: cash.id,
+        items: {
+          create: [{ productId: p1.id, quantity: 2, unitPrice: p1.price, unitCost: p1.cost, subtotal: total }],
+        },
+      },
+    })
+    await db.cashTransaction.create({
+      data: {
+        cashSessionId: cash.id,
+        type: "venta",
+        amount: total,
+        concept: "Venta FAC-001-0001",
+        method: "efectivo",
+      },
+    })
+    await db.product.update({ where: { id: p1.id }, data: { stock: { decrement: 2 } } })
+
+    console.log("🎉 Datos demo limpios creados: admin (1234) y vendedor (0000) en 1 sede.")
   }
 
   console.log("✨ Base de datos lista.")

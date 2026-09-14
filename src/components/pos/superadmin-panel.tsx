@@ -291,7 +291,7 @@ export default function SuperadminPanel() {
             onClick={handleGenerateDemo}
             disabled={seedingDemo || refreshing}
             className="h-10 px-3.5 rounded-xl text-xs font-semibold gap-1.5 shadow-xs"
-            title="Genera empresas, múltiples sedes, personal y ventas demo"
+            title="Carga una sede demo limpia con admin (PIN 1234), vendedor (PIN 0000), catálogo, caja y ventas de prueba"
           >
             {seedingDemo ? (
               <IconRefresh className="h-4 w-4 animate-spin" />
