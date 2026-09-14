@@ -2,7 +2,6 @@ version: "3.8"
 
 services:
   omnipos:
-    image: omnipos:latest
     build:
       context: .
       dockerfile: Dockerfile
