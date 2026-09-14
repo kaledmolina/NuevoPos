@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireAdmin, getSession, logAudit } from "@/lib/auth"
-import { getDatabasePath } from "@/lib/db"
+import { getDatabasePath, getBackupDirectory, isMysql } from "@/lib/db"
 import fs from "fs"
 import path from "path"
 
@@ -25,8 +25,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Nombre de backup inválido" }, { status: 400 })
     }
 
-    const dbPath = getDatabasePath()
-
     // CASO 1: Administrador regular (Aislamiento Multi-Tenant)
     if (session.role !== "superadmin") {
       const tenantId = session.tenantId
@@ -34,7 +32,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "No perteneces a ningún negocio para restaurar datos" }, { status: 403 })
       }
 
-      const tenantDir = path.join(path.dirname(dbPath), "backups", "tenants", tenantId)
+      const tenantDir = path.join(getBackupDirectory(), "tenants", tenantId)
       const backupPath = path.join(tenantDir, backupName)
 
       if (!fs.existsSync(backupPath)) {
@@ -419,29 +417,427 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // CASO 2: Superadministrador (Restauración de SQLite .db global)
-    if (!/^(backup|upload|pre-restore)-[\w.-]+\.db$/.test(backupName)) {
+    // CASO 2: Superadministrador (Restauración de backup global MySQL / SQLite)
+    if (!/^(backup|upload|pre-restore)-[\w.-]+\.(json|db)$/.test(backupName)) {
       return NextResponse.json({ error: "Nombre de backup inválido para restauración global" }, { status: 400 })
     }
 
-    const backupDir = path.join(path.dirname(dbPath), "backups")
+    const backupDir = getBackupDirectory()
     const backupPath = path.join(backupDir, backupName)
 
     if (!fs.existsSync(backupPath)) {
       return NextResponse.json({ error: "El backup global no existe" }, { status: 404 })
     }
 
-    const preRestoreBackup = path.join(
-      backupDir,
-      `pre-restore-${new Date().toISOString().replace(/[:.]/g, "-")}.db`
-    )
-    try {
-      fs.copyFileSync(dbPath, preRestoreBackup)
-    } catch {
-      /* noop */
+    if (backupName.endsWith(".json")) {
+      const fileContent = fs.readFileSync(backupPath, "utf-8")
+      let backupData: any
+      try {
+        backupData = JSON.parse(fileContent)
+      } catch {
+        return NextResponse.json({ error: "El archivo de respaldo JSON está dañado o es ilegible" }, { status: 400 })
+      }
+
+      if (backupData.type !== "global_saas_backup") {
+        return NextResponse.json({ error: "El archivo no corresponde a un respaldo global de toda la plataforma" }, { status: 400 })
+      }
+
+      // Crear respaldo preventivo antes de restaurar
+      const ts = new Date().toISOString().replace(/[:.]/g, "-")
+      const preRestoreBackup = path.join(backupDir, `pre-restore-${ts}.json`)
+      try {
+        fs.copyFileSync(backupPath, preRestoreBackup)
+      } catch {
+        /* noop */
+      }
+
+      // Restaurar transaccionalmente todas las tablas del sistema
+      await db.$transaction(async (tx) => {
+        // 1. Limpieza en orden referencial
+        await tx.creditMovement.deleteMany()
+        await tx.creditAccount.deleteMany()
+        await tx.cashTransaction.deleteMany()
+        await tx.cashSession.deleteMany()
+        await tx.saleItem.deleteMany()
+        await tx.sale.deleteMany()
+        await tx.purchaseItem.deleteMany()
+        await tx.purchase.deleteMany()
+        await tx.transaction.deleteMany()
+        await tx.productBatch.deleteMany()
+        await tx.product.deleteMany()
+        await tx.client.deleteMany()
+        await tx.supplier.deleteMany()
+        await tx.category.deleteMany()
+        await tx.user.deleteMany()
+        await tx.branch.deleteMany()
+        await tx.tenant.deleteMany()
+
+        // 2. Tenants
+        if (Array.isArray(backupData.tenants)) {
+          for (const t of backupData.tenants) {
+            await tx.tenant.create({
+              data: {
+                id: t.id,
+                name: t.name,
+                slug: t.slug,
+                rubro: t.rubro || "drogueria",
+                ownerName: t.ownerName,
+                ownerEmail: t.ownerEmail,
+                ownerPhone: t.ownerPhone,
+                status: t.status || "aprobado",
+                maxBranches: Number(t.maxBranches) || 3,
+                approvedAt: t.approvedAt ? new Date(t.approvedAt) : null,
+                approvedBy: t.approvedBy,
+                notes: t.notes,
+                createdAt: t.createdAt ? new Date(t.createdAt) : new Date(),
+                updatedAt: t.updatedAt ? new Date(t.updatedAt) : new Date(),
+              },
+            })
+          }
+        }
+
+        // 3. Branches
+        if (Array.isArray(backupData.branches)) {
+          for (const b of backupData.branches) {
+            await tx.branch.create({
+              data: {
+                id: b.id,
+                name: b.name,
+                code: b.code,
+                address: b.address,
+                phone: b.phone,
+                isMain: Boolean(b.isMain),
+                active: b.active !== false,
+                tenantId: b.tenantId || null,
+                createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
+                updatedAt: b.updatedAt ? new Date(b.updatedAt) : new Date(),
+              },
+            })
+          }
+        }
+
+        // 4. Users
+        if (Array.isArray(backupData.users)) {
+          for (const u of backupData.users) {
+            await tx.user.create({
+              data: {
+                id: u.id,
+                name: u.name,
+                email: u.email,
+                role: u.role,
+                pinHash: u.pinHash,
+                isPrimary: Boolean(u.isPrimary),
+                allowedBranchIds: typeof u.allowedBranchIds === "string" ? u.allowedBranchIds : JSON.stringify(u.allowedBranchIds || []),
+                tenantId: u.tenantId || null,
+                active: u.active !== false,
+                createdAt: u.createdAt ? new Date(u.createdAt) : new Date(),
+              },
+            })
+          }
+        }
+
+        // 5. Categories
+        if (Array.isArray(backupData.categories)) {
+          for (const c of backupData.categories) {
+            await tx.category.create({
+              data: {
+                id: c.id,
+                name: c.name,
+                createdAt: c.createdAt ? new Date(c.createdAt) : new Date(),
+              },
+            })
+          }
+        }
+
+        // 6. Products & Batches
+        if (Array.isArray(backupData.products)) {
+          for (const p of backupData.products) {
+            await tx.product.create({
+              data: {
+                id: p.id,
+                name: p.name,
+                sku: p.sku,
+                barcode: p.barcode,
+                categoryId: p.categoryId,
+                branchId: p.branchId,
+                description: p.description,
+                image: p.image,
+                cost: Number(p.cost) || 0,
+                price: Number(p.price) || 0,
+                stock: Number(p.stock) || 0,
+                minStock: Number(p.minStock) || 5,
+                unit: p.unit || "unidad",
+                expirationDate: p.expirationDate ? new Date(p.expirationDate) : null,
+                batch: p.batch,
+                location: p.location,
+                active: p.active !== false,
+                createdAt: p.createdAt ? new Date(p.createdAt) : new Date(),
+                updatedAt: p.updatedAt ? new Date(p.updatedAt) : new Date(),
+              },
+            })
+            if (Array.isArray(p.batches)) {
+              for (const batch of p.batches) {
+                await tx.productBatch.create({
+                  data: {
+                    id: batch.id,
+                    productId: p.id,
+                    batch: batch.batch,
+                    stock: Number(batch.stock) || 0,
+                    cost: Number(batch.cost) || 0,
+                    expirationDate: batch.expirationDate ? new Date(batch.expirationDate) : null,
+                    createdAt: batch.createdAt ? new Date(batch.createdAt) : new Date(),
+                    updatedAt: batch.updatedAt ? new Date(batch.updatedAt) : new Date(),
+                  },
+                })
+              }
+            }
+          }
+        }
+
+        // 7. Clients & Credit Accounts
+        if (Array.isArray(backupData.clients)) {
+          for (const cl of backupData.clients) {
+            await tx.client.create({
+              data: {
+                id: cl.id,
+                name: cl.name,
+                document: cl.document,
+                phone: cl.phone,
+                email: cl.email,
+                address: cl.address,
+                notes: cl.notes,
+                branchId: cl.branchId,
+                isGeneric: Boolean(cl.isGeneric),
+                createdAt: cl.createdAt ? new Date(cl.createdAt) : new Date(),
+                updatedAt: cl.updatedAt ? new Date(cl.updatedAt) : new Date(),
+              },
+            })
+            if (cl.creditAccount) {
+              await tx.creditAccount.create({
+                data: {
+                  id: cl.creditAccount.id,
+                  clientId: cl.id,
+                  creditLimit: Number(cl.creditAccount.creditLimit) || 0,
+                  balance: Number(cl.creditAccount.balance) || 0,
+                  active: cl.creditAccount.active !== false,
+                  createdAt: cl.creditAccount.createdAt ? new Date(cl.creditAccount.createdAt) : new Date(),
+                  updatedAt: cl.creditAccount.updatedAt ? new Date(cl.creditAccount.updatedAt) : new Date(),
+                },
+              })
+              if (Array.isArray(cl.creditAccount.movements)) {
+                for (const m of cl.creditAccount.movements) {
+                  await tx.creditMovement.create({
+                    data: {
+                      id: m.id,
+                      accountId: cl.creditAccount.id,
+                      type: m.type,
+                      amount: Number(m.amount) || 0,
+                      concept: m.concept,
+                      method: m.method || "efectivo",
+                      reportedBy: m.reportedBy,
+                      previousBalance: m.previousBalance,
+                      remainingBalance: m.remainingBalance,
+                      saleId: m.saleId,
+                      createdAt: m.createdAt ? new Date(m.createdAt) : new Date(),
+                    },
+                  })
+                }
+              }
+            }
+          }
+        }
+
+        // 8. Suppliers
+        if (Array.isArray(backupData.suppliers)) {
+          for (const s of backupData.suppliers) {
+            await tx.supplier.create({
+              data: {
+                id: s.id,
+                name: s.name,
+                document: s.document,
+                phone: s.phone,
+                email: s.email,
+                address: s.address,
+                contactName: s.contactName,
+                notes: s.notes,
+                branchId: s.branchId,
+                createdAt: s.createdAt ? new Date(s.createdAt) : new Date(),
+                updatedAt: s.updatedAt ? new Date(s.updatedAt) : new Date(),
+              },
+            })
+          }
+        }
+
+        // 9. Cash sessions & transactions
+        if (Array.isArray(backupData.cashSessions)) {
+          for (const cs of backupData.cashSessions) {
+            await tx.cashSession.create({
+              data: {
+                id: cs.id,
+                branchId: cs.branchId,
+                openingAmount: Number(cs.openingAmount) || 0,
+                closingAmount: cs.closingAmount != null ? Number(cs.closingAmount) : null,
+                expectedAmount: cs.expectedAmount != null ? Number(cs.expectedAmount) : null,
+                difference: cs.difference != null ? Number(cs.difference) : null,
+                status: cs.status || "cerrada",
+                openedAt: cs.openedAt ? new Date(cs.openedAt) : new Date(),
+                closedAt: cs.closedAt ? new Date(cs.closedAt) : null,
+                openedBy: cs.openedBy,
+                closedBy: cs.closedBy,
+                notes: cs.notes,
+              },
+            })
+            if (Array.isArray(cs.transactions)) {
+              for (const ctx of cs.transactions) {
+                await tx.cashTransaction.create({
+                  data: {
+                    id: ctx.id,
+                    cashSessionId: cs.id,
+                    type: ctx.type,
+                    amount: Number(ctx.amount) || 0,
+                    concept: ctx.concept,
+                    method: ctx.method || "efectivo",
+                    reference: ctx.reference,
+                    createdAt: ctx.createdAt ? new Date(ctx.createdAt) : new Date(),
+                  },
+                })
+              }
+            }
+          }
+        }
+
+        // 10. Sales & items
+        if (Array.isArray(backupData.sales)) {
+          for (const sl of backupData.sales) {
+            await tx.sale.create({
+              data: {
+                id: sl.id,
+                invoiceNumber: sl.invoiceNumber,
+                clientId: sl.clientId,
+                branchId: sl.branchId,
+                subtotal: Number(sl.subtotal) || 0,
+                tax: Number(sl.tax) || 0,
+                discount: Number(sl.discount) || 0,
+                total: Number(sl.total) || 0,
+                paymentMethod: sl.paymentMethod || "efectivo",
+                amountReceived: Number(sl.amountReceived) || 0,
+                change: Number(sl.change) || 0,
+                status: sl.status || "completada",
+                cashSessionId: sl.cashSessionId,
+                notes: sl.notes,
+                createdAt: sl.createdAt ? new Date(sl.createdAt) : new Date(),
+              },
+            })
+            if (Array.isArray(sl.items)) {
+              for (const it of sl.items) {
+                await tx.saleItem.create({
+                  data: {
+                    id: it.id,
+                    saleId: sl.id,
+                    productId: it.productId,
+                    quantity: Number(it.quantity) || 1,
+                    unitPrice: Number(it.unitPrice) || 0,
+                    unitCost: Number(it.unitCost) || 0,
+                    subtotal: Number(it.subtotal) || 0,
+                  },
+                })
+              }
+            }
+          }
+        }
+
+        // 11. Purchases & items
+        if (Array.isArray(backupData.purchases)) {
+          for (const pu of backupData.purchases) {
+            await tx.purchase.create({
+              data: {
+                id: pu.id,
+                reference: pu.reference,
+                supplierId: pu.supplierId,
+                branchId: pu.branchId,
+                subtotal: Number(pu.subtotal) || 0,
+                tax: Number(pu.tax) || 0,
+                total: Number(pu.total) || 0,
+                status: pu.status || "recibida",
+                notes: pu.notes,
+                createdAt: pu.createdAt ? new Date(pu.createdAt) : new Date(),
+              },
+            })
+            if (Array.isArray(pu.items)) {
+              for (const it of pu.items) {
+                await tx.purchaseItem.create({
+                  data: {
+                    id: it.id,
+                    purchaseId: pu.id,
+                    productId: it.productId,
+                    quantity: Number(it.quantity) || 1,
+                    unitCost: Number(it.unitCost) || 0,
+                    subtotal: Number(it.subtotal) || 0,
+                    expirationDate: it.expirationDate ? new Date(it.expirationDate) : null,
+                    batch: it.batch,
+                  },
+                })
+              }
+            }
+          }
+        }
+
+        // 12. General Transactions
+        if (Array.isArray(backupData.transactions)) {
+          for (const txItem of backupData.transactions) {
+            await tx.transaction.create({
+              data: {
+                id: txItem.id,
+                branchId: txItem.branchId,
+                type: txItem.type,
+                category: txItem.category || "General",
+                amount: Number(txItem.amount) || 0,
+                concept: txItem.concept,
+                description: txItem.description,
+                method: txItem.method || "efectivo",
+                date: txItem.date ? new Date(txItem.date) : new Date(),
+                cashSessionId: txItem.cashSessionId,
+                createdAt: txItem.createdAt ? new Date(txItem.createdAt) : new Date(),
+              },
+            })
+          }
+        }
+
+        // 13. Settings
+        if (Array.isArray(backupData.settings)) {
+          for (const st of backupData.settings) {
+            await tx.setting.upsert({
+              where: { key: st.key },
+              update: { value: String(st.value) },
+              create: { id: st.id, key: st.key, value: String(st.value) },
+            })
+          }
+        }
+      })
+
+      try {
+        await logAudit({
+          action: "backup_restore",
+          entityType: "system",
+          userName: session.name,
+          role: session.role,
+          detail: `Backup global JSON restaurado exitosamente: ${backupName}`,
+        })
+      } catch {
+        /* noop */
+      }
+
+      return NextResponse.json({
+        ok: true,
+        message: `Backup global ${backupName} restaurado correctamente. Se recomienda recargar la página.`,
+      })
     }
 
-    fs.copyFileSync(backupPath, dbPath)
+    // Caso legacy .db (solo si el archivo sqlite existe)
+    const dbPath = getDatabasePath()
+    if (fs.existsSync(dbPath)) {
+      fs.copyFileSync(backupPath, dbPath)
+    }
 
     try {
       await logAudit({
@@ -449,7 +845,7 @@ export async function POST(req: NextRequest) {
         entityType: "system",
         userName: session.name,
         role: session.role,
-        detail: `Backup global SQLite restaurado: ${backupName}`,
+        detail: `Backup global restaurado: ${backupName}`,
       })
     } catch {
       /* noop */

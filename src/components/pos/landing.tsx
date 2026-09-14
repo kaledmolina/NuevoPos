@@ -67,7 +67,7 @@ const ADMIN_GUIDE: GuideStep[] = [
     icon: HardDrive,
     title: "7. Copias de seguridad (Backups)",
     desc: "Ve a Configuración → Backups",
-    detail: "Crea respaldos completos de tu base de datos SQLite con un solo clic. Descarga el archivo .db para guardarlo en tu equipo o restaura versiones anteriores cuando lo necesites.",
+    detail: "Crea respaldos completos de tu base de datos con un solo clic. Descarga el archivo para guardarlo en tu equipo o restaura versiones anteriores cuando lo necesites.",
   },
 ]
 
@@ -195,7 +195,7 @@ const RUBRO_SHOWCASE = [
       "Personalización instantánea del nombre y datos de negocio",
       "Unidades de medida flexibles (combos, juegos, unidades)",
       "Gestión ágil de clientes y proveedores",
-      "Respaldo y modo offline seguro con SQLite",
+      "Respaldo seguro en la nube y copias descargables",
     ],
     sampleProducts: [
       { name: "Cuaderno Argollado 100h", price: "$9.500", unit: "unidad" },
@@ -215,7 +215,7 @@ const FEATURES_LIST = [
   { icon: Truck, title: "Compras a Proveedores", desc: "Registro de entradas de mercancía que actualiza existencias y costos de adquisición de forma automática." },
   { icon: BarChart3, title: "Reportes y Utilidad Real", desc: "Métricas de ingresos, ticket promedio, margen de ganancia, top de productos y mejores clientes." },
   { icon: Shield, title: "Seguridad y Roles", desc: "Sesiones firmadas y seguras con cookie httpOnly. Roles Admin y Vendedor con permisos restringidos." },
-  { icon: HardDrive, title: "Backups y Modo Offline", desc: "Base de datos local SQLite ultra veloz. Copias de seguridad descargables con 1 clic para total tranquilidad." },
+  { icon: HardDrive, title: "Backups y Alta Disponibilidad", desc: "Base de datos en la nube de alto rendimiento. Copias de seguridad descargables con 1 clic para total tranquilidad." },
   { icon: Printer, title: "Tickets Térmicos POS", desc: "Impresión de recibos optimizada para impresoras térmicas de 58mm y 80mm con datos personalizados de tu negocio." },
 ]
 
@@ -336,7 +336,7 @@ export default function LandingPage() {
               { icon: Store, label: "Rubros compatibles", value: "100%" },
               { icon: ScanLine, label: "Cobro rápido", value: "< 3 seg" },
               { icon: Wallet, label: "Arqueo de turnos", value: "Sin descuadres" },
-              { icon: HardDrive, label: "Modo offline", value: "SQLite Local" },
+              { icon: HardDrive, label: "Base de datos", value: "MySQL SaaS" },
             ].map((s, i) => (
               <div
                 key={s.label}

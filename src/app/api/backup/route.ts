@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireAdmin, getSession, logAudit } from "@/lib/auth"
-import { getDatabasePath } from "@/lib/db"
+import { getBackupDirectory, isMysql } from "@/lib/db"
 import fs from "fs"
 import path from "path"
 
@@ -19,17 +19,16 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "No autenticado" }, { status: 401 })
 
   try {
-    const dbPath = getDatabasePath()
     const now = Date.now()
 
     if (session.role === "superadmin") {
-      // Superadmin: backups globales .db
-      const backupDir = path.join(path.dirname(dbPath), "backups")
+      // Superadmin: backups globales (.json de MySQL o .db legacy)
+      const backupDir = getBackupDirectory()
       if (!fs.existsSync(backupDir)) return NextResponse.json([])
 
       const files = fs
         .readdirSync(backupDir)
-        .filter((f) => f.endsWith(".db"))
+        .filter((f) => f.endsWith(".json") || f.endsWith(".db"))
         .map((f) => {
           const fp = path.join(backupDir, f)
           const stat = fs.statSync(fp)
@@ -46,7 +45,7 @@ export async function GET(req: NextRequest) {
             canDelete,
             ageDays,
             daysRemaining,
-            type: "global_db",
+            type: f.endsWith(".json") ? "global_json" : "global_db",
           }
         })
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -60,7 +59,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json([])
     }
 
-    const tenantBackupDir = path.join(path.dirname(dbPath), "backups", "tenants", tenantId)
+    const tenantBackupDir = path.join(getBackupDirectory(), "tenants", tenantId)
     if (!fs.existsSync(tenantBackupDir)) {
       return NextResponse.json([])
     }
@@ -106,7 +105,6 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "No autenticado" }, { status: 401 })
 
   try {
-    const dbPath = getDatabasePath()
     const ts = new Date().toISOString().replace(/[:.]/g, "-")
 
     // CASO 1: Administrador regular de negocio (Aislamiento de Tienda)
@@ -201,7 +199,7 @@ export async function POST(req: NextRequest) {
         transactions,
       }
 
-      const tenantDir = path.join(path.dirname(dbPath), "backups", "tenants", tenantId)
+      const tenantDir = path.join(getBackupDirectory(), "tenants", tenantId)
       if (!fs.existsSync(tenantDir)) {
         fs.mkdirSync(tenantDir, { recursive: true })
       }
@@ -235,16 +233,58 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // CASO 2: Superadministrador (Backup global SQLite .db)
-    if (!fs.existsSync(dbPath)) {
-      return NextResponse.json({ error: "Base de datos no encontrada" }, { status: 500 })
+    // CASO 2: Superadministrador (Backup global de toda la base de datos MySQL/SaaS)
+    const [
+      tenants,
+      branches,
+      users,
+      categories,
+      products,
+      clients,
+      suppliers,
+      sales,
+      purchases,
+      cashSessions,
+      transactions,
+      settings,
+    ] = await Promise.all([
+      db.tenant.findMany(),
+      db.branch.findMany(),
+      db.user.findMany(),
+      db.category.findMany(),
+      db.product.findMany({ include: { batches: true } }),
+      db.client.findMany({ include: { creditAccount: { include: { movements: true } } } }),
+      db.supplier.findMany(),
+      db.sale.findMany({ include: { items: true } }),
+      db.purchase.findMany({ include: { items: true } }),
+      db.cashSession.findMany({ include: { transactions: true } }),
+      db.transaction.findMany(),
+      db.setting.findMany(),
+    ])
+
+    const backupPayload = {
+      version: "2.0",
+      type: "global_saas_backup",
+      engine: isMysql() ? "mysql" : "sqlite",
+      exportedAt: new Date().toISOString(),
+      tenants,
+      branches,
+      users,
+      categories,
+      products,
+      clients,
+      suppliers,
+      sales,
+      purchases,
+      cashSessions,
+      transactions,
+      settings,
     }
 
-    const backupDir = path.join(path.dirname(dbPath), "backups")
-    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true })
-
-    const backupPath = path.join(backupDir, `backup-${ts}.db`)
-    fs.copyFileSync(dbPath, backupPath)
+    const backupDir = getBackupDirectory()
+    const fileName = `backup-global-${ts}.json`
+    const backupPath = path.join(backupDir, fileName)
+    fs.writeFileSync(backupPath, JSON.stringify(backupPayload, null, 2), "utf-8")
 
     const size = fs.statSync(backupPath).size
     try {
@@ -253,7 +293,7 @@ export async function POST(req: NextRequest) {
         entityType: "system",
         userName: session.name,
         role: session.role,
-        detail: `Backup global SQLite creado: ${path.basename(backupPath)}`,
+        detail: `Backup global MySQL creado: ${fileName} (${tenants.length} empresas, ${products.length} productos, ${sales.length} ventas)`,
       })
     } catch {
       /* noop */
@@ -261,10 +301,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      backup: path.basename(backupPath),
+      backup: fileName,
       size,
       createdAt: ts,
-      type: "global_db",
+      type: "global_json",
+      message: "Copia de seguridad global del sistema generada exitosamente.",
     })
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })
@@ -282,20 +323,16 @@ export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
     const purgeOld = searchParams.get("purgeOld") === "1" || searchParams.get("olderThan") === "5"
-    const dbPath = getDatabasePath()
     const now = Date.now()
 
     let backupDir: string
-    let extension: string
 
     if (session.role === "superadmin") {
-      backupDir = path.join(path.dirname(dbPath), "backups")
-      extension = ".db"
+      backupDir = getBackupDirectory()
     } else {
       const tenantId = session.tenantId
       if (!tenantId) return NextResponse.json({ error: "Negocio no identificado" }, { status: 400 })
-      backupDir = path.join(path.dirname(dbPath), "backups", "tenants", tenantId)
-      extension = ".json"
+      backupDir = path.join(getBackupDirectory(), "tenants", tenantId)
     }
 
     if (!fs.existsSync(backupDir)) {
@@ -304,7 +341,9 @@ export async function DELETE(req: NextRequest) {
 
     // Caso 1: Purgar todas las copias con más de 5 días de antigüedad
     if (purgeOld) {
-      const files = fs.readdirSync(backupDir).filter((f) => f.endsWith(extension))
+      const files = fs.readdirSync(backupDir).filter((f) =>
+        session.role === "superadmin" ? (f.endsWith(".json") || f.endsWith(".db")) : f.endsWith(".json")
+      )
       let deletedCount = 0
       for (const f of files) {
         const fp = path.join(backupDir, f)
@@ -346,12 +385,17 @@ export async function DELETE(req: NextRequest) {
 
     // Caso 2: Eliminar una copia individual específica
     const backupName = String(searchParams.get("name") ?? "").trim()
+    const isValidExt =
+      session.role === "superadmin"
+        ? (backupName.endsWith(".json") || backupName.endsWith(".db"))
+        : backupName.endsWith(".json")
+
     if (
       !backupName ||
       backupName.includes("..") ||
       backupName.includes("/") ||
       backupName.includes("\\") ||
-      !backupName.endsWith(extension)
+      !isValidExt
     ) {
       return NextResponse.json({ error: "Nombre de backup inválido" }, { status: 400 })
     }

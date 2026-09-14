@@ -366,11 +366,12 @@ export default function SettingsView() {
     const file = e.target.files?.[0]
     if (!file) return
     const isSuper = role === "superadmin"
-    const expectedExt = isSuper ? ".db" : ".json"
-    if (!file.name.endsWith(expectedExt)) {
+    const isJson = file.name.endsWith(".json")
+    const isDb = file.name.endsWith(".db")
+    if (isSuper ? (!isJson && !isDb) : !isJson) {
       toast.error(
         isSuper
-          ? "El archivo debe ser una base de datos SQLite con extensión .db"
+          ? "El archivo debe ser un respaldo válido con formato .json o .db"
           : "El archivo de respaldo de tienda debe tener formato .json"
       )
       e.target.value = ""
@@ -1062,12 +1063,12 @@ export default function SettingsView() {
                 <div>
                   <CardTitle className="text-sm sm:text-base font-bold">
                     {role === "superadmin"
-                      ? "Copias de Seguridad Globales (Base de Datos SQLite)"
+                      ? "Copias de Seguridad Globales (Base de Datos MySQL)"
                       : `Copias de Seguridad de ${tenantName || "Mi Negocio"} (Datos Aislados)`}
                   </CardTitle>
                   <CardDescription className="text-xs mt-0.5">
                     {role === "superadmin"
-                      ? "Respaldos completos del motor SQLite de toda la plataforma SaaS."
+                      ? "Respaldos completos de la base de datos MySQL de toda la plataforma SaaS."
                       : "Respalda y restaura únicamente la información de tus sedes (catálogo, ventas, compras, clientes y cajas)."}
                   </CardDescription>
                 </div>
@@ -1079,7 +1080,7 @@ export default function SettingsView() {
                   {creatingBackup ? (
                     <><IconRefresh className="h-4 w-4 mr-2 animate-spin" /> Creando copia…</>
                   ) : (
-                    <><IconDatabase className="h-4 w-4 mr-2" /> {role === "superadmin" ? "Crear backup global (.db)" : "Crear respaldo de mi negocio (.json)"}</>
+                    <><IconDatabase className="h-4 w-4 mr-2" /> {role === "superadmin" ? "Crear backup global (.json)" : "Crear respaldo de mi negocio (.json)"}</>
                   )}
                 </Button>
                 <Button
@@ -1091,13 +1092,13 @@ export default function SettingsView() {
                   {uploadingBackup ? (
                     <><IconRefresh className="h-4 w-4 mr-2 animate-spin" /> Subiendo copia…</>
                   ) : (
-                    <><IconUpload className="h-4 w-4 mr-2" /> {role === "superadmin" ? "Subir archivo de copia (.db)" : "Subir archivo de copia (.json)"}</>
+                    <><IconUpload className="h-4 w-4 mr-2" /> {role === "superadmin" ? "Subir archivo de copia (.json)" : "Subir archivo de copia (.json)"}</>
                   )}
                 </Button>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept={role === "superadmin" ? ".db" : ".json"}
+                  accept=".json,.db"
                   className="hidden"
                   onChange={handleUploadFile}
                 />
@@ -1405,7 +1406,7 @@ export default function SettingsView() {
                   <p className="font-bold text-foreground flex items-center gap-1.5">
                     <IconDeviceFloppy className="h-4 w-4 text-muted-foreground" /> Respaldo Automático
                   </p>
-                  <p className="text-muted-foreground leading-relaxed">Descarga copias de seguridad de tu base de datos SQLite antes de realizar cambios importantes con protección de 5 días.</p>
+                  <p className="text-muted-foreground leading-relaxed">Descarga copias de seguridad de tu base de datos antes de realizar cambios importantes con protección de 5 días.</p>
                 </div>
               </div>
             </CardContent>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdmin, getSession } from "@/lib/auth"
-import { getDatabasePath } from "@/lib/db"
+import { getBackupDirectory } from "@/lib/db"
 import fs from "fs"
 import path from "path"
 
@@ -23,21 +23,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Nombre de backup inválido" }, { status: 400 })
     }
 
-    const dbPath = getDatabasePath()
     let backupPath: string
     let contentType = "application/octet-stream"
 
     if (session.role === "superadmin") {
-      // Superadmin puede descargar .db de db/backups o .json de un tenant si especifica tenantId
+      // Superadmin puede descargar .json o .db de db/backups o de un tenant si especifica tenantId
       const tenantIdParam = searchParams.get("tenantId")
       if (tenantIdParam && backupName.endsWith(".json")) {
-        backupPath = path.join(path.dirname(dbPath), "backups", "tenants", tenantIdParam, backupName)
+        backupPath = path.join(getBackupDirectory(), "tenants", tenantIdParam, backupName)
         contentType = "application/json"
       } else {
-        if (!/^(backup|upload|pre-restore)-[\w.-]+\.db$/.test(backupName)) {
+        if (!/^(backup|upload|pre-restore)-[\w.-]+\.(db|json)$/.test(backupName)) {
           return NextResponse.json({ error: "Nombre de backup inválido" }, { status: 400 })
         }
-        backupPath = path.join(path.dirname(dbPath), "backups", backupName)
+        backupPath = path.join(getBackupDirectory(), backupName)
+        contentType = backupName.endsWith(".json") ? "application/json" : "application/octet-stream"
       }
     } else {
       // Admin Regular: ÚNICAMENTE puede descargar backups JSON de su propio negocio
@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "Solo puedes descargar copias en formato .json de tu negocio" }, { status: 400 })
       }
 
-      backupPath = path.join(path.dirname(dbPath), "backups", "tenants", tenantId, backupName)
+      backupPath = path.join(getBackupDirectory(), "tenants", tenantId, backupName)
       contentType = "application/json"
     }
 

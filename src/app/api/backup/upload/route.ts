@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdmin, getSession, logAudit } from "@/lib/auth"
-import { getDatabasePath } from "@/lib/db"
+import { getBackupDirectory } from "@/lib/db"
 import fs from "fs"
 import path from "path"
 
@@ -53,8 +53,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "El archivo no contiene un formato válido de copia de seguridad de tienda" }, { status: 400 })
       }
 
-      const dbPath = getDatabasePath()
-      const tenantDir = path.join(path.dirname(dbPath), "backups", "tenants", tenantId)
+      const tenantDir = path.join(getBackupDirectory(), "tenants", tenantId)
       if (!fs.existsSync(tenantDir)) {
         fs.mkdirSync(tenantDir, { recursive: true })
       }
@@ -88,9 +87,15 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // SUPERADMIN: Subir .db SQLite
-    if (!file.name.endsWith(".db")) {
-      return NextResponse.json({ error: "El archivo debe tener extensión .db" }, { status: 400 })
+    // SUPERADMIN: Subir .json o .db
+    const isJson = file.name.endsWith(".json")
+    const isDb = file.name.endsWith(".db")
+
+    if (!isJson && !isDb) {
+      return NextResponse.json(
+        { error: "El archivo de respaldo debe tener formato .json o .db" },
+        { status: 400 }
+      )
     }
 
     // Tamaño máximo: 50MB
@@ -99,10 +104,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "El archivo supera el tamaño máximo de 50MB" }, { status: 400 })
     }
 
+    const backupDir = getBackupDirectory()
+    const ts = new Date().toISOString().replace(/[:.]/g, "-")
+
+    if (isJson) {
+      const text = await file.text()
+      try {
+        JSON.parse(text)
+      } catch {
+        return NextResponse.json({ error: "El archivo subido no es un JSON válido" }, { status: 400 })
+      }
+
+      const sanitizedBase = path.basename(file.name, ".json").replace(/[^a-zA-Z0-9_-]/g, "_")
+      const backupFileName = `upload-${sanitizedBase}-${ts}.json`
+      const targetPath = path.join(backupDir, backupFileName)
+      fs.writeFileSync(targetPath, text, "utf-8")
+
+      try {
+        await logAudit({
+          action: "backup_upload",
+          entityType: "system",
+          userName: session?.name ?? "superadmin",
+          role: session?.role ?? "superadmin",
+          detail: `Backup global JSON subido exitosamente: ${backupFileName} (${(file.size / 1024).toFixed(1)} KB)`,
+          meta: { originalName: file.name, size: file.size },
+        })
+      } catch {
+        /* noop */
+      }
+
+      return NextResponse.json({
+        ok: true,
+        message: `Backup global "${backupFileName}" subido y verificado correctamente`,
+        name: backupFileName,
+        size: file.size,
+      })
+    }
+
+    // Archivo .db legacy
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
 
-    // Validar cabecera SQLite (primeros 16 bytes: "SQLite format 3\0")
+    // Validar cabecera SQLite si es archivo .db
     const headerString = buffer.subarray(0, 16).toString("utf-8")
     if (!headerString.startsWith("SQLite format 3")) {
       return NextResponse.json(
@@ -111,14 +154,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const dbPath = getDatabasePath()
-    const backupDir = path.join(path.dirname(dbPath), "backups")
-    if (!fs.existsSync(backupDir)) {
-      fs.mkdirSync(backupDir, { recursive: true })
-    }
-
     const sanitizedBase = path.basename(file.name, ".db").replace(/[^a-zA-Z0-9_-]/g, "_")
-    const ts = new Date().toISOString().replace(/[:.]/g, "-")
     const backupFileName = `upload-${sanitizedBase}-${ts}.db`
     const targetPath = path.join(backupDir, backupFileName)
 
@@ -130,7 +166,7 @@ export async function POST(req: NextRequest) {
         entityType: "system",
         userName: session?.name ?? "superadmin",
         role: session?.role ?? "superadmin",
-        detail: `Backup SQLite subido exitosamente: ${backupFileName} (${(file.size / 1024).toFixed(1)} KB)`,
+        detail: `Backup subido exitosamente: ${backupFileName} (${(file.size / 1024).toFixed(1)} KB)`,
         meta: { originalName: file.name, size: file.size },
       })
     } catch {

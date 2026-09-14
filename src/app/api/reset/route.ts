@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireSuperAdmin, hashPin, getSession, logAudit } from "@/lib/auth"
-import { getDatabasePath } from "@/lib/db"
+import { getBackupDirectory, isMysql, getDatabasePath } from "@/lib/db"
 import fs from "fs"
 import path from "path"
 
@@ -35,13 +35,14 @@ export async function POST(req: NextRequest) {
 
     // 1. Crear respaldo preventivo automático antes de cualquier eliminación
     try {
-      const dbPath = getDatabasePath()
-      if (fs.existsSync(dbPath)) {
-        const backupDir = path.join(path.dirname(dbPath), "backups")
-        if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true })
-        const ts = new Date().toISOString().replace(/[:.]/g, "-")
-        const backupPath = path.join(backupDir, `backup-pre-limpieza-demo-${ts}.db`)
-        fs.copyFileSync(dbPath, backupPath)
+      const backupDir = getBackupDirectory()
+      const ts = new Date().toISOString().replace(/[:.]/g, "-")
+      if (!isMysql()) {
+        const dbPath = getDatabasePath()
+        if (fs.existsSync(dbPath)) {
+          const backupPath = path.join(backupDir, `backup-pre-limpieza-demo-${ts}.db`)
+          fs.copyFileSync(dbPath, backupPath)
+        }
       }
     } catch (errBackup) {
       console.warn("Advertencia: No se pudo generar copia automática previa al reset:", errBackup)

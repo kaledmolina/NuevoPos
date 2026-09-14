@@ -213,7 +213,7 @@ const ADMIN_WORKFLOW: TourStep[] = [
     category: "PASO 8: SEGURIDAD Y RESPALDO",
     icon: HardDrive,
     desc: "Protege la información de tu negocio contra cualquier imprevisto.",
-    detail: "En 'Configuración → Backups' puedes descargar una copia completa de tu base de datos SQLite en un solo clic. Guárdala en tu computador o memoria USB y restáurala cuando lo necesites.",
+    detail: "En 'Configuración → Backups' puedes descargar una copia completa de tu base de datos en un solo clic. Guárdala en tu computador o memoria USB y restáurala cuando lo necesites.",
     actionLabel: "👉 Haz clic en 'Crear nueva copia ahora' para respaldar tu base de datos.",
     tip: "¡Excelente! Has completado el tour de administración. Tu negocio está listo para operar.",
     view: "settings",

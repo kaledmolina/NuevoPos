@@ -114,7 +114,7 @@ export default function BackupManager({ open, onOpenChange }: { open: boolean; o
             </DialogTitle>
             <DialogDescription>
               {isSuperAdmin
-                ? "Crea, restaura o descarga copias de seguridad completas de la base de datos SQLite."
+                ? "Crea, restaura o descarga copias de seguridad completas de la base de datos del sistema (MySQL)."
                 : "Crea, restaura o descarga copias de seguridad de los datos de tu negocio y sedes aisladas."}
             </DialogDescription>
           </DialogHeader>
