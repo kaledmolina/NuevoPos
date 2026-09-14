@@ -53,43 +53,168 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // 2. Limpiar datos demo previos con integridad referencial
-    await db.cashTransaction.deleteMany()
-    await db.cashSession.deleteMany()
-    await db.saleItem.deleteMany()
-    await db.sale.deleteMany()
-    await db.purchaseItem.deleteMany()
-    await db.purchase.deleteMany()
-    await db.transaction.deleteMany()
-    await db.productBatch.deleteMany()
-    await db.product.deleteMany()
-    await db.category.deleteMany()
-    await db.client.deleteMany()
-    await db.supplier.deleteMany()
-
-    // Eliminar todos los usuarios excepto Superadmin
-    await db.user.deleteMany({
-      where: { id: { not: superadmin.id } },
+    // 2. Limpiar ÚNICAMENTE datos demo previos (sin tocar empresas ni usuarios reales)
+    const prevDemoTenants = await db.tenant.findMany({
+      where: {
+        OR: [
+          { slug: "drogueria-la-salud-demo" },
+          { ownerEmail: "admin@demo.com" },
+          { name: "Droguería & Farmacia La Salud" },
+        ],
+      },
+      include: { branches: true },
     })
 
-    // Eliminar sedes y empresas previas
-    await db.branch.deleteMany()
-    await db.tenant.deleteMany()
+    const prevDemoTenantIds = prevDemoTenants.map((t) => t.id)
+    const prevDemoBranchIds = prevDemoTenants.flatMap((t) => t.branches.map((b) => b.id))
+
+    const orphanDemoBranches = await db.branch.findMany({
+      where: {
+        OR: [
+          { name: "Sede Principal Demo" },
+          { code: "SEDE-01", tenantId: { in: prevDemoTenantIds } },
+        ],
+      },
+      select: { id: true },
+    })
+    for (const b of orphanDemoBranches) {
+      if (!prevDemoBranchIds.includes(b.id)) prevDemoBranchIds.push(b.id)
+    }
+
+    const prevDemoUsers = await db.user.findMany({
+      where: {
+        AND: [
+          { role: { not: "superadmin" } },
+          { email: { not: "kaledmoly@gmail.com" } },
+          {
+            OR: [
+              ...(prevDemoTenantIds.length > 0 ? [{ tenantId: { in: prevDemoTenantIds } }] : []),
+              { email: "admin@demo.com" },
+              { email: "vendedor@demo.com" },
+              { name: "admin" },
+              { name: "vendedor" },
+            ],
+          },
+        ],
+      },
+      select: { id: true },
+    })
+    const prevDemoUserIds = prevDemoUsers.map((u) => u.id)
+
+    // Eliminar transaccionalmente solo los datos asociados al demo previo
+    await db.$transaction(async (tx) => {
+      if (prevDemoBranchIds.length > 0) {
+        const clients = await tx.client.findMany({
+          where: { branchId: { in: prevDemoBranchIds } },
+          select: { id: true },
+        })
+        const clientIds = clients.map((c) => c.id)
+        if (clientIds.length > 0) {
+          const accounts = await tx.creditAccount.findMany({
+            where: { clientId: { in: clientIds } },
+            select: { id: true },
+          })
+          const accountIds = accounts.map((a) => a.id)
+          if (accountIds.length > 0) {
+            await tx.creditMovement.deleteMany({ where: { accountId: { in: accountIds } } })
+            await tx.creditAccount.deleteMany({ where: { id: { in: accountIds } } })
+          }
+        }
+
+        const sales = await tx.sale.findMany({
+          where: { branchId: { in: prevDemoBranchIds } },
+          select: { id: true },
+        })
+        const saleIds = sales.map((s) => s.id)
+        if (saleIds.length > 0) {
+          await tx.creditMovement.deleteMany({ where: { saleId: { in: saleIds } } })
+          await tx.cashTransaction.deleteMany({ where: { reference: { in: saleIds } } })
+          await tx.saleItem.deleteMany({ where: { saleId: { in: saleIds } } })
+          await tx.sale.deleteMany({ where: { id: { in: saleIds } } })
+        }
+
+        const purchases = await tx.purchase.findMany({
+          where: { branchId: { in: prevDemoBranchIds } },
+          select: { id: true },
+        })
+        const purchaseIds = purchases.map((p) => p.id)
+        if (purchaseIds.length > 0) {
+          await tx.purchaseItem.deleteMany({ where: { purchaseId: { in: purchaseIds } } })
+          await tx.purchase.deleteMany({ where: { id: { in: purchaseIds } } })
+        }
+
+        const cash = await tx.cashSession.findMany({
+          where: { branchId: { in: prevDemoBranchIds } },
+          select: { id: true },
+        })
+        const cashIds = cash.map((c) => c.id)
+        if (cashIds.length > 0) {
+          await tx.cashTransaction.deleteMany({ where: { cashSessionId: { in: cashIds } } })
+          await tx.cashSession.deleteMany({ where: { id: { in: cashIds } } })
+        }
+
+        await tx.transaction.deleteMany({ where: { branchId: { in: prevDemoBranchIds } } })
+
+        const products = await tx.product.findMany({
+          where: { branchId: { in: prevDemoBranchIds } },
+          select: { id: true },
+        })
+        const productIds = products.map((p) => p.id)
+        if (productIds.length > 0) {
+          await tx.saleItem.deleteMany({ where: { productId: { in: productIds } } })
+          await tx.purchaseItem.deleteMany({ where: { productId: { in: productIds } } })
+          await tx.productBatch.deleteMany({ where: { productId: { in: productIds } } })
+          await tx.product.deleteMany({ where: { id: { in: productIds } } })
+        }
+
+        await tx.client.deleteMany({ where: { branchId: { in: prevDemoBranchIds } } })
+        await tx.supplier.deleteMany({ where: { branchId: { in: prevDemoBranchIds } } })
+        await tx.branch.deleteMany({ where: { id: { in: prevDemoBranchIds } } })
+      }
+
+      if (prevDemoUserIds.length > 0) {
+        await tx.user.deleteMany({
+          where: {
+            id: { in: prevDemoUserIds },
+            role: { not: "superadmin" },
+            email: { not: "kaledmoly@gmail.com" },
+          },
+        })
+      }
+
+      if (prevDemoTenantIds.length > 0) {
+        await tx.tenant.deleteMany({ where: { id: { in: prevDemoTenantIds } } })
+      }
+    })
 
     const now = new Date()
     const day = 24 * 60 * 60 * 1000
     const d = (offsetDays: number) => new Date(now.getTime() + offsetDays * day)
 
-    // 3. Sede Central exclusiva para Superadmin
-    await db.branch.create({
+    // 3. Sede Central exclusiva para Superadmin (crear solo si no existe)
+    let superadminBranch = await db.branch.findFirst({
+      where: { tenantId: null, isMain: true },
+    })
+    if (!superadminBranch) {
+      superadminBranch = await db.branch.create({
+        data: {
+          name: "Sede Central Superadmin",
+          code: "SEDE-SAAS",
+          address: "Oficinas Centrales SaaS",
+          phone: "+57 300 000 0000",
+          isMain: true,
+          active: true,
+          tenantId: null,
+        },
+      })
+    }
+
+    await db.user.update({
+      where: { id: superadmin.id },
       data: {
-        name: "Sede Central Superadmin",
-        code: "SEDE-SAAS",
-        address: "Oficinas Centrales SaaS",
-        phone: "+57 300 000 0000",
-        isMain: true,
-        active: true,
+        allowedBranchIds: JSON.stringify([superadminBranch.id]),
         tenantId: null,
+        active: true,
       },
     })
 
@@ -150,13 +275,19 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    // 7. Categorías de muestra
+    // 7. Categorías de muestra (obtener o crear para no duplicar)
+    async function getOrCreateCategory(name: string) {
+      const existing = await db.category.findFirst({ where: { name } })
+      if (existing) return existing
+      return db.category.create({ data: { name } })
+    }
+
     const [catMedicamentos, catOTC, catAseo, catPrimerosAux, catVitaminas] = await Promise.all([
-      db.category.create({ data: { name: "Medicamentos Éticos" } }),
-      db.category.create({ data: { name: "Analgésicos & OTC" } }),
-      db.category.create({ data: { name: "Cuidado Personal & Aseo" } }),
-      db.category.create({ data: { name: "Primeros Auxilios" } }),
-      db.category.create({ data: { name: "Vitaminas & Suplementos" } }),
+      getOrCreateCategory("Medicamentos Éticos"),
+      getOrCreateCategory("Analgésicos & OTC"),
+      getOrCreateCategory("Cuidado Personal & Aseo"),
+      getOrCreateCategory("Primeros Auxilios"),
+      getOrCreateCategory("Vitaminas & Suplementos"),
     ])
 
     // 8. Productos de muestra con stock y precios

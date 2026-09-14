@@ -40,22 +40,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
@@ -132,10 +116,6 @@ export default function SuperadminPanel() {
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
   const [tenantToDelete, setTenantToDelete] = useState<TenantItem | null>(null)
   const [deletingTenant, setDeletingTenant] = useState(false)
-  const [cleanModalOpen, setCleanModalOpen] = useState(false)
-  const [cleaningAction, setCleaningAction] = useState<"purge_sales" | "purge_products" | "purge_inactive">("purge_sales")
-  const [selectedCleanTenantId, setSelectedCleanTenantId] = useState<string>("all")
-  const [cleaningDemo, setCleaningDemo] = useState(false)
 
   const handleDeleteTenant = async () => {
     if (!tenantToDelete) return
@@ -151,26 +131,6 @@ export default function SuperadminPanel() {
       toast.error((e as Error).message)
     } finally {
       setDeletingTenant(false)
-    }
-  }
-
-  const handlePurgeDemo = async () => {
-    setCleaningDemo(true)
-    try {
-      const res = await apiFetch<{ ok: boolean; message: string }>("/api/superadmin/clean-demo", {
-        method: "POST",
-        body: JSON.stringify({
-          action: cleaningAction,
-          tenantId: selectedCleanTenantId === "all" ? undefined : selectedCleanTenantId,
-        }),
-      })
-      toast.success(res.message || "Limpieza completada")
-      setCleanModalOpen(false)
-      loadData()
-    } catch (e) {
-      toast.error((e as Error).message)
-    } finally {
-      setCleaningDemo(false)
     }
   }
 
@@ -339,22 +299,10 @@ export default function SuperadminPanel() {
             onClick={() => setResetConfirmOpen(true)}
             disabled={resettingDemo || refreshing}
             className="h-10 px-3.5 rounded-xl text-xs font-semibold gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
-            title="Purga todas las empresas y datos demo, conservando solo tu Superadmin con una sede vacía"
+            title="Purga únicamente el negocio demo y sus datos de prueba sin tocar empresas ni usuarios reales"
           >
             <IconTrash className="h-4 w-4" />
             Limpiar Demo (Reset)
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCleanModalOpen(true)}
-            disabled={refreshing}
-            className="h-10 px-3.5 rounded-xl text-xs font-semibold gap-1.5 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
-            title="Limpiar ventas o productos de prueba sin reiniciar la plataforma completa"
-          >
-            <IconTrash className="h-4 w-4" />
-            Purgar Ventas / Productos Demo
           </Button>
 
           <Button
@@ -841,14 +789,14 @@ export default function SuperadminPanel() {
         <AlertDialogContent className="max-w-md rounded-2xl border-destructive/30">
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-destructive font-bold">
-              <IconAlertTriangle className="h-5 w-5" /> ¿Purgar datos demo y reiniciar sistema?
+              <IconAlertTriangle className="h-5 w-5" /> ¿Limpiar negocio demo (Reset)?
             </AlertDialogTitle>
             <AlertDialogDescription className="text-left space-y-2 text-xs leading-relaxed text-muted-foreground">
               <span className="block">
-                Esta acción eliminará de forma permanente todos los negocios registrados, ventas ficticias, productos, cajas, compras y personal de demostración.
+                Esta acción eliminará únicamente el negocio de demostración oficial (&quot;Droguería & Farmacia La Salud&quot;), su sede demo, catálogo de prueba y ventas ficticias.
               </span>
               <span className="font-semibold text-foreground bg-muted p-2.5 rounded-lg block border border-border">
-                ⚠️ Únicamente se conservará tu cuenta de Superadministrador (kaledmoly@gmail.com) con una sede vacía lista para operar.
+                🛡️ Tus usuarios y empresas reales, así como tu cuenta de Superadministrador (kaledmoly@gmail.com), permanecerán 100% intactos.
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -861,10 +809,10 @@ export default function SuperadminPanel() {
             >
               {resettingDemo ? (
                 <>
-                  <IconRefresh className="h-4 w-4 mr-1.5 animate-spin" /> Purgando…
+                  <IconRefresh className="h-4 w-4 mr-1.5 animate-spin" /> Limpiando demo…
                 </>
               ) : (
-                "Sí, purgar todo y reiniciar"
+                "Sí, limpiar negocio demo"
               )}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -908,88 +856,6 @@ export default function SuperadminPanel() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Modal para purgar selectivamente ventas o productos de prueba */}
-      <Dialog open={cleanModalOpen} onOpenChange={(o) => !o && !cleaningDemo && setCleanModalOpen(false)}>
-        <DialogContent className="sm:max-w-md rounded-2xl p-6">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
-              <IconTrash className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-              Limpiar Datos de Prueba y Demo
-            </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Selecciona los datos creados por usuarios demo que deseas purgar de la base de datos sin afectar tu cuenta de Superadmin.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">¿Qué deseas purgar?</Label>
-              <Select value={cleaningAction} onValueChange={(v) => setCleaningAction(v as typeof cleaningAction)}>
-                <SelectTrigger className="h-10 text-xs rounded-xl">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="purge_sales">🛒 Purgar sólo ventas de prueba y arqueos</SelectItem>
-                  <SelectItem value="purge_products">📦 Purgar productos de prueba (con lotes e ítems)</SelectItem>
-                  <SelectItem value="purge_inactive">🗑️ Purgar productos inactivos / archivados</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">Aplicar en negocio:</Label>
-              <Select value={selectedCleanTenantId} onValueChange={setSelectedCleanTenantId}>
-                <SelectTrigger className="h-10 text-xs rounded-xl">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">🌐 Todos los negocios demo del sistema</SelectItem>
-                  {tenants.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      🏢 {t.name} ({t.salesCount} ventas)
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl text-xs text-amber-800 dark:text-amber-300 space-y-1">
-              <p className="font-semibold flex items-center gap-1.5">
-                <IconAlertTriangle className="h-3.5 w-3.5" /> Aviso de seguridad
-              </p>
-              <p className="text-[11px] leading-relaxed">
-                Los registros eliminados no se podrán recuperar. La cuenta Superadmin y la configuración principal del sistema se mantienen intactas.
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter className="flex flex-row justify-end gap-2 pt-2">
-            <Button
-              variant="outline"
-              disabled={cleaningDemo}
-              onClick={() => setCleanModalOpen(false)}
-              className="rounded-xl text-xs"
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handlePurgeDemo}
-              disabled={cleaningDemo}
-              className="rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
-            >
-              {cleaningDemo ? (
-                <>
-                  <IconRefresh className="h-3.5 w-3.5 animate-spin" /> Limpiando...
-                </>
-              ) : (
-                <>
-                  <IconTrash className="h-3.5 w-3.5" /> Confirmar Limpieza
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
