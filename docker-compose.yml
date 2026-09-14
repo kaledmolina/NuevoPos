@@ -1,6 +1,32 @@
 version: "3.8"
 
 services:
+  # ==========================================
+  # 1. Base de Datos MySQL 8.0 Oficial
+  # ==========================================
+  omnipos_db:
+    image: mysql:8.0
+    container_name: omnipos_mysql
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: omnipos_root_secret_2026
+      MYSQL_DATABASE: omnipos_db
+      MYSQL_USER: omnipos_user
+      MYSQL_PASSWORD: omnipos_user_pass_2026
+    volumes:
+      - omnipos_mysql_data:/var/lib/mysql
+    networks:
+      - omnipos_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pomnipos_root_secret_2026"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # 2. Aplicación OmniPOS (Next.js)
+  # ==========================================
   omnipos:
     build:
       context: .
@@ -9,15 +35,22 @@ services:
     restart: unless-stopped
     ports:
       - "8086:3000"
+    depends_on:
+      omnipos_db:
+        condition: service_healthy
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=file:/app/db/custom.db
-      - AUTH_SECRET=omnipos_secret_key_production_2026_change_me
-    volumes:
-      # Volumen persistente: garantiza que tus ventas, inventario y usuarios no se borren al actualizar
-      - omnipos_db_data:/app/db
+      - DATABASE_URL=mysql://omnipos_user:omnipos_user_pass_2026@omnipos_db:3306/omnipos_db
+      - AUTH_SECRET=omnipos_secret_key_production_2026_xyz
+    networks:
+      - omnipos_network
 
 volumes:
-  omnipos_db_data:
-    name: omnipos_db_data
+  omnipos_mysql_data:
+    name: omnipos_mysql_data
     driver: local
+
+networks:
+  omnipos_network:
+    name: omnipos_network
+    driver: bridge
