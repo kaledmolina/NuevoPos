@@ -9,7 +9,7 @@ services:
     container_name: omnipos_app
     restart: unless-stopped
     ports:
-      - "3005:3000"
+      - "8086:3000"
     environment:
       - NODE_ENV=production
       - DATABASE_URL=file:/app/db/custom.db
