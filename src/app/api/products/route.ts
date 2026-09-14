@@ -47,10 +47,53 @@ export async function GET(req: NextRequest) {
 
   let products = await db.product.findMany({
     where,
-    include: { category: true },
+    include: {
+      category: true,
+      saleItems: {
+        where: {
+          sale: {
+            status: "completada",
+          },
+        },
+        select: {
+          quantity: true,
+          unitPrice: true,
+          unitCost: true,
+          subtotal: true,
+        },
+      },
+    },
     orderBy: { name: "asc" },
     ...(paginate ? { skip: (page - 1) * pageSize, take: pageSize } : {}),
   })
+
+  // Mapear métricas de ventas reales para cada producto
+  const productsWithMetrics = products.map((p) => {
+    let soldUnits = 0
+    let totalRevenue = 0
+    let totalRealCost = 0
+
+    if (p.saleItems && Array.isArray(p.saleItems)) {
+      for (const item of p.saleItems) {
+        soldUnits += item.quantity
+        totalRevenue += item.subtotal
+        totalRealCost += (item.unitCost || p.cost || 0) * item.quantity
+      }
+    }
+
+    const totalRealProfit = totalRevenue - totalRealCost
+
+    // Omitir el array pesado de saleItems en la respuesta para mantenerla liviana
+    const { saleItems: _, ...rest } = p
+    return {
+      ...rest,
+      soldUnits,
+      totalRevenue,
+      totalRealProfit,
+    }
+  })
+
+  products = productsWithMetrics as any
 
   if (lowStock) {
     products = products.filter((p) => p.stock <= p.minStock)

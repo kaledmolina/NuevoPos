@@ -41,6 +41,14 @@ import {
   IconTag,
   IconX,
   IconCheck,
+  IconCurrencyDollar,
+  IconTrendingUp,
+  IconPackage,
+  IconEye,
+  IconBarcode,
+  IconMapPin,
+  IconHash,
+  IconReceipt2,
 } from "@tabler/icons-react"
 
 interface Category { id: string; name: string; _count?: { products: number } }
@@ -61,6 +69,9 @@ interface Product {
   batch: string | null
   location: string | null
   active: boolean
+  soldUnits?: number
+  totalRevenue?: number
+  totalRealProfit?: number
 }
 
 const emptyForm = {
@@ -258,53 +269,169 @@ export default function ProductsView() {
   }
 
   const totalStockValue = canSeeCosts ? filtered.reduce((s, p) => s + p.cost * p.stock, 0) : 0
+  const totalSaleValue = filtered.reduce((s, p) => s + p.price * p.stock, 0)
+  const totalProfit = canSeeCosts ? totalSaleValue - totalStockValue : 0
+  const totalUnits = filtered.reduce((s, p) => s + p.stock, 0)
+  const lowStockCount = filtered.filter((p) => p.stock > 0 && p.stock <= p.minStock).length
+  const outOfStockCount = filtered.filter((p) => p.stock <= 0).length
+
+  // Métricas de ventas reales ya consolidadas (Ganancia real obtenida)
+  const totalRealSoldUnits = filtered.reduce((s, p) => s + (p.soldUnits ?? 0), 0)
+  const totalRealRevenue = filtered.reduce((s, p) => s + (p.totalRevenue ?? 0), 0)
+  const totalRealProfit = canSeeCosts ? filtered.reduce((s, p) => s + (p.totalRealProfit ?? 0), 0) : 0
+
+  // Modal Ver Detalle de Producto
+  const [detailProduct, setDetailProduct] = useState<Product | null>(null)
 
   return (
     <div className="p-4 md:p-6 space-y-4">
-      {/* Header / filtros */}
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-bold flex items-center gap-2"><IconBoxSeam className="h-5 w-5 text-primary" /> Inventario de productos</h2>
-            <p className="text-sm text-muted-foreground">
-              {filtered.length} productos{canSeeCosts ? ` · Valor en stock: ${formatCurrency(totalStockValue)}` : ""}
-              {!canEdit && <span className="ml-2 text-xs text-muted-foreground">· Solo lectura</span>}
-            </p>
-          </div>
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold flex items-center gap-2"><IconBoxSeam className="h-5 w-5 text-primary" /> Inventario de productos</h2>
+          <p className="text-sm text-muted-foreground">
+            {filtered.length} productos · {totalUnits} unidades en stock
+            {!canEdit && <span className="ml-2 text-xs text-muted-foreground">· Solo lectura</span>}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={exportCsv}><IconDownload className="h-4 w-4 mr-1" /> Exportar</Button>
           {canEdit && (
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={exportCsv}><IconDownload className="h-4 w-4 mr-1" /> Exportar</Button>
+            <>
               <Button variant="outline" size="sm" onClick={() => setCatManageOpen(true)}><IconTag className="h-4 w-4 mr-1" /> Categorías</Button>
               <Button size="sm" onClick={openNew} data-tour="products-new-btn"><IconPlus className="h-4 w-4 mr-1" /> Nuevo producto</Button>
-            </div>
-          )}
-          {!canEdit && (
-            <Button variant="outline" size="sm" onClick={exportCsv}><IconDownload className="h-4 w-4 mr-1" /> Exportar</Button>
+            </>
           )}
         </div>
+      </div>
 
-        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3" data-tour="products-search-bar">
-          <div className="relative flex-1">
-            <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por nombre o código…" className="pl-9 h-10 bg-card" />
-          </div>
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 scroll-thin">
-            <div className="w-[180px] shrink-0">
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className="w-full h-10 bg-card"><IconFilter className="h-3.5 w-3.5 mr-1 text-muted-foreground" /><SelectValue placeholder="Categoría" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas las categorías</SelectItem>
-                  {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+        {/* Total unidades */}
+        <Card className="rounded-xl border shadow-2xs">
+          <CardContent className="p-3.5 sm:p-4">
+            <div className="flex items-center gap-2.5">
+              <div className="h-9 w-9 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
+                <IconPackage className="h-4.5 w-4.5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] text-muted-foreground font-medium truncate">Unidades en stock</p>
+                <p className="text-lg font-bold text-foreground leading-tight">{totalUnits.toLocaleString()}</p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  {outOfStockCount > 0 && (
+                    <span className="text-[10px] text-red-600 dark:text-red-400 font-medium">{outOfStockCount} agotados</span>
+                  )}
+                  {lowStockCount > 0 && (
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">{outOfStockCount > 0 ? "· " : ""}{lowStockCount} bajo</span>
+                  )}
+                  {outOfStockCount === 0 && lowStockCount === 0 && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Todo en orden</span>
+                  )}
+                </div>
+              </div>
             </div>
-            <Button variant={showLow ? "default" : "outline"} size="sm" className="h-10 shrink-0 bg-card" onClick={() => setShowLow(!showLow)}>
-              <IconAlertTriangle className="h-3.5 w-3.5 mr-1" /> Stock bajo
-            </Button>
-            <Button variant={showExpiring ? "default" : "outline"} size="sm" className="h-10 shrink-0 bg-card" onClick={() => setShowExpiring(!showExpiring)}>
-              <IconCalendarTime className="h-3.5 w-3.5 mr-1" /> Por vencer
-            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Valor en costo */}
+        {canSeeCosts && (
+          <Card className="rounded-xl border shadow-2xs">
+            <CardContent className="p-3.5 sm:p-4">
+              <div className="flex items-center gap-2.5">
+                <div className="h-9 w-9 rounded-lg bg-orange-500/10 flex items-center justify-center shrink-0">
+                  <IconCurrencyDollar className="h-4.5 w-4.5 text-orange-600 dark:text-orange-400" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[11px] text-muted-foreground font-medium truncate">Costo del inventario</p>
+                  <p className="text-lg font-bold text-foreground leading-tight">{formatCurrency(totalStockValue)}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Inversión actual en stock</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Valor en venta */}
+        <Card className="rounded-xl border shadow-2xs">
+          <CardContent className="p-3.5 sm:p-4">
+            <div className="flex items-center gap-2.5">
+              <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                <IconCurrencyDollar className="h-4.5 w-4.5 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] text-muted-foreground font-medium truncate">Valor en venta</p>
+                <p className="text-lg font-bold text-foreground leading-tight">{formatCurrency(totalSaleValue)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Si se vende todo el stock</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Ganancia estimada */}
+        {canSeeCosts && (
+          <Card className="rounded-xl border shadow-2xs">
+            <CardContent className="p-3.5 sm:p-4">
+              <div className="flex items-center gap-2.5">
+                <div className="h-9 w-9 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+                  <IconTrendingUp className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[11px] text-muted-foreground font-medium truncate">Ganancia estimada</p>
+                  <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400 leading-tight">{formatCurrency(totalProfit)}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Margen: {totalSaleValue > 0 ? `${Math.round((totalProfit / totalSaleValue) * 100)}%` : "0%"}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Ganancia Real Obtenida (Ventas ya cerradas) */}
+        {canSeeCosts && (
+          <Card className="rounded-xl border shadow-2xs bg-emerald-500/[0.04] border-emerald-500/30 col-span-2 lg:col-span-1">
+            <CardContent className="p-3.5 sm:p-4">
+              <div className="flex items-center gap-2.5">
+                <div className="h-9 w-9 rounded-lg bg-emerald-500/20 flex items-center justify-center shrink-0">
+                  <IconReceipt2 className="h-4.5 w-4.5 text-emerald-700 dark:text-emerald-400" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 truncate">Ganancia Real Obtenida</p>
+                  <p className="text-lg font-extrabold text-emerald-700 dark:text-emerald-400 leading-tight">
+                    +{formatCurrency(totalRealProfit)}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {totalRealSoldUnits} {totalRealSoldUnits === 1 ? "ud. vendida" : "uds. vendidas"} · {formatCurrency(totalRealRevenue)}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Filtros */}
+      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3" data-tour="products-search-bar">
+        <div className="relative flex-1">
+          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por nombre o código…" className="pl-9 h-10 bg-card" />
+        </div>
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 scroll-thin">
+          <div className="w-[180px] shrink-0">
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-full h-10 bg-card"><IconFilter className="h-3.5 w-3.5 mr-1 text-muted-foreground" /><SelectValue placeholder="Categoría" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las categorías</SelectItem>
+                {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
+          <Button variant={showLow ? "default" : "outline"} size="sm" className="h-10 shrink-0 bg-card" onClick={() => setShowLow(!showLow)}>
+            <IconAlertTriangle className="h-3.5 w-3.5 mr-1" /> Stock bajo
+          </Button>
+          <Button variant={showExpiring ? "default" : "outline"} size="sm" className="h-10 shrink-0 bg-card" onClick={() => setShowExpiring(!showExpiring)}>
+            <IconCalendarTime className="h-3.5 w-3.5 mr-1" /> Por vencer
+          </Button>
         </div>
       </div>
 
@@ -347,8 +474,18 @@ export default function ProductsView() {
                       <TableHead className="hidden md:table-cell">Categoría</TableHead>
                       <TableHead className="text-right">Precio</TableHead>
                       <TableHead className="text-center">Stock</TableHead>
+                      {canSeeCosts && (
+                        <TableHead className="text-right hidden xl:table-cell">Total Costo</TableHead>
+                      )}
+                      <TableHead className="text-right hidden lg:table-cell">Total Venta</TableHead>
+                      {canSeeCosts && (
+                        <>
+                          <TableHead className="text-right hidden xl:table-cell">Ganancia Est.</TableHead>
+                          <TableHead className="text-right hidden md:table-cell">Ganancia Real</TableHead>
+                        </>
+                      )}
                       <TableHead className="hidden lg:table-cell">Vencimiento</TableHead>
-                      {canEdit && <TableHead className="text-right">Acciones</TableHead>}
+                      <TableHead className="text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -356,6 +493,10 @@ export default function ProductsView() {
                       const exp = expirationStatus(p.expirationDate)
                       const low = p.stock <= p.minStock
                       const out = p.stock <= 0
+                      const itemCostTotal = p.cost * p.stock
+                      const itemSaleTotal = p.price * p.stock
+                      const itemProfit = itemSaleTotal - itemCostTotal
+                      const hasSales = (p.soldUnits ?? 0) > 0
                       return (
                         <TableRow key={p.id}>
                           <TableCell>
@@ -375,6 +516,33 @@ export default function ProductsView() {
                             </Badge>
                             {low && !out && <p className="text-[10px] text-amber-600 mt-0.5">min {p.minStock}</p>}
                           </TableCell>
+                          {canSeeCosts && (
+                            <TableCell className="text-right font-medium text-xs hidden xl:table-cell text-muted-foreground">
+                              {formatCurrency(itemCostTotal)}
+                            </TableCell>
+                          )}
+                          <TableCell className="text-right font-semibold text-xs hidden lg:table-cell text-foreground">
+                            {formatCurrency(itemSaleTotal)}
+                          </TableCell>
+                          {canSeeCosts && (
+                            <>
+                              <TableCell className="text-right font-semibold text-xs hidden xl:table-cell text-emerald-600 dark:text-emerald-400">
+                                +{formatCurrency(itemProfit)}
+                              </TableCell>
+                              <TableCell className="text-right font-bold text-xs hidden md:table-cell">
+                                {hasSales ? (
+                                  <div>
+                                    <span className="text-emerald-700 dark:text-emerald-400">+{formatCurrency(p.totalRealProfit ?? 0)}</span>
+                                    <span className="block text-[10px] font-normal text-muted-foreground">
+                                      {p.soldUnits} {p.soldUnits === 1 ? "ud." : "uds."}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground/60 text-[11px] font-normal">Sin ventas</span>
+                                )}
+                              </TableCell>
+                            </>
+                          )}
                           <TableCell className="hidden lg:table-cell">
                             {p.expirationDate ? (
                               <div>
@@ -389,13 +557,12 @@ export default function ProductsView() {
                             ) : <span className="text-xs text-muted-foreground">—</span>}
                           </TableCell>
                           <TableCell className="text-right">
-                            {canEdit ? (
-                              <div className="flex justify-end gap-1">
+                            <div className="flex justify-end gap-1">
+                              <Button size="icon" variant="ghost" className="h-8 w-8" title="Ver detalle" onClick={() => setDetailProduct(p)}><IconEye className="h-3.5 w-3.5" /></Button>
+                              {canEdit && (
                                 <Button size="icon" variant="ghost" className="h-8 w-8" title="Editar producto" onClick={() => openEdit(p)}><IconPencil className="h-3.5 w-3.5" /></Button>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       )
@@ -485,13 +652,47 @@ export default function ProductsView() {
                       </Badge>
                     </div>
                   )}
-                  {canEdit && (
-                    <div className="pt-1 border-t">
-                      <Button size="sm" variant="outline" className="h-10 w-full" onClick={() => openEdit(p)}>
-                        <IconPencil className="h-4 w-4 mr-1.5" /> Editar
-                      </Button>
+                  {/* Resumen de totales por producto en móvil */}
+                  <div className="bg-muted/40 rounded-lg p-2 text-xs space-y-1.5">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground block">Total Venta Stock</span>
+                        <span className="font-semibold text-foreground">{formatCurrency(p.price * p.stock)}</span>
+                      </div>
+                      {canSeeCosts ? (
+                        <div>
+                          <span className="text-[10px] text-muted-foreground block">Ganancia Est. Stock</span>
+                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                            +{formatCurrency((p.price - p.cost) * p.stock)}
+                          </span>
+                        </div>
+                      ) : (
+                        <div>
+                          <span className="text-[10px] text-muted-foreground block">Unidad</span>
+                          <span className="font-medium text-muted-foreground">{p.unit}</span>
+                        </div>
+                      )}
                     </div>
-                  )}
+                    {canSeeCosts && (p.soldUnits ?? 0) > 0 && (
+                      <div className="pt-1.5 border-t border-border/50 flex items-center justify-between text-[11px]">
+                        <span className="text-muted-foreground">Ganancia Real ({p.soldUnits} {p.soldUnits === 1 ? "ud." : "uds."}):</span>
+                        <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                          +{formatCurrency(p.totalRealProfit ?? 0)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-1 border-t flex gap-2">
+                    <Button size="sm" variant="outline" className="h-9 flex-1 text-xs" onClick={() => setDetailProduct(p)}>
+                      <IconEye className="h-3.5 w-3.5 mr-1" /> Ver
+                    </Button>
+                    {canEdit && (
+                      <Button size="sm" variant="secondary" className="h-9 flex-1 text-xs" onClick={() => openEdit(p)}>
+                        <IconPencil className="h-3.5 w-3.5 mr-1" /> Editar
+                      </Button>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             )
@@ -725,6 +926,192 @@ export default function ProductsView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ==================== MODAL VER DETALLE DE PRODUCTO ==================== */}
+      <Dialog open={!!detailProduct} onOpenChange={(openState) => !openState && setDetailProduct(null)}>
+        <DialogContent className="max-w-md rounded-2xl p-0 overflow-hidden gap-0">
+          {detailProduct && (
+            <>
+              {/* Header con gradiente y nombre */}
+              <div className="bg-gradient-to-br from-primary/15 via-primary/5 to-background border-b p-5 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-1">
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-semibold text-primary border-primary/30 bg-primary/5">
+                      {detailProduct.category?.name ?? "Sin Categoría"}
+                    </Badge>
+                    <DialogTitle className="text-lg font-bold text-foreground leading-tight">
+                      {detailProduct.name}
+                    </DialogTitle>
+                  </div>
+                  <Badge variant={detailProduct.active ? "default" : "secondary"} className="shrink-0 text-[10px]">
+                    {detailProduct.active ? "Activo" : "Inactivo"}
+                  </Badge>
+                </div>
+                {detailProduct.description && (
+                  <DialogDescription className="text-xs text-muted-foreground line-clamp-2">
+                    {detailProduct.description}
+                  </DialogDescription>
+                )}
+              </div>
+
+              {/* Métricas Financieras del Stock (Total Costo, Total Venta, Ganancia) */}
+              <div className="p-5 space-y-4">
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                    Balance Financiero de Stock ({detailProduct.stock} {detailProduct.unit}s)
+                  </p>
+                  
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {/* Tarjeta Total Costo */}
+                    {canSeeCosts ? (
+                      <div className="rounded-xl border bg-orange-500/5 border-orange-500/20 p-3 space-y-1">
+                        <span className="text-[10px] font-medium text-orange-700 dark:text-orange-400 flex items-center gap-1">
+                          <IconCurrencyDollar className="h-3.5 w-3.5" /> Total Costo
+                        </span>
+                        <p className="text-base font-bold text-orange-950 dark:text-orange-200">
+                          {formatCurrency(detailProduct.cost * detailProduct.stock)}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {formatCurrency(detailProduct.cost)} c/u × {detailProduct.stock}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border bg-muted/40 p-3 space-y-1">
+                        <span className="text-[10px] font-medium text-muted-foreground">Stock actual</span>
+                        <p className="text-base font-bold">{detailProduct.stock} {detailProduct.unit}</p>
+                      </div>
+                    )}
+
+                    {/* Tarjeta Total Venta */}
+                    <div className="rounded-xl border bg-primary/5 border-primary/20 p-3 space-y-1">
+                      <span className="text-[10px] font-medium text-primary flex items-center gap-1">
+                        <IconCurrencyDollar className="h-3.5 w-3.5" /> Total Venta
+                      </span>
+                      <p className="text-base font-bold text-primary">
+                        {formatCurrency(detailProduct.price * detailProduct.stock)}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {formatCurrency(detailProduct.price)} c/u × {detailProduct.stock}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Tarjeta Ganancia Estimada */}
+                  {canSeeCosts && (
+                    <div className="rounded-xl border bg-emerald-500/10 border-emerald-500/30 p-3 flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
+                          <IconTrendingUp className="h-4 w-4 text-emerald-600" /> Ganancia Estimada en Stock
+                        </span>
+                        <p className="text-xs text-muted-foreground">
+                          Margen unitario: {formatCurrency(detailProduct.price - detailProduct.cost)} por {detailProduct.unit}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-extrabold text-emerald-600 dark:text-emerald-400">
+                          +{formatCurrency((detailProduct.price - detailProduct.cost) * detailProduct.stock)}
+                        </p>
+                        <p className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                          {detailProduct.price > 0
+                            ? `${Math.round(((detailProduct.price - detailProduct.cost) / detailProduct.price) * 100)}% de margen`
+                            : "0%"}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sección de Ventas Reales Concretadas y Ganancia Real */}
+                  <div className="rounded-xl border bg-emerald-500/[0.04] border-emerald-500/25 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-1.5 uppercase tracking-wide">
+                        <IconReceipt2 className="h-4 w-4 text-emerald-600" /> Rendimiento Real de Ventas
+                      </span>
+                      <Badge variant="outline" className="text-[10px] font-semibold border-emerald-500/30 text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40">
+                        {detailProduct.soldUnits ?? 0} {(detailProduct.soldUnits ?? 0) === 1 ? "unidad vendida" : "unidades vendidas"}
+                      </Badge>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-emerald-500/20">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground block">Recaudo Total Real</span>
+                        <p className="font-bold text-foreground">{formatCurrency(detailProduct.totalRevenue ?? 0)}</p>
+                      </div>
+                      {canSeeCosts ? (
+                        <div>
+                          <span className="text-[10px] text-muted-foreground block">Ganancia Real Obtenida</span>
+                          <p className="font-extrabold text-emerald-700 dark:text-emerald-400">
+                            +{(detailProduct.totalRealProfit ?? 0) > 0 ? formatCurrency(detailProduct.totalRealProfit ?? 0) : formatCurrency(0)}
+                          </p>
+                        </div>
+                      ) : (
+                        <div>
+                          <span className="text-[10px] text-muted-foreground block">Estado de Ventas</span>
+                          <p className="font-medium text-muted-foreground">
+                            {(detailProduct.soldUnits ?? 0) > 0 ? "Con ventas activas" : "Sin ventas aún"}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Especificaciones y Almacén */}
+                <div className="rounded-xl border bg-muted/20 p-3 space-y-2 text-xs">
+                  <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+                    <div>
+                      <span className="text-[10px] text-muted-foreground/70 block">Código / Barcode:</span>
+                      <span className="font-mono font-medium text-foreground">{detailProduct.barcode || "Sin código de barras"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-muted-foreground/70 block">SKU / Referencia:</span>
+                      <span className="font-mono font-medium text-foreground">{detailProduct.sku || "Sin SKU"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-muted-foreground/70 block">Stock Mínimo de Alerta:</span>
+                      <span className="font-medium text-foreground">{detailProduct.minStock} {detailProduct.unit}s</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-muted-foreground/70 block">Ubicación física:</span>
+                      <span className="font-medium text-foreground">{detailProduct.location || "No asignada"}</span>
+                    </div>
+                  </div>
+
+                  {(detailProduct.expirationDate || detailProduct.batch) && (
+                    <div className="pt-2 border-t flex items-center justify-between text-[11px]">
+                      {detailProduct.batch && (
+                        <span>Lote: <strong className="text-foreground">{detailProduct.batch}</strong></span>
+                      )}
+                      {detailProduct.expirationDate && (
+                        <span>Vence: <strong className="text-foreground">{formatDate(detailProduct.expirationDate)}</strong></span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer acciones */}
+              <div className="border-t p-3.5 bg-muted/20 flex items-center justify-between gap-2">
+                <Button variant="outline" size="sm" className="rounded-xl text-xs" onClick={() => setDetailProduct(null)}>
+                  Cerrar
+                </Button>
+                {canEdit && (
+                  <Button
+                    size="sm"
+                    className="rounded-xl text-xs gap-1.5 shadow-xs"
+                    onClick={() => {
+                      const p = detailProduct
+                      setDetailProduct(null)
+                      openEdit(p)
+                    }}
+                  >
+                    <IconPencil className="h-3.5 w-3.5" /> Editar Producto
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -245,6 +245,10 @@ export async function POST(req: NextRequest) {
         },
       })
 
+      if (!openSession) {
+        throw new Error("La caja registradora está cerrada. Debes abrir caja antes de realizar ventas.")
+      }
+
       // Validación de cliente y crédito
       let creditAccount: { id: string; balance: number; creditLimit: number; active: boolean } | null = null
       if (paymentMethod === "credito" && !clientId) {

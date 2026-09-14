@@ -86,7 +86,7 @@ interface Sale {
 }
 
 const METHOD_LABEL: Record<string, string> = {
-  efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", credito: "Crédito",
+  efectivo: "Efectivo", credito: "Crédito",
 }
 
 export default function SalesView() {
@@ -752,8 +752,6 @@ export default function SalesView() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="efectivo">Efectivo</SelectItem>
-                      <SelectItem value="transferencia">Transferencia</SelectItem>
-                      <SelectItem value="tarjeta">Tarjeta</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

@@ -73,6 +73,7 @@ import SettingsView from "@/components/pos/settings"
 import ReportsView from "@/components/pos/reports"
 import StaffManager from "@/components/pos/staff-manager"
 import SuperadminPanel from "@/components/pos/superadmin-panel"
+import { NotificationsBell } from "@/components/pos/notifications-bell"
 import { ThemeToggle } from "@/components/theme-toggle"
 
 interface NavItem { key: ViewKey; label: string; icon: React.ElementType }
@@ -693,6 +694,9 @@ export default function Home() {
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+
+          {/* Centro de Notificaciones y Alertas (Campanita) */}
+          <NotificationsBell onNavigate={handleSetView} />
 
           {/* Botón selector de tema claro/oscuro */}
           <ThemeToggle />

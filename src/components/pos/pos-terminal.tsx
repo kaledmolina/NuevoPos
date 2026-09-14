@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { apiFetch } from "@/lib/api"
 import { useAppStore, type HeldCart } from "@/lib/store"
 import { formatCurrency, expirationStatus, formatDateTime, formatRelativeTime } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -27,7 +28,7 @@ import { toast } from "sonner"
 import {
   IconSearch, IconPlus, IconMinus, IconTrash, IconShoppingCart, IconScan, IconX, IconCircleCheck,
   IconPrinter, IconPackage, IconDownload, IconPlayerPause, IconPlayerPlay, IconClock, IconUsers, IconArrowsExchange, IconAlertTriangle,
-  IconCash, IconCreditCard, IconDeviceMobile, IconFileText, IconChevronDown, IconChevronRight, IconArrowLeft,
+  IconCash, IconFileText, IconChevronDown, IconChevronRight, IconArrowLeft, IconLock, IconWallet,
 } from "@tabler/icons-react"
 
 interface Product {
@@ -57,8 +58,6 @@ interface Sale {
 
 const PAYMENTS = [
   { value: "efectivo", label: "Efectivo", icon: IconCash },
-  { value: "transferencia", label: "Transferencia / Nequi", icon: IconDeviceMobile },
-  { value: "tarjeta", label: "Tarjeta", icon: IconCreditCard },
   { value: "credito", label: "Crédito", icon: IconFileText },
 ]
 
@@ -91,6 +90,7 @@ export default function PosTerminal() {
   const [checkingOut, setCheckingOut] = useState(false)
   const [receipt, setReceipt] = useState<Sale | null>(null)
   const [cartOpenMobile, setCartOpenMobile] = useState(false)
+  const [cashOpen, setCashOpen] = useState<boolean | null>(null) // null = cargando, false = cerrada, true = abierta
 
   // Estados de modales para cola y pausar
   const [holdDialogOpen, setHoldDialogOpen] = useState(false)
@@ -113,10 +113,12 @@ export default function PosTerminal() {
       apiFetch<Product[]>("/api/products?active=1"),
       apiFetch<Client[]>("/api/clients"),
       apiFetch<Record<string, string>>("/api/settings").catch(() => ({} as Record<string, string>)),
+      apiFetch<{ id: string; status: string } | null>("/api/cash").catch(() => null),
     ])
-      .then(([p, c, settings]) => {
+      .then(([p, c, settings, cashSession]) => {
         setProducts(p)
         setClients(c)
+        setCashOpen(Boolean(cashSession && cashSession.status === "abierta"))
         if (settings) {
           setStoreInfo({
             name: settings.store_name || "Sistema POS",
@@ -136,11 +138,17 @@ export default function PosTerminal() {
   useEffect(() => {
     const exact = products.find((p) => p.barcode && p.barcode === query.trim())
     if (exact && exact.stock > 0) {
+      const inCartItem = cart.find((c) => c.productId === exact.id)
+      if (inCartItem && inCartItem.quantity >= exact.stock) {
+        toast.warning(`Sin stock disponible — solo hay ${exact.stock} unidad(es) de "${exact.name}"`)
+        setQuery("")
+        return
+      }
       addToCart({ productId: exact.id, name: exact.name, price: exact.price, cost: exact.cost, stock: exact.stock, unit: exact.unit })
       toast.success(`${exact.name} agregado`)
       setQuery("")
     }
-  }, [query, products, addToCart])
+  }, [query, products, addToCart, cart])
 
   // Categorías extraídas dinámicamente de los productos disponibles
   const categories = useMemo(() => {
@@ -242,6 +250,15 @@ export default function PosTerminal() {
   }
 
   const handleCheckout = async () => {
+    if (cashOpen === false) {
+      return toast.error("Caja registradora cerrada", {
+        description: "Debes abrir caja antes de registrar ventas.",
+        action: {
+          label: "Abrir Caja",
+          onClick: () => setView("cash"),
+        },
+      })
+    }
     if (cart.length === 0) return toast.error("Agrega productos a la venta")
     if (!receivedNum && payment === "efectivo") return toast.error("Ingresa el monto recibido")
     if (payment === "efectivo" && receivedNum < total) return toast.error("El monto recibido es menor al total")
@@ -387,7 +404,10 @@ export default function PosTerminal() {
                       size="icon"
                       variant="outline"
                       className="h-7 w-7 rounded-lg active:scale-95"
-                      onClick={() => updateCartQty(it.productId, Math.min(it.quantity + 1, it.stock))}
+                      onClick={() => {
+                        if (it.quantity >= it.stock) return toast.warning(`Sin stock disponible — solo hay ${it.stock} unidad(es)`)
+                        updateCartQty(it.productId, it.quantity + 1)
+                      }}
                     >
                       <IconPlus className="h-3 w-3" />
                     </Button>
@@ -576,15 +596,49 @@ export default function PosTerminal() {
             <span className="text-primary">{formatCurrency(total)}</span>
           </div>
         </div>
-        <div className="p-3">
+        <div className="p-3 space-y-2">
+          {cashOpen === false && (
+            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 min-w-0">
+                <IconLock className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <div className="min-w-0">
+                  <p className="font-bold text-amber-800 dark:text-amber-300 leading-tight">Caja Cerrada</p>
+                  <p className="text-[10px] text-muted-foreground truncate">Abre turno para permitir cobros</p>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px] font-semibold border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 shrink-0"
+                onClick={() => setView("cash")}
+              >
+                Abrir Caja
+              </Button>
+            </div>
+          )}
+
           <Button
-            className="w-full h-12 text-base font-bold shadow-md shadow-primary/25 rounded-xl"
-            disabled={cart.length === 0 || checkingOut}
+            className={cn(
+              "w-full h-12 text-base font-bold shadow-md rounded-xl transition-all",
+              cashOpen === false
+                ? "bg-muted text-muted-foreground hover:bg-muted border border-border/80 shadow-none cursor-not-allowed"
+                : "shadow-primary/25"
+            )}
+            disabled={cart.length === 0 || checkingOut || cashOpen === false}
             onClick={handleCheckout}
             data-tour="pos-checkout-btn"
           >
-            <IconCircleCheck className="h-5 w-5 mr-2" />
-            {checkingOut ? "Procesando…" : `Cobrar ${cart.length > 0 ? formatCurrency(total) : ""}`}
+            {cashOpen === false ? (
+              <>
+                <IconLock className="h-5 w-5 mr-2 text-amber-600" />
+                Caja cerrada · No disponible
+              </>
+            ) : (
+              <>
+                <IconCircleCheck className="h-5 w-5 mr-2" />
+                {checkingOut ? "Procesando…" : `Cobrar ${cart.length > 0 ? formatCurrency(total) : ""}`}
+              </>
+            )}
           </Button>
         </div>
       </div>
@@ -822,6 +876,7 @@ export default function PosTerminal() {
                       onClick={() => {
                         if (out) return toast.error("Producto sin stock")
                         if (exp.variant === "expired") return toast.error("Producto vencido, no se puede vender")
+                        if (inCartQty >= p.stock) return toast.warning(`Sin stock disponible — solo hay ${p.stock} unidad(es) de "${p.name}"`)
                         addToCart({ productId: p.id, name: p.name, price: p.price, cost: p.cost, stock: p.stock, unit: p.unit })
                         toast.success(`${p.name} agregado`)
                       }}

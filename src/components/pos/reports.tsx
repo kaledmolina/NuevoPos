@@ -52,8 +52,6 @@ interface ReportsData {
 
 const METHOD_LABEL: Record<string, string> = {
   efectivo: "Efectivo",
-  tarjeta: "Tarjeta",
-  transferencia: "Transferencia",
   credito: "Crédito",
 }
 
