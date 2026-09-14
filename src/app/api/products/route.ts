@@ -60,6 +60,12 @@ export async function GET(req: NextRequest) {
           unitPrice: true,
           unitCost: true,
           subtotal: true,
+          sale: {
+            select: {
+              subtotal: true,
+              discount: true,
+            },
+          },
         },
       },
     },
@@ -67,7 +73,7 @@ export async function GET(req: NextRequest) {
     ...(paginate ? { skip: (page - 1) * pageSize, take: pageSize } : {}),
   })
 
-  // Mapear métricas de ventas reales para cada producto
+  // Mapear métricas de ventas reales para cada producto considerando descuentos
   const productsWithMetrics = products.map((p) => {
     let soldUnits = 0
     let totalRevenue = 0
@@ -76,7 +82,12 @@ export async function GET(req: NextRequest) {
     if (p.saleItems && Array.isArray(p.saleItems)) {
       for (const item of p.saleItems) {
         soldUnits += item.quantity
-        totalRevenue += item.subtotal
+        const saleSubtotal = item.sale?.subtotal || item.subtotal
+        const saleDiscount = item.sale?.discount || 0
+        const discountFraction = saleSubtotal > 0 ? (saleDiscount / saleSubtotal) : 0
+        const netItemRevenue = item.subtotal * (1 - discountFraction)
+
+        totalRevenue += netItemRevenue
         totalRealCost += (item.unitCost || p.cost || 0) * item.quantity
       }
     }

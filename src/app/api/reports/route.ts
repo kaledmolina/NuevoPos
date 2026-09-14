@@ -33,7 +33,10 @@ export async function GET(req: NextRequest) {
       }),
       db.saleItem.findMany({
         where: { sale: { createdAt: { gte: start, lte: end }, status: "completada", ...branchFilter } },
-        include: { product: { include: { category: true } } },
+        include: {
+          product: { include: { category: true } },
+          sale: { select: { subtotal: true, discount: true } },
+        },
       }),
       db.purchase.findMany({
         where: { createdAt: { gte: start, lte: end }, ...branchFilter },
@@ -46,12 +49,12 @@ export async function GET(req: NextRequest) {
 
     // ---------- KPIs principales ----------
     const totalSales = sales.reduce((s, x) => s + x.total, 0)
+    const totalDiscounts = sales.reduce((s, x) => s + (x.discount || 0), 0)
     const salesCount = sales.length
     const avgTicket = salesCount > 0 ? totalSales / salesCount : 0
-    const totalProfit = saleItems.reduce(
-      (s, it) => s + (it.unitPrice - it.unitCost) * it.quantity,
-      0
-    )
+    const totalCost = saleItems.reduce((s, it) => s + (it.unitCost || 0) * it.quantity, 0)
+    // Utilidad real neta: Ingresos totales netos (tras aplicar descuentos) menos el costo de la mercancía vendida
+    const totalProfit = totalSales - totalCost
     const totalPurchases = purchases.reduce((s, p) => s + p.total, 0)
     const totalIncome = transactions
       .filter((t) => t.type === "ingreso")
@@ -158,9 +161,16 @@ export async function GET(req: NextRequest) {
         total: 0,
         profit: 0,
       }
+      const saleSubtotal = (it as any).sale?.subtotal || it.subtotal
+      const saleDiscount = (it as any).sale?.discount || 0
+      const discountFraction = saleSubtotal > 0 ? (saleDiscount / saleSubtotal) : 0
+      const netItemRevenue = it.subtotal * (1 - discountFraction)
+      const itemCost = (it.unitCost || 0) * it.quantity
+      const itemProfit = netItemRevenue - itemCost
+
       cur.qty += it.quantity
-      cur.total += it.subtotal
-      cur.profit += (it.unitPrice - it.unitCost) * it.quantity
+      cur.total += netItemRevenue
+      cur.profit += itemProfit
       prodMap.set(it.productId, cur)
     }
     const topProducts = [...prodMap.values()]
@@ -204,6 +214,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       range: days,
       totalSales,
+      totalDiscounts,
       salesCount,
       avgTicket,
       totalProfit,

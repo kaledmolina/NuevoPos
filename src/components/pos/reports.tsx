@@ -28,6 +28,7 @@ import {
 interface ReportsData {
   range: number
   totalSales: number
+  totalDiscounts?: number
   salesCount: number
   avgTicket: number
   totalProfit: number
@@ -125,7 +126,9 @@ export default function ReportsView() {
     {
       label: "Utilidad bruta",
       value: formatCurrency(data.totalProfit),
-      sub: "Margen sobre costo",
+      sub: data.totalDiscounts && data.totalDiscounts > 0
+        ? `-${formatCurrency(data.totalDiscounts)} en descuentos`
+        : "Margen neto sobre costo",
       icon: TrendingUp,
       tone: "blue" as const,
     },
