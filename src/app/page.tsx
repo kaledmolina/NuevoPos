@@ -165,6 +165,7 @@ export default function Home() {
   const setView = useAppStore((s) => s.setView)
   const sidebarOpen = useAppStore((s) => s.sidebarOpen)
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen)
+  const userEmail = useAppStore((s) => s.userEmail)
   const cartCount = useAppStore((s) => s.cart.reduce((n, c) => n + c.quantity, 0))
 
   const branches = useAppStore((s) => s.branches)
@@ -242,6 +243,11 @@ export default function Home() {
 
   // Al salir del POS con items en el carrito, se pasa automáticamente a la cola de espera
   const handleSetView = (v: typeof view) => {
+    // Bloqueo estricto: Las cuentas demo (admin / vendedor) NUNCA pueden acceder al Superadmin
+    if (v === "superadmin" && (role !== "superadmin" || (userEmail !== "kaledmoly@gmail.com" && userName !== "Superadmin Kaled"))) {
+      toast.error("Acceso restringido: Solo el Superadministrador (kaledmoly@gmail.com) puede acceder a este panel.")
+      return
+    }
     if (view === "pos" && v !== "pos" && cartCount > 0) {
       toast.info(`Venta de ${cartCount} producto(s) guardada en espera`, {
         description: "Tu carrito se pausó automáticamente. Puedes retomarlo en la cola del POS cuando desees.",
@@ -249,6 +255,13 @@ export default function Home() {
     }
     setView(v)
   }
+
+  // Redirección de seguridad si un usuario sin rol superadmin cae en la vista superadmin
+  useEffect(() => {
+    if (view === "superadmin" && (role !== "superadmin" || (userEmail !== "kaledmoly@gmail.com" && userName !== "Superadmin Kaled"))) {
+      setView(role === "admin" ? "dashboard" : "pos")
+    }
+  }, [view, role, userEmail, userName, setView])
 
   // Hidratar sesión consultando al servidor (cookie httpOnly firmada)
   useEffect(() => { hydrate() }, [hydrate])
@@ -779,7 +792,7 @@ export default function Home() {
               transition={{ duration: 0.18, ease: "easeOut" }}
               className="min-h-full w-full min-w-0 flex flex-col"
             >
-              {view === "superadmin" && <SuperadminPanel />}
+              {view === "superadmin" && role === "superadmin" && (userEmail === "kaledmoly@gmail.com" || userName === "Superadmin Kaled") && <SuperadminPanel />}
               {view === "dashboard" && (
                 <>
                   <SetupChecklist />

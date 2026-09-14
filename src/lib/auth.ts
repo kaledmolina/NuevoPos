@@ -98,9 +98,17 @@ export function requireSuperAdmin(req: NextRequest): NextResponse | null {
   if (!session) {
     return NextResponse.json({ error: "No autenticado" }, { status: 401 })
   }
+  // Bloqueo estricto: Las cuentas de demostración (admin y vendedor) NUNCA pueden acceder al Superadmin
+  const lowerName = session.name.toLowerCase()
+  if (lowerName === "admin" || lowerName === "vendedor") {
+    return NextResponse.json(
+      { error: "Acceso denegado: Las cuentas de prueba (admin / vendedor) no tienen acceso a las funciones de Superadministrador." },
+      { status: 403 }
+    )
+  }
   if (session.role !== "superadmin") {
     return NextResponse.json(
-      { error: "Acceso exclusivo para el Superadministrador" },
+      { error: "Acceso exclusivo para el Superadministrador (kaledmoly@gmail.com)" },
       { status: 403 }
     )
   }

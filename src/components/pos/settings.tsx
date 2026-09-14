@@ -105,8 +105,13 @@ export default function SettingsView() {
   const setView = useAppStore((s) => s.setView)
   const triggerRefresh = useAppStore((s) => s.triggerRefresh)
   const role = useAppStore((s) => s.role)
+  const userName = useAppStore((s) => s.userName)
   const tenantName = useAppStore((s) => s.tenantName)
   const refreshKey = useAppStore((s) => s.refreshKey)
+
+  const isDemoAccount =
+    (userName?.toLowerCase() === "admin" || userName?.toLowerCase() === "vendedor") &&
+    role !== "superadmin"
 
   // Configuración de la tienda
   const [settingsForm, setSettingsForm] = useState({
@@ -218,6 +223,9 @@ export default function SettingsView() {
 
   // Cambiar PIN Admin
   const handleChangeAdminPin = async () => {
+    if (isDemoAccount) {
+      return toast.warning("🔒 Cuenta Demo Protegida: No está permitido cambiar el PIN en las cuentas de prueba.")
+    }
     if (!pinAdminNew || pinAdminNew.length < 4) {
       return toast.error("El nuevo PIN debe tener entre 4 y 8 dígitos")
     }
@@ -243,6 +251,9 @@ export default function SettingsView() {
 
   // Cambiar PIN Vendedor (desde Admin)
   const handleChangeVendedorPin = async () => {
+    if (isDemoAccount) {
+      return toast.warning("🔒 Cuenta Demo Protegida: No está permitido cambiar el PIN en las cuentas de prueba.")
+    }
     if (!pinVendedorNew || pinVendedorNew.length < 4) {
       return toast.error("El nuevo PIN para el vendedor debe tener al menos 4 dígitos")
     }
@@ -773,6 +784,20 @@ export default function SettingsView() {
               <IconUsers className="h-3.5 w-3.5" /> Administrar Personal & Sedes
             </Button>
           </div>
+
+          {isDemoAccount && (
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-start gap-3 shadow-xs">
+              <IconShieldLock className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1 text-xs">
+                <p className="font-bold text-amber-900 dark:text-amber-200">
+                  Cuentas de Demostración Protegidas
+                </p>
+                <p className="text-muted-foreground leading-relaxed">
+                  Has iniciado sesión como usuario de prueba (<strong>{userName}</strong>). Por seguridad y para garantizar que otros clientes puedan continuar evaluando el sistema con los datos de acceso públicos (<strong>admin / 1234</strong> y <strong>vendedor / 0000</strong>), la modificación de PIN y credenciales está deshabilitada en el modo demo.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* PIN Admin */}

@@ -5,6 +5,9 @@ import { requireAdmin, hashPin, getSession, logAudit } from "@/lib/auth"
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
 
+const DEMO_PROTECTED_NAMES = ["admin", "vendedor", "superadmin", "superadmin kaled"]
+const DEMO_PROTECTED_EMAILS = ["admin@demo.com", "vendedor@demo.com", "kaledmoly@gmail.com"]
+
 // GET /api/users - Listar colaboradores (Admin only)
 export async function GET(req: NextRequest) {
   const denied = requireAdmin(req)
@@ -303,6 +306,50 @@ export async function PUT(req: NextRequest) {
       )
     }
 
+    // Seguridad de Cuentas Demo:
+    const isTargetDemo =
+      DEMO_PROTECTED_NAMES.includes(targetUser.name.toLowerCase()) ||
+      (targetUser.email && DEMO_PROTECTED_EMAILS.includes(targetUser.email.toLowerCase()))
+
+    const isSessionDemo =
+      Boolean(session?.name && DEMO_PROTECTED_NAMES.includes(session.name.toLowerCase()))
+
+    // Si el usuario conectado es demo (admin / vendedor) y no superadmin:
+    if (isSessionDemo && session?.role !== "superadmin") {
+      if (
+        body.pin ||
+        body.email !== undefined ||
+        (body.name && body.name !== targetUser.name) ||
+        body.active === false
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "🔒 Cuenta de Demostración Protegida: No está permitido cambiar el nombre, correo, PIN ni desactivar las cuentas de prueba (admin / vendedor).",
+          },
+          { status: 403 }
+        )
+      }
+    }
+
+    // Si cualquier admin normal intenta modificar las cuentas oficiales demo
+    if (isTargetDemo && session?.role !== "superadmin") {
+      if (
+        body.pin ||
+        (body.name && body.name !== targetUser.name) ||
+        (body.email !== undefined && body.email !== targetUser.email) ||
+        body.active === false
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "🔒 Esta cuenta de prueba está protegida. No está permitido cambiar su PIN, correo ni desactivarla.",
+          },
+          { status: 403 }
+        )
+      }
+    }
+
     const updateData: {
       name?: string
       email?: string | null
@@ -502,6 +549,18 @@ export async function DELETE(req: NextRequest) {
     if (session?.role !== "superadmin" && session?.tenantId && targetUser.tenantId !== session.tenantId) {
       return NextResponse.json(
         { error: "Acceso denegado: Este colaborador pertenece a otro negocio." },
+        { status: 403 }
+      )
+    }
+
+    // Protección de cuentas Demo:
+    const isTargetDemo =
+      DEMO_PROTECTED_NAMES.includes(targetUser.name.toLowerCase()) ||
+      (targetUser.email && DEMO_PROTECTED_EMAILS.includes(targetUser.email.toLowerCase()))
+
+    if (isTargetDemo && session?.role !== "superadmin") {
+      return NextResponse.json(
+        { error: "🔒 No es posible eliminar ni desactivar las cuentas oficiales de demostración (admin / vendedor)." },
         { status: 403 }
       )
     }

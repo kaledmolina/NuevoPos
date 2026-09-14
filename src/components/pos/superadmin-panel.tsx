@@ -27,7 +27,9 @@ import {
   IconBuildingCommunity,
   IconDatabase,
   IconTrash,
+  IconShieldLock,
 } from "@tabler/icons-react"
+import { useAppStore } from "@/lib/store"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -107,6 +109,15 @@ interface RankedAdmin {
 }
 
 export default function SuperadminPanel() {
+  const role = useAppStore((s) => s.role)
+  const userEmail = useAppStore((s) => s.userEmail)
+  const userName = useAppStore((s) => s.userName)
+  const setView = useAppStore((s) => s.setView)
+
+  const isSuperAdmin =
+    role === "superadmin" &&
+    (userEmail === "kaledmoly@gmail.com" || userName === "Superadmin Kaled")
+
   const [activeTab, setActiveTab] = useState<"tenants" | "ranking" | "stats">("tenants")
   const [stats, setStats] = useState<SuperAdminStats | null>(null)
   const [tenants, setTenants] = useState<TenantItem[]>([])
@@ -251,6 +262,27 @@ export default function SuperadminPanel() {
       (t.ownerPhone && t.ownerPhone.includes(q))
     )
   })
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      toast.error("Acceso denegado: El Panel Superadmin es exclusivo para kaledmoly@gmail.com")
+      setView(role === "admin" ? "dashboard" : "pos")
+    }
+  }, [isSuperAdmin, role, setView])
+
+  if (!isSuperAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 space-y-3">
+        <div className="h-14 w-14 rounded-2xl bg-destructive/10 text-destructive flex items-center justify-center">
+          <IconShieldLock className="h-7 w-7" />
+        </div>
+        <h2 className="text-xl font-bold">Acceso Denegado</h2>
+        <p className="text-sm text-muted-foreground max-w-md">
+          Este panel es exclusivo para el Superadministrador global (<strong>kaledmoly@gmail.com</strong>). Las cuentas de demostración no tienen acceso a esta sección.
+        </p>
+      </div>
+    )
+  }
 
   if (loading) {
     return (

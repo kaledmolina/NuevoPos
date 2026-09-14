@@ -306,6 +306,26 @@ export default function StaffManager() {
   // Guardar Edición Colaborador
   const handleSaveEditUser = async () => {
     if (!selectedUser) return
+
+    // Protección de cuentas de demostración
+    const isDemoTarget =
+      selectedUser.name?.toLowerCase() === "admin" ||
+      selectedUser.name?.toLowerCase() === "vendedor" ||
+      selectedUser.email === "admin@demo.com" ||
+      selectedUser.email === "vendedor@demo.com"
+
+    if (isDemoTarget && role !== "superadmin") {
+      if (
+        editName.trim().toLowerCase() !== selectedUser.name.toLowerCase() ||
+        editEmail.trim().toLowerCase() !== (selectedUser.email || "").toLowerCase() ||
+        !editActive
+      ) {
+        return toast.error(
+          "🔒 Cuenta Demo Protegida: No se permite cambiar el nombre, correo ni estado de los usuarios demo."
+        )
+      }
+    }
+
     if (!editName.trim() || editName.trim().length < 2) {
       return toast.error("El nombre debe tener al menos 2 caracteres.")
     }
@@ -360,6 +380,16 @@ export default function StaffManager() {
 
   // Abrir Modal Cambiar PIN
   const handleOpenChangePin = (user: StaffUser) => {
+    const isDemoTarget =
+      user.name?.toLowerCase() === "admin" ||
+      user.name?.toLowerCase() === "vendedor" ||
+      user.email === "admin@demo.com" ||
+      user.email === "vendedor@demo.com"
+
+    if (isDemoTarget && role !== "superadmin") {
+      return toast.warning("🔒 Cuenta Demo Protegida: No está permitido cambiar el PIN de las cuentas de prueba.")
+    }
+
     setPinTargetUser(user)
     setNewPinValue("")
     setNewPinConfirmValue("")
@@ -369,6 +399,17 @@ export default function StaffManager() {
   // Guardar Nuevo PIN
   const handleSavePin = async () => {
     if (!pinTargetUser) return
+
+    const isDemoTarget =
+      pinTargetUser.name?.toLowerCase() === "admin" ||
+      pinTargetUser.name?.toLowerCase() === "vendedor" ||
+      pinTargetUser.email === "admin@demo.com" ||
+      pinTargetUser.email === "vendedor@demo.com"
+
+    if (isDemoTarget && role !== "superadmin") {
+      return toast.warning("🔒 Cuenta Demo Protegida: No está permitido cambiar el PIN de las cuentas de prueba.")
+    }
+
     if (!newPinValue || !/^\d{4,8}$/.test(newPinValue)) {
       return toast.error("El PIN debe tener entre 4 y 8 dígitos numéricos.")
     }
@@ -398,6 +439,16 @@ export default function StaffManager() {
   const handleToggleUserActive = (user: StaffUser) => {
     if (user.role === "superadmin" || user.email === "kaledmoly@gmail.com") {
       return toast.error("El Superadministrador del sistema está protegido permanentemente y no se puede deshabilitar nunca.")
+    }
+
+    const isDemoTarget =
+      user.name?.toLowerCase() === "admin" ||
+      user.name?.toLowerCase() === "vendedor" ||
+      user.email === "admin@demo.com" ||
+      user.email === "vendedor@demo.com"
+
+    if (isDemoTarget && role !== "superadmin") {
+      return toast.error("🔒 Las cuentas de demostración (admin y vendedor) están protegidas y no se pueden desactivar.")
     }
     if (user.isPrimary && role !== "superadmin") {
       return toast.error("Solo el Superadministrador puede modificar el estado del Administrador Principal.")
