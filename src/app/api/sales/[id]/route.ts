@@ -137,3 +137,106 @@ export async function PATCH(
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
+
+// DELETE /api/sales/[id] - Elimina físicamente una venta (especialmente ventas de prueba / demo)
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const denied = requireAdmin(req)
+  if (denied) return denied
+  const { getSession, logAudit } = await import("@/lib/auth")
+  const sess = getSession(req)
+
+  try {
+    const { id } = await params
+    const sale = await db.sale.findUnique({
+      where: { id },
+      include: { items: true },
+    })
+
+    if (!sale) {
+      return NextResponse.json({ error: "Venta no encontrada" }, { status: 404 })
+    }
+
+    // Si no es Superadmin, verificar que tenga acceso a la sede de la venta
+    if (sess && sess.role !== "superadmin" && sale.branchId) {
+      const { canUserAccessBranch } = await import("@/lib/branch")
+      const hasAccess = await canUserAccessBranch(sess.uid, sale.branchId)
+      if (!hasAccess) {
+        return NextResponse.json(
+          { error: "Acceso denegado: No tienes autorización para eliminar ventas de esta sede." },
+          { status: 403 }
+        )
+      }
+    }
+
+    const invoiceNumber = sale.invoiceNumber
+    const saleTotal = sale.total
+
+    await db.$transaction(async (tx) => {
+      // 1. Si la venta estaba activa (no anulada), devolver el stock a los productos
+      if (sale.status !== "anulada") {
+        for (const it of sale.items) {
+          await tx.product.updateMany({
+            where: { id: it.productId },
+            data: { stock: { increment: it.quantity } },
+          })
+        }
+      }
+
+      // 2. Si la venta fue a crédito y no anulada, reversar saldo de la cuenta del cliente
+      if (sale.paymentMethod === "credito" && sale.clientId && sale.status !== "anulada") {
+        const creditAccount = await tx.creditAccount.findUnique({ where: { clientId: sale.clientId } })
+        if (creditAccount) {
+          await tx.creditAccount.update({
+            where: { id: creditAccount.id },
+            data: { balance: Math.max(0, creditAccount.balance - sale.total) },
+          })
+        }
+      }
+
+      // 3. Eliminar movimientos de crédito asociados a esta venta
+      await tx.creditMovement.deleteMany({
+        where: { saleId: id },
+      })
+
+      // 4. Eliminar transacciones de arqueo / caja vinculadas a esta venta
+      await tx.cashTransaction.deleteMany({
+        where: { reference: id },
+      })
+
+      // 5. Eliminar ítems de la venta
+      await tx.saleItem.deleteMany({
+        where: { saleId: id },
+      })
+
+      // 6. Eliminar la venta físicamente
+      await tx.sale.delete({
+        where: { id },
+      })
+    })
+
+    try {
+      await logAudit({
+        action: "sale_delete_permanent",
+        entityType: "sale",
+        entityId: id,
+        userName: sess?.name ?? "Superadmin",
+        role: sess?.role ?? "superadmin",
+        detail: `Venta eliminada permanentemente #${invoiceNumber} por valor de ${saleTotal}`,
+        meta: { invoiceNumber, total: saleTotal },
+      })
+    } catch {
+      // noop
+    }
+
+    return NextResponse.json({
+      ok: true,
+      message: `Venta #${invoiceNumber} eliminada permanentemente.`,
+    })
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+  }
+}
+

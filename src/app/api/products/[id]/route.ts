@@ -87,10 +87,41 @@ export async function DELETE(
       )
     }
 
+    const { searchParams } = new URL(req.url)
+    const isHard = searchParams.get("hard") === "true" || searchParams.get("force") === "true" || session?.role === "superadmin"
+
+    // Si es Superadmin o solicita borrado definitivo de producto de prueba/demo:
+    if (session?.role === "superadmin" || isHard) {
+      await db.$transaction(async (tx) => {
+        await tx.saleItem.deleteMany({ where: { productId: id } })
+        await tx.purchaseItem.deleteMany({ where: { productId: id } })
+        await tx.productBatch.deleteMany({ where: { productId: id } })
+        await tx.product.delete({ where: { id } })
+      })
+
+      try {
+        await logAudit({
+          action: "product_delete_permanent",
+          entityType: "product",
+          entityId: id,
+          userName: session?.name ?? "Superadmin",
+          role: session?.role ?? "superadmin",
+          detail: `Producto eliminado permanentemente: "${existing.name}" (código: ${existing.barcode || existing.sku || "N/A"})`,
+        })
+      } catch {
+        // noop
+      }
+
+      return NextResponse.json({
+        ok: true,
+        message: `Producto "${existing.name}" eliminado permanentemente del sistema.`,
+      })
+    }
+
     const salesCount = await db.saleItem.count({ where: { productId: id } })
     const purchasesCount = await db.purchaseItem.count({ where: { productId: id } })
 
-    // Soft delete: Desactivar producto para proteger integridad histórica y contable
+    // Soft delete para administradores estándar: Desactivar producto para proteger integridad
     await db.product.update({ where: { id }, data: { active: false } })
     try {
       await logAudit({

@@ -38,6 +38,22 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
@@ -103,6 +119,49 @@ export default function SuperadminPanel() {
   const [seedingDemo, setSeedingDemo] = useState(false)
   const [resettingDemo, setResettingDemo] = useState(false)
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
+  const [tenantToDelete, setTenantToDelete] = useState<TenantItem | null>(null)
+  const [deletingTenant, setDeletingTenant] = useState(false)
+  const [cleanModalOpen, setCleanModalOpen] = useState(false)
+  const [cleaningAction, setCleaningAction] = useState<"purge_sales" | "purge_products" | "purge_inactive">("purge_sales")
+  const [selectedCleanTenantId, setSelectedCleanTenantId] = useState<string>("all")
+  const [cleaningDemo, setCleaningDemo] = useState(false)
+
+  const handleDeleteTenant = async () => {
+    if (!tenantToDelete) return
+    setDeletingTenant(true)
+    try {
+      const res = await apiFetch<{ ok: boolean; message: string }>(`/api/superadmin/tenants/${tenantToDelete.id}`, {
+        method: "DELETE",
+      })
+      toast.success(res.message || "Negocio y datos eliminados")
+      setTenantToDelete(null)
+      loadData()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setDeletingTenant(false)
+    }
+  }
+
+  const handlePurgeDemo = async () => {
+    setCleaningDemo(true)
+    try {
+      const res = await apiFetch<{ ok: boolean; message: string }>("/api/superadmin/clean-demo", {
+        method: "POST",
+        body: JSON.stringify({
+          action: cleaningAction,
+          tenantId: selectedCleanTenantId === "all" ? undefined : selectedCleanTenantId,
+        }),
+      })
+      toast.success(res.message || "Limpieza completada")
+      setCleanModalOpen(false)
+      loadData()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setCleaningDemo(false)
+    }
+  }
 
   const handleGenerateDemo = async () => {
     setSeedingDemo(true)
@@ -252,6 +311,18 @@ export default function SuperadminPanel() {
           >
             <IconTrash className="h-4 w-4" />
             Limpiar Demo (Reset)
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCleanModalOpen(true)}
+            disabled={refreshing}
+            className="h-10 px-3.5 rounded-xl text-xs font-semibold gap-1.5 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
+            title="Limpiar ventas o productos de prueba sin reiniciar la plataforma completa"
+          >
+            <IconTrash className="h-4 w-4" />
+            Purgar Ventas / Productos Demo
           </Button>
 
           <Button
@@ -577,6 +648,17 @@ export default function SuperadminPanel() {
                               Rehabilitar Acceso
                             </Button>
                           )}
+
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setTenantToDelete(t)}
+                            disabled={isLoading}
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive rounded-xl text-xs h-9 font-medium px-2.5"
+                            title="Eliminar este negocio demo y todos sus datos"
+                          >
+                            <IconTrash className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
                     </CardContent>
@@ -756,6 +838,126 @@ export default function SuperadminPanel() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Modal para eliminar negocio demo específico */}
+      <AlertDialog open={!!tenantToDelete} onOpenChange={(o) => !o && !deletingTenant && setTenantToDelete(null)}>
+        <AlertDialogContent className="max-w-md rounded-2xl border-destructive/30">
+          <AlertDialogHeader>
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
+              <IconTrash className="h-6 w-6" />
+            </div>
+            <AlertDialogTitle className="text-center font-bold">
+              ¿Eliminar negocio demo &quot;{tenantToDelete?.name}&quot;?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-center text-xs text-muted-foreground space-y-2">
+              <span className="block">
+                Esta acción eliminará permanentemente la empresa demo, sus sedes, productos de prueba, ventas registradas y usuarios colaboradores.
+              </span>
+              <span className="block font-medium text-destructive">
+                Esta acción es irreversible y limpiará por completo las pruebas de este negocio.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex flex-row justify-center gap-2 pt-2 sm:justify-center">
+            <AlertDialogCancel disabled={deletingTenant} className="flex-1">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deletingTenant}
+              onClick={(e) => {
+                e.preventDefault()
+                handleDeleteTenant()
+              }}
+              className="flex-1 bg-destructive text-destructive-foreground hover:bg-destructive/90 font-semibold"
+            >
+              {deletingTenant ? "Eliminando..." : "Sí, eliminar negocio demo"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal para purgar selectivamente ventas o productos de prueba */}
+      <Dialog open={cleanModalOpen} onOpenChange={(o) => !o && !cleaningDemo && setCleanModalOpen(false)}>
+        <DialogContent className="sm:max-w-md rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+              <IconTrash className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+              Limpiar Datos de Prueba y Demo
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Selecciona los datos creados por usuarios demo que deseas purgar de la base de datos sin afectar tu cuenta de Superadmin.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">¿Qué deseas purgar?</Label>
+              <Select value={cleaningAction} onValueChange={(v) => setCleaningAction(v as typeof cleaningAction)}>
+                <SelectTrigger className="h-10 text-xs rounded-xl">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="purge_sales">🛒 Purgar sólo ventas de prueba y arqueos</SelectItem>
+                  <SelectItem value="purge_products">📦 Purgar productos de prueba (con lotes e ítems)</SelectItem>
+                  <SelectItem value="purge_inactive">🗑️ Purgar productos inactivos / archivados</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Aplicar en negocio:</Label>
+              <Select value={selectedCleanTenantId} onValueChange={setSelectedCleanTenantId}>
+                <SelectTrigger className="h-10 text-xs rounded-xl">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">🌐 Todos los negocios demo del sistema</SelectItem>
+                  {tenants.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      🏢 {t.name} ({t.salesCount} ventas)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl text-xs text-amber-800 dark:text-amber-300 space-y-1">
+              <p className="font-semibold flex items-center gap-1.5">
+                <IconAlertTriangle className="h-3.5 w-3.5" /> Aviso de seguridad
+              </p>
+              <p className="text-[11px] leading-relaxed">
+                Los registros eliminados no se podrán recuperar. La cuenta Superadmin y la configuración principal del sistema se mantienen intactas.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="flex flex-row justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              disabled={cleaningDemo}
+              onClick={() => setCleanModalOpen(false)}
+              className="rounded-xl text-xs"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handlePurgeDemo}
+              disabled={cleaningDemo}
+              className="rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
+            >
+              {cleaningDemo ? (
+                <>
+                  <IconRefresh className="h-3.5 w-3.5 animate-spin" /> Limpiando...
+                </>
+              ) : (
+                <>
+                  <IconTrash className="h-3.5 w-3.5" /> Confirmar Limpieza
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

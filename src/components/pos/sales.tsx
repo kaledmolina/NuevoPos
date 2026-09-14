@@ -39,6 +39,7 @@ import {
   IconCirclePlus,
   IconCircleCheck,
   IconClock,
+  IconTrash,
 } from "@tabler/icons-react"
 
 interface SaleItem { id: string; quantity: number; unitPrice: number; subtotal: number; product: { name: string } }
@@ -100,6 +101,8 @@ export default function SalesView() {
   const [query, setQuery] = useState("")
   const [method, setMethod] = useState("all")
   const [detail, setDetail] = useState<Sale | null>(null)
+  const [saleToDelete, setSaleToDelete] = useState<Sale | null>(null)
+  const [deletingSale, setDeletingSale] = useState(false)
   const [storeInfo, setStoreInfo] = useState({
     name: "Sistema POS",
     nit: "",
@@ -222,6 +225,26 @@ export default function SalesView() {
       toast.error((e as Error).message)
     } finally {
       setAnnulling(false)
+    }
+  }
+
+  // Eliminar venta físicamente (útil para limpiar ventas de prueba / demo)
+  const executeDeleteSale = async () => {
+    if (!saleToDelete) return
+    setDeletingSale(true)
+    try {
+      const res = await apiFetch<{ ok: boolean; message: string }>(`/api/sales/${saleToDelete.id}`, {
+        method: "DELETE",
+      })
+      toast.success(res.message || "Venta eliminada permanentemente")
+      load()
+      triggerRefresh()
+      setDetail(null)
+      setSaleToDelete(null)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setDeletingSale(false)
     }
   }
 
@@ -443,7 +466,22 @@ export default function SalesView() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button size="icon" variant="ghost" className="h-8 w-8" title="Ver detalle de venta" onClick={() => setDetail(s)}><IconEye className="h-3.5 w-3.5" /></Button>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button size="icon" variant="ghost" className="h-8 w-8" title="Ver detalle de venta" onClick={() => setDetail(s)}>
+                              <IconEye className="h-3.5 w-3.5" />
+                            </Button>
+                            {(role === "superadmin" || canAnnul) && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                title={role === "superadmin" ? "Eliminar venta demo definitivamente" : "Eliminar venta"}
+                                onClick={() => setSaleToDelete(s)}
+                              >
+                                <IconTrash className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -490,9 +528,23 @@ export default function SalesView() {
                     <p className="font-mono text-sm font-semibold truncate">{s.invoiceNumber}</p>
                     <p className="text-xs text-muted-foreground truncate">{s.client?.name ?? "Cliente genérico"}</p>
                   </div>
-                  <Button size="icon" variant="outline" className="h-10 w-10 shrink-0" title="Ver detalle de venta" onClick={() => setDetail(s)} aria-label="Ver detalle">
-                    <IconEye className="h-4 w-4" />
-                  </Button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button size="icon" variant="outline" className="h-9 w-9" title="Ver detalle de venta" onClick={() => setDetail(s)} aria-label="Ver detalle">
+                      <IconEye className="h-4 w-4" />
+                    </Button>
+                    {(role === "superadmin" || canAnnul) && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-9 w-9 text-destructive hover:bg-destructive/10"
+                        title={role === "superadmin" ? "Eliminar venta demo definitivamente" : "Eliminar venta"}
+                        onClick={() => setSaleToDelete(s)}
+                        aria-label="Eliminar venta"
+                      >
+                        <IconTrash className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <p className="text-xs text-muted-foreground">{formatDateTime(s.createdAt)}</p>
                 <div className="flex items-center justify-between gap-2 pt-1 border-t">
@@ -653,6 +705,15 @@ export default function SalesView() {
                   <IconBan className="h-4 w-4 mr-2" /> Anular venta
                 </Button>
               )}
+              {(role === "superadmin" || canAnnul) && (
+                <Button
+                  variant="destructive"
+                  className="w-full text-xs font-semibold gap-2 shadow-xs"
+                  onClick={() => setSaleToDelete(detail)}
+                >
+                  <IconTrash className="h-4 w-4" /> Eliminar venta permanentemente
+                </Button>
+              )}
             </div>
           )}
         </DialogContent>
@@ -685,6 +746,38 @@ export default function SalesView() {
               className="flex-1 bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {annulling ? "Anulando..." : "Sí, anular venta"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal para Eliminar Venta Permanentemente (especial para datos de prueba y superadmin) */}
+      <AlertDialog open={!!saleToDelete} onOpenChange={(open) => { if (!open && !deletingSale) setSaleToDelete(null) }}>
+        <AlertDialogContent className="border-border bg-card shadow-2xl max-w-md rounded-2xl">
+          <AlertDialogHeader>
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
+              <IconTrash className="h-6 w-6" />
+            </div>
+            <AlertDialogTitle className="text-center text-lg font-semibold tracking-tight">
+              ¿Eliminar la venta {saleToDelete?.invoiceNumber}?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-center text-sm text-muted-foreground">
+              Esta acción eliminará de forma <strong>definitiva</strong> este registro de venta, sus ítems y movimientos contables asociados. Esta función permite limpiar ventas realizadas con cuentas demo o durante pruebas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex flex-row justify-center gap-2 pt-2 sm:justify-center">
+            <AlertDialogCancel disabled={deletingSale} className="flex-1">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deletingSale}
+              onClick={(e) => {
+                e.preventDefault()
+                executeDeleteSale()
+              }}
+              className="flex-1 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingSale ? "Eliminando..." : "Sí, eliminar venta"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

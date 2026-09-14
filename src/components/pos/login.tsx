@@ -47,12 +47,14 @@ function getRubroIcon(rubro: string) {
 export default function LoginScreen() {
   const login = useAppStore((s) => s.login)
   const setShowLanding = useAppStore((s) => s.setShowLanding)
-  const [role, setRole] = useState<Role | null>(null)
+  const [role, setRole] = useState<Role | null>("admin")
   const [name, setName] = useState("")
   const [pin, setPin] = useState("")
   const [loading, setLoading] = useState(false)
   const [storeName, setStoreName] = useState("Sistema POS")
   const [storeRubro, setStoreRubro] = useState("drogueria")
+  const [showSuperAdmin, setShowSuperAdmin] = useState(false)
+  const [lockClicks, setLockClicks] = useState(0)
 
   // Estado del modal de auto-registro
   const [registerOpen, setRegisterOpen] = useState(false)
@@ -74,7 +76,27 @@ export default function LoginScreen() {
         if (s.store_rubro) setStoreRubro(s.store_rubro)
       })
       .catch(() => {})
+
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search)
+      if (sp.get("sa") === "1" || sp.get("superadmin") === "1" || sp.get("role") === "superadmin") {
+        setShowSuperAdmin(true)
+      }
+    }
   }, [])
+
+  const handleLockClick = () => {
+    const next = lockClicks + 1
+    setLockClicks(next)
+    if (next >= 3) {
+      setShowSuperAdmin((prev) => {
+        const newVal = !prev
+        if (newVal) toast.info("Modo Superadministrador habilitado")
+        return newVal
+      })
+      setLockClicks(0)
+    }
+  }
 
   const selectRole = (r: Role) => {
     setRole(r)
@@ -99,7 +121,6 @@ export default function LoginScreen() {
   }
 
   const submit = async () => {
-    if (!role) return toast.error("Selecciona un rol para continuar")
     if (!name.trim()) return toast.error("Ingresa tu usuario o correo electrónico")
     if (!pin.trim()) return toast.error("Ingresa tu PIN")
     setLoading(true)
@@ -182,7 +203,11 @@ export default function LoginScreen() {
             />
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{storeName}</h1>
-          <p className="text-sm sm:text-base text-foreground/70 mt-2 flex items-center justify-center gap-1.5 font-medium">
+          <p
+            onClick={handleLockClick}
+            className="text-sm sm:text-base text-foreground/70 mt-2 flex items-center justify-center gap-1.5 font-medium cursor-pointer select-none hover:text-foreground transition-colors"
+            title="Plataforma SaaS · Acceso Seguro"
+          >
             <Lock className="h-3.5 w-3.5" /> Plataforma SaaS · Acceso Seguro
           </p>
         </div>
@@ -192,11 +217,18 @@ export default function LoginScreen() {
           <CardContent className="p-5 sm:p-7 space-y-6">
             {/* Paso 1: Rol */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">1</span>
-                <Label className="text-sm font-semibold text-foreground">Selecciona tu rol</Label>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">1</span>
+                  <Label className="text-sm font-semibold text-foreground">Selecciona tu rol</Label>
+                </div>
+                {showSuperAdmin && (
+                  <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                    Modo Superadmin
+                  </span>
+                )}
               </div>
-              <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
+              <div className={cn("grid gap-2 sm:gap-2.5", showSuperAdmin ? "grid-cols-3" : "grid-cols-2")}>
                 <RoleCard
                   active={role === "admin"}
                   onClick={() => selectRole("admin")}
@@ -211,13 +243,15 @@ export default function LoginScreen() {
                   title="Vendedor"
                   desc="Caja y venta"
                 />
-                <RoleCard
-                  active={role === "superadmin"}
-                  onClick={() => selectRole("superadmin")}
-                  icon={Crown}
-                  title="Superadmin"
-                  desc="Control SaaS"
-                />
+                {showSuperAdmin && (
+                  <RoleCard
+                    active={role === "superadmin"}
+                    onClick={() => selectRole("superadmin")}
+                    icon={Crown}
+                    title="Superadmin"
+                    desc="Control SaaS"
+                  />
+                )}
               </div>
             </div>
 
@@ -244,7 +278,7 @@ export default function LoginScreen() {
                     id="name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder={role === "superadmin" ? "kaledmoly@gmail.com" : "Usuario o correo@dominio.com"}
+                    placeholder={showSuperAdmin && role === "superadmin" ? "kaledmoly@gmail.com" : "Usuario o correo@dominio.com"}
                     autoComplete="username"
                     className="h-12 pl-10 text-base"
                   />
@@ -275,7 +309,7 @@ export default function LoginScreen() {
               {/* Botón */}
               <Button
                 className="w-full h-12 text-base font-semibold shadow-sm"
-                disabled={!role || loading}
+                disabled={loading}
                 onClick={submit}
               >
                 {loading ? (
@@ -305,7 +339,7 @@ export default function LoginScreen() {
           <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
           <div className="text-xs text-foreground/70 space-y-1.5 w-full">
             <p className="font-semibold text-primary">Credenciales de demostración</p>
-            <div className="grid grid-cols-3 gap-2">
+            <div className={cn("grid gap-2", showSuperAdmin ? "grid-cols-3" : "grid-cols-2")}>
               <button
                 type="button"
                 onClick={() => quickFill("admin")}
@@ -322,16 +356,18 @@ export default function LoginScreen() {
                 <p className="font-medium text-foreground">Vendedor</p>
                 <p className="text-muted-foreground text-[11px]">vendedor / <span className="font-mono">0000</span></p>
               </button>
-              <button
-                type="button"
-                onClick={() => quickFill("superadmin")}
-                className="text-left rounded-md bg-background/70 px-2 py-1.5 hover:bg-background hover:ring-1 hover:ring-primary/30 transition-all active:scale-[0.98]"
-              >
-                <p className="font-medium text-foreground flex items-center gap-1">
-                  <Crown className="h-3 w-3 text-amber-500" /> Superadmin
-                </p>
-                <p className="text-muted-foreground text-[11px]">kaledmoly@... / <span className="font-mono">9999</span></p>
-              </button>
+              {showSuperAdmin && (
+                <button
+                  type="button"
+                  onClick={() => quickFill("superadmin")}
+                  className="text-left rounded-md bg-background/70 px-2 py-1.5 hover:bg-background hover:ring-1 hover:ring-primary/30 transition-all active:scale-[0.98]"
+                >
+                  <p className="font-medium text-foreground flex items-center gap-1">
+                    <Crown className="h-3 w-3 text-amber-500" /> Superadmin
+                  </p>
+                  <p className="text-muted-foreground text-[11px]">kaledmoly@... / <span className="font-mono">9999</span></p>
+                </button>
+              )}
             </div>
             <p className="text-[10px] text-muted-foreground text-center pt-0.5">Toca una tarjeta para autocompletar</p>
           </div>
@@ -366,7 +402,7 @@ export default function LoginScreen() {
                     <Info className="h-3.5 w-3.5 text-primary" /> Información importante:
                   </p>
                   <p className="text-muted-foreground">
-                    El Superadministrador (<strong>kaledmoly@gmail.com</strong>) validará tu registro para activar el acceso al POS. Una vez aprobado, podrás ingresar con tu correo <strong>{regEmail}</strong> y tu PIN registrado.
+                    El Superadministrador validará tu registro para activar el acceso al POS. Una vez aprobado, podrás ingresar con tu correo <strong>{regEmail}</strong> y tu PIN registrado.
                   </p>
                 </div>
                 <Button onClick={resetRegisterModal} className="w-full rounded-xl font-semibold">

@@ -106,6 +106,8 @@ export default function ProductsView() {
   const [editingCatId, setEditingCatId] = useState<string | null>(null)
   const [editCatName, setEditCatName] = useState("")
   const [deleteCatId, setDeleteCatId] = useState<string | null>(null)
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null)
+  const [deletingProduct, setDeletingProduct] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -244,6 +246,27 @@ export default function ProductsView() {
       toast.error((e as Error).message)
     } finally {
       setDeleteCatId(null)
+    }
+  }
+
+  // Eliminar producto (soporta borrado definitivo para superadmin / demo)
+  const confirmDeleteProduct = async (hard: boolean = false) => {
+    if (!productToDelete) return
+    setDeletingProduct(true)
+    try {
+      const url = `/api/products/${productToDelete.id}${hard || role === "superadmin" ? "?hard=true" : ""}`
+      const res = await apiFetch<{ ok: boolean; message: string }>(url, {
+        method: "DELETE",
+      })
+      toast.success(res.message || "Producto eliminado")
+      setProductToDelete(null)
+      if (detailProduct?.id === productToDelete.id) setDetailProduct(null)
+      load()
+      triggerRefresh()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setDeletingProduct(false)
     }
   }
 
@@ -692,6 +715,17 @@ export default function ProductsView() {
                         <IconPencil className="h-3.5 w-3.5 mr-1" /> Editar
                       </Button>
                     )}
+                    {canEdit && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-9 px-2.5 text-destructive hover:bg-destructive/10 hover:text-destructive shrink-0"
+                        title={role === "superadmin" ? "Eliminar producto demo definitivamente" : "Eliminar o desactivar producto"}
+                        onClick={() => setProductToDelete(p)}
+                      >
+                        <IconTrash className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -927,6 +961,46 @@ export default function ProductsView() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Confirmar eliminar producto (con soporte para Superadmin / datos de prueba) */}
+      <AlertDialog open={!!productToDelete} onOpenChange={(o) => !o && !deletingProduct && setProductToDelete(null)}>
+        <AlertDialogContent className="rounded-2xl max-w-md">
+          <AlertDialogHeader>
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
+              <IconTrash className="h-6 w-6" />
+            </div>
+            <AlertDialogTitle className="text-center">
+              {role === "superadmin" ? "¿Eliminar producto de prueba?" : "¿Eliminar producto?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-center text-xs text-muted-foreground">
+              {role === "superadmin" ? (
+                <>
+                  Estás en modo <strong>Superadministrador</strong>. Esta acción eliminará físicamente <strong>&quot;{productToDelete?.name}&quot;</strong> y todos sus lotes o registros de prueba asociados.
+                </>
+              ) : (
+                <>
+                  Se desactivará el producto <strong>&quot;{productToDelete?.name}&quot;</strong> para proteger la integridad histórica de las ventas.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex flex-row justify-center gap-2 pt-2 sm:justify-center">
+            <AlertDialogCancel disabled={deletingProduct} className="flex-1">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deletingProduct}
+              onClick={(e) => {
+                e.preventDefault()
+                confirmDeleteProduct(role === "superadmin")
+              }}
+              className="flex-1 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingProduct ? "Eliminando..." : role === "superadmin" ? "Eliminar permanentemente" : "Confirmar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* ==================== MODAL VER DETALLE DE PRODUCTO ==================== */}
       <Dialog open={!!detailProduct} onOpenChange={(openState) => !openState && setDetailProduct(null)}>
         <DialogContent className="max-w-md rounded-2xl p-0 overflow-hidden gap-0">
@@ -1094,19 +1168,35 @@ export default function ProductsView() {
                 <Button variant="outline" size="sm" className="rounded-xl text-xs" onClick={() => setDetailProduct(null)}>
                   Cerrar
                 </Button>
-                {canEdit && (
-                  <Button
-                    size="sm"
-                    className="rounded-xl text-xs gap-1.5 shadow-xs"
-                    onClick={() => {
-                      const p = detailProduct
-                      setDetailProduct(null)
-                      openEdit(p)
-                    }}
-                  >
-                    <IconPencil className="h-3.5 w-3.5" /> Editar Producto
-                  </Button>
-                )}
+                <div className="flex items-center gap-2">
+                  {canEdit && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="rounded-xl text-xs text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5"
+                      onClick={() => {
+                        const p = detailProduct
+                        setProductToDelete(p)
+                      }}
+                    >
+                      <IconTrash className="h-3.5 w-3.5" />
+                      {role === "superadmin" ? "Eliminar de prueba" : "Eliminar"}
+                    </Button>
+                  )}
+                  {canEdit && (
+                    <Button
+                      size="sm"
+                      className="rounded-xl text-xs gap-1.5 shadow-xs"
+                      onClick={() => {
+                        const p = detailProduct
+                        setDetailProduct(null)
+                        openEdit(p)
+                      }}
+                    >
+                      <IconPencil className="h-3.5 w-3.5" /> Editar Producto
+                    </Button>
+                  )}
+                </div>
               </div>
             </>
           )}
