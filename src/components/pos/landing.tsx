@@ -421,87 +421,100 @@ export default function LandingPage() {
       </div>
 
       {/* ========================================================= */}
-      {/* 1. HEADER / NAVBAR COMPLETO & ELEGANTE ESTILO CLAPOS      */}
+      {/* 1. NAVBAR EN CÁPSULA FLOTANTE ANIMADA (FLOATING ISLAND)   */}
       {/* ========================================================= */}
-      <header
-        className={cn(
-          "sticky top-0 z-50 w-full transition-all duration-200 border-b",
-          isScrolled
-            ? "bg-white/90 dark:bg-slate-950/90 backdrop-blur-md border-slate-200/80 dark:border-slate-800 shadow-xs"
-            : "bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-slate-200/50 dark:border-slate-800/50"
-        )}
-      >
-        <div className="mx-auto max-w-7xl px-4 sm:px-8 h-18 sm:h-20 flex items-center justify-between">
-          
+      <header className="fixed top-0 left-0 right-0 z-50 flex flex-col items-center px-3 sm:px-6 pt-3 sm:pt-4 pointer-events-none transition-all">
+        <motion.div
+          initial={{ y: -50, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ type: "spring", stiffness: 320, damping: 28 }}
+          className={cn(
+            "pointer-events-auto w-full transition-all duration-300 flex items-center justify-between",
+            "max-w-5xl rounded-full px-4 sm:px-6 py-2 sm:py-2.5",
+            "bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl",
+            "border border-emerald-500/25 dark:border-emerald-500/30",
+            "shadow-lg shadow-emerald-950/5 dark:shadow-black/40 ring-1 ring-emerald-500/10",
+            isScrolled && "bg-white/95 dark:bg-slate-900/95 shadow-xl shadow-emerald-950/10 border-emerald-500/40"
+          )}
+        >
           {/* Logo y Marca */}
           <a
             href="#home"
-            className="flex items-center gap-2.5 cursor-pointer group select-none"
+            className="flex items-center gap-2 select-none group cursor-pointer"
           >
             <motion.div
-              whileHover={{ rotate: 12, scale: 1.08 }}
+              whileHover={{ rotate: 15, scale: 1.1 }}
               transition={{ type: "spring", stiffness: 400, damping: 17 }}
-              className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-emerald-600 to-emerald-400 text-white shadow-md shadow-emerald-600/25 ring-2 ring-emerald-500/20"
+              className="relative flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xs"
             >
-              <Zap className="h-5 w-5 fill-white" />
+              <Zap className="h-4 w-4 fill-white" />
             </motion.div>
-            <div className="flex flex-col">
-              <span className="font-black text-lg sm:text-xl tracking-tight leading-none text-slate-900 dark:text-white">
-                Omni<span className="text-emerald-600 dark:text-emerald-400">POS</span>
-              </span>
-              <span className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
-                All-In-One Business
-              </span>
-            </div>
+            <span className="font-black text-sm sm:text-base tracking-tight text-slate-900 dark:text-white">
+              Omni<span className="text-emerald-600 dark:text-emerald-400">POS</span>
+            </span>
           </a>
 
-          {/* Navegación central limpia y elegante (Idéntica a ClaPos) */}
-          <nav className="hidden md:flex items-center gap-8 lg:gap-10">
+          {/* Navegación central en la cápsula con píldora deslizante */}
+          <nav
+            className="hidden md:flex items-center gap-1"
+            onMouseLeave={() => setHoveredNav(null)}
+          >
             {NAV_ITEMS.map((item) => {
               const isActive = activeNav === item.id
+              const isHovered = hoveredNav === item.id
 
               return (
                 <a
                   key={item.id}
                   href={item.href}
                   onClick={() => setActiveNav(item.id)}
+                  onMouseEnter={() => setHoveredNav(item.id)}
                   className={cn(
-                    "relative py-2 text-sm font-semibold transition-colors select-none",
+                    "relative px-3 py-1.5 text-xs font-semibold rounded-full transition-colors select-none",
                     isActive
-                      ? "text-slate-900 dark:text-white"
-                      : "text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400"
+                      ? "text-emerald-700 dark:text-emerald-300 font-bold"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                   )}
                 >
-                  {item.label}
-
-                  {/* Indicador inferior animado estilo ClaPos */}
-                  {isActive && (
+                  {/* Deslizador animado suave al hacer hover */}
+                  {isHovered && (
                     <motion.span
-                      layoutId="activeNavIndicator"
-                      className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-emerald-500 rounded-full"
+                      layoutId="capsuleHover"
+                      className="absolute inset-0 bg-emerald-500/15 dark:bg-emerald-500/25 rounded-full -z-10"
                       transition={{ type: "spring", stiffness: 400, damping: 30 }}
                     />
                   )}
+
+                  {/* Indicador activo permanente si no hay hover */}
+                  {isActive && !isHovered && (
+                    <motion.span
+                      layoutId="capsuleActive"
+                      className="absolute inset-0 bg-emerald-50 dark:bg-emerald-950/50 rounded-full -z-10 border border-emerald-500/20"
+                      transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                    />
+                  )}
+
+                  {item.label}
                 </a>
               )
             })}
           </nav>
 
-          {/* Acciones de la derecha */}
-          <div className="flex items-center gap-2.5 sm:gap-3">
+          {/* Acciones de la derecha dentro de la cápsula */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <ThemeToggle />
 
-            {/* Botón Login Pill estilizado como en ClaPos */}
+            {/* Iniciar Sesión Pill */}
             <motion.button
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
               onClick={goLogin}
-              className="rounded-full border border-slate-300 dark:border-slate-700 bg-white/70 dark:bg-slate-900/70 px-5 py-2 text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-200 hover:border-emerald-500 hover:text-emerald-600 transition-all shadow-2xs"
+              className="rounded-full px-3 sm:px-4 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-emerald-600 hover:bg-emerald-50/60 dark:hover:bg-slate-800 transition-colors"
             >
               Iniciar Sesión
             </motion.button>
 
-            {/* Botón CTA Verde Esmeralda */}
+            {/* Probar Gratis Pill */}
             <motion.div
               whileHover={{ scale: 1.04 }}
               whileTap={{ scale: 0.96 }}
@@ -510,57 +523,35 @@ export default function LandingPage() {
               <Button
                 size="sm"
                 onClick={goLogin}
-                className="rounded-full px-5 py-2 text-xs sm:text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/25 transition-all h-9"
+                className="rounded-full px-4 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs h-8"
               >
-                <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                <Sparkles className="h-3 w-3 mr-1" />
                 Probar Gratis
               </Button>
             </motion.div>
 
-            {/* Botón de Menú móvil */}
+            {/* Botón menú móvil */}
             <button
-              className="md:hidden p-2 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-slate-800 transition-colors"
+              className="md:hidden p-1.5 rounded-full text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              aria-label="Menú de navegación"
+              aria-label="Menú"
             >
-              <AnimatePresence mode="wait" initial={false}>
-                {mobileMenuOpen ? (
-                  <motion.div
-                    key="close"
-                    initial={{ rotate: -90, opacity: 0 }}
-                    animate={{ rotate: 0, opacity: 1 }}
-                    exit={{ rotate: 90, opacity: 0 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    <X className="h-5 w-5" />
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key="menu"
-                    initial={{ rotate: 90, opacity: 0 }}
-                    animate={{ rotate: 0, opacity: 1 }}
-                    exit={{ rotate: -90, opacity: 0 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    <Menu className="h-5 w-5" />
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
             </button>
           </div>
-        </div>
+        </motion.div>
 
-        {/* Menú móvil desplegable fluido */}
+        {/* Menú móvil desplegable como tarjeta flotante alineada */}
         <AnimatePresence>
           {mobileMenuOpen && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
+              initial={{ opacity: 0, y: -8, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.96 }}
               transition={{ duration: 0.2 }}
-              className="md:hidden border-t border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl px-5 py-4 space-y-1.5"
+              className="pointer-events-auto w-full max-w-sm mt-2 rounded-3xl border border-emerald-500/25 bg-white/95 dark:bg-slate-950/95 backdrop-blur-2xl shadow-2xl p-4 space-y-1"
             >
-              {NAV_ITEMS.map((item, i) => (
+              {NAV_ITEMS.map((item) => (
                 <a
                   key={item.id}
                   href={item.href}
@@ -569,20 +560,20 @@ export default function LandingPage() {
                     setMobileMenuOpen(false)
                   }}
                   className={cn(
-                    "flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-colors",
+                    "flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors",
                     activeNav === item.id
-                      ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600"
+                      ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 font-bold"
                       : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900"
                   )}
                 >
                   <span>{item.label}</span>
-                  <ChevronRight className="h-4 w-4 text-emerald-600" />
+                  <ChevronRight className="h-3.5 w-3.5 text-emerald-600" />
                 </a>
               ))}
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-col gap-2">
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
                 <Button
                   onClick={goLogin}
-                  className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-10"
+                  className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-9 text-xs"
                 >
                   Acceder al Sistema
                 </Button>
@@ -595,7 +586,7 @@ export default function LandingPage() {
       {/* ========================================================= */}
       {/* 2. HERO SECTION CON MOCKUP INTERACTIVO ESTILO CLAPOS      */}
       {/* ========================================================= */}
-      <section id="home" className="relative pt-10 sm:pt-16 pb-20 sm:pb-32 px-4 sm:px-6 overflow-hidden">
+      <section id="home" className="relative pt-24 sm:pt-32 pb-20 sm:pb-32 px-4 sm:px-6 overflow-hidden">
         <div className="mx-auto max-w-6xl text-center">
 
           {/* Badge Pill "Nuevo" */}
