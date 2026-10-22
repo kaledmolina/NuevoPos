@@ -150,6 +150,31 @@ button:disabled,
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* Regla better-ui: Contorno de 1px a imágenes para profundidad consistente */
+.img-outline {
+  outline: 1px solid oklch(0 0 0 / 0.08);
+}
+.dark .img-outline {
+  outline: 1px solid oklch(1 0 0 / 0.12);
+}
+
+/* Kbd badge de atajos de teclado POS */
+kbd.pos-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background-color: var(--muted);
+  color: var(--muted-foreground);
+  box-shadow: 0 1px 1px oklch(0 0 0 / 0.05);
+}
+
 /* Prevent text size adjust on orientation change */
 html {
   -webkit-text-size-adjust: 100%;

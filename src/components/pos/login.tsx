@@ -55,11 +55,26 @@ export default function LoginScreen() {
 
   // Modo: "login" o "register"
   const [authMode, setAuthMode] = useState<"login" | "register">("login")
+  const [showNumpad, setShowNumpad] = useState(false)
+
+  const handleNumpadPress = (digit: string) => {
+    if (digit === "clear") {
+      setPin("")
+      return
+    }
+    if (digit === "backspace") {
+      setPin((prev) => prev.slice(0, -1))
+      return
+    }
+    if (pin.length < 8) {
+      setPin((prev) => prev + digit)
+    }
+  }
 
   // Estado del Login
   const [role, setRole] = useState<Role | null>("admin")
-  const [name, setName] = useState("")
-  const [pin, setPin] = useState("")
+  const [name, setName] = useState("admin")
+  const [pin, setPin] = useState("1234")
   const [showPin, setShowPin] = useState(false)
   const [loading, setLoading] = useState(false)
   const [storeName, setStoreName] = useState("Sistema POS")
@@ -117,10 +132,14 @@ export default function LoginScreen() {
     setRole(r)
     if (r === "superadmin") {
       setName("kaledmoly@gmail.com")
-    } else if (!name || name === "admin" || name === "vendedor" || name === "kaledmoly@gmail.com") {
-      setName(r === "admin" ? "admin" : "vendedor")
+      setPin("9999")
+    } else if (r === "admin") {
+      setName("admin")
+      setPin("1234")
+    } else {
+      setName("vendedor")
+      setPin("0000")
     }
-    setPin("")
   }
 
   // Rellena rol + usuario + PIN automáticamente (acceso rápido demo)
@@ -347,7 +366,7 @@ export default function LoginScreen() {
                   </div>
 
                   {/* Formulario de Credenciales */}
-                  <div className="space-y-4 pt-1">
+                  <form onSubmit={(e) => { e.preventDefault(); submitLogin(); }} className="space-y-4 pt-1">
                     <div className="space-y-1.5">
                       <Label htmlFor="login-username" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                         Usuario o Correo Electrónico
@@ -370,7 +389,17 @@ export default function LoginScreen() {
                         <Label htmlFor="login-pin" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                           PIN Numérico
                         </Label>
-                        <span className="text-[10px] text-muted-foreground font-mono">4-8 dígitos</span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowNumpad(!showNumpad)}
+                            className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <Sparkles className="h-3 w-3" />
+                            {showNumpad ? "Ocultar teclado táctil" : "Teclado táctil"}
+                          </button>
+                          <span className="text-[10px] text-muted-foreground font-mono">4-8 dígitos</span>
+                        </div>
                       </div>
                       <div className="relative">
                         <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -383,24 +412,92 @@ export default function LoginScreen() {
                           placeholder="••••"
                           autoComplete="current-password"
                           className="h-11 pl-10 pr-10 text-sm tracking-[0.3em] font-mono rounded-xl border-slate-200 dark:border-slate-800 focus:border-emerald-500"
-                          onKeyDown={(e) => e.key === "Enter" && submitLogin()}
                         />
                         <button
                           type="button"
                           onClick={() => setShowPin(!showPin)}
-                          className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5"
+                          className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 active:scale-[0.96]"
                           tabIndex={-1}
                           title={showPin ? "Ocultar PIN" : "Mostrar PIN"}
                         >
                           {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </button>
                       </div>
+
+                      {/* Teclado numérico táctil interactivo para POS / Tablets */}
+                      <AnimatePresence>
+                        {showNumpad && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="pt-2 overflow-hidden"
+                          >
+                            <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 space-y-2.5">
+                              {/* Visual PIN dots indicator */}
+                              <div className="flex items-center justify-center gap-2.5 py-1">
+                                {[0, 1, 2, 3].map((idx) => {
+                                  const filled = pin.length > idx
+                                  return (
+                                    <span
+                                      key={idx}
+                                      className={cn(
+                                        "h-3 w-3 rounded-full transition-all duration-150",
+                                        filled
+                                          ? "bg-emerald-600 dark:bg-emerald-400 scale-110 shadow-xs shadow-emerald-500/50"
+                                          : "bg-slate-300 dark:bg-slate-700"
+                                      )}
+                                    />
+                                  )
+                                })}
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-1.5">
+                                {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
+                                  <button
+                                    key={num}
+                                    type="button"
+                                    onClick={() => handleNumpadPress(num)}
+                                    className="h-11 sm:h-12 rounded-xl text-base font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 text-foreground shadow-2xs active:scale-[0.96] transition-transform duration-100 ease-out"
+                                  >
+                                    {num}
+                                  </button>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => handleNumpadPress("clear")}
+                                  className="h-11 sm:h-12 rounded-xl text-xs font-bold text-destructive hover:bg-destructive/10 border border-transparent active:scale-[0.96] transition-transform duration-100 ease-out"
+                                  title="Borrar todo"
+                                >
+                                  C
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleNumpadPress("0")}
+                                  className="h-11 sm:h-12 rounded-xl text-base font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 text-foreground shadow-2xs active:scale-[0.96] transition-transform duration-100 ease-out"
+                                >
+                                  0
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleNumpadPress("backspace")}
+                                  className="h-11 sm:h-12 rounded-xl text-xs font-bold text-muted-foreground hover:bg-muted/80 border border-transparent active:scale-[0.96] transition-transform duration-100 ease-out flex items-center justify-center"
+                                  title="Borrar último"
+                                >
+                                  ⌫
+                                </button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
 
                     <Button
-                      className="w-full h-12 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-md shadow-emerald-600/25 transition-all hover:scale-[1.01] active:scale-[0.99]"
+                      type="submit"
+                      className="w-full h-12 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-md shadow-emerald-600/25 transition-all active:scale-[0.96]"
                       disabled={loading}
-                      onClick={submitLogin}
                     >
                       {loading ? (
                         <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Verificando credenciales…</>
@@ -408,18 +505,18 @@ export default function LoginScreen() {
                         <>Ingresar al Sistema <ArrowRight className="h-4 w-4 ml-2" /></>
                       )}
                     </Button>
-                  </div>
+                  </form>
 
                   {/* Acceso Rápido Demo 1-Clic */}
                   <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
                     <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1">
                       <Sparkles className="h-3 w-3 text-emerald-600" /> Cuentas de demostración rápida
                     </p>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className={cn("grid gap-2 text-xs", showSuperAdmin ? "grid-cols-3" : "grid-cols-2")}>
                       <button
                         type="button"
                         onClick={() => quickFill("admin")}
-                        className="text-left p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 hover:border-emerald-400 transition-all active:scale-[0.98]"
+                        className="text-left p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 hover:border-emerald-400 transition-all active:scale-[0.96]"
                       >
                         <p className="font-bold text-slate-800 dark:text-slate-200">Admin</p>
                         <p className="text-[11px] text-muted-foreground">admin / <span className="font-mono font-bold text-emerald-600">1234</span></p>
@@ -428,11 +525,22 @@ export default function LoginScreen() {
                       <button
                         type="button"
                         onClick={() => quickFill("vendedor")}
-                        className="text-left p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 hover:border-teal-400 transition-all active:scale-[0.98]"
+                        className="text-left p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 hover:border-teal-400 transition-all active:scale-[0.96]"
                       >
                         <p className="font-bold text-slate-800 dark:text-slate-200">Vendedor</p>
                         <p className="text-[11px] text-muted-foreground">vendedor / <span className="font-mono font-bold text-teal-600">0000</span></p>
                       </button>
+
+                      {showSuperAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => quickFill("superadmin")}
+                          className="text-left p-2.5 rounded-xl border border-amber-300 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-950/30 hover:border-amber-400 transition-all active:scale-[0.96]"
+                        >
+                          <p className="font-bold text-amber-900 dark:text-amber-200">Superadmin</p>
+                          <p className="text-[11px] text-muted-foreground">kaled / <span className="font-mono font-bold text-amber-600">9999</span></p>
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -702,7 +810,7 @@ function RoleButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "text-left rounded-2xl border-2 p-3 transition-all active:scale-[0.98] flex flex-col justify-between",
+        "text-left rounded-2xl border-2 p-3 transition-transform duration-100 ease-out active:scale-[0.96] flex flex-col justify-between select-none cursor-pointer",
         active
           ? "border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/25 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500/20"
           : "border-slate-200 dark:border-slate-800 hover:border-emerald-300 bg-card"

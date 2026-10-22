@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, useCallback } from "react"
+import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { apiFetch } from "@/lib/api"
 import { useAppStore, type HeldCart } from "@/lib/store"
@@ -79,6 +79,7 @@ export default function PosTerminal() {
   const deleteHeldCart = useAppStore((s) => s.deleteHeldCart)
   const clearHeldCarts = useAppStore((s) => s.clearHeldCarts)
 
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [products, setProducts] = useState<Product[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [query, setQuery] = useState("")
@@ -297,6 +298,34 @@ export default function PosTerminal() {
       setCheckingOut(false)
     }
   }
+
+  // Atajos de teclado ergonómicos para cajero (F2 = Buscar/Escanear, F4 = Cobrar, Escape = Limpiar/Cerrar)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "F2") {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+        searchInputRef.current?.select()
+      } else if (e.key === "F4") {
+        e.preventDefault()
+        if (cart.length > 0 && cashOpen !== false && !checkingOut) {
+          handleCheckout()
+        }
+      } else if (e.key === "Escape") {
+        if (query) {
+          setQuery("")
+        } else if (receipt) {
+          setReceipt(null)
+        } else if (holdDialogOpen) {
+          setHoldDialogOpen(false)
+        } else if (queueOpen) {
+          setQueueOpen(false)
+        }
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [cart.length, cashOpen, checkingOut, query, receipt, holdDialogOpen, queueOpen])
 
   // Botones de cabecera de carrito (Cola, En espera, Vaciar)
   const CartHeaderActions = (
@@ -533,13 +562,13 @@ export default function PosTerminal() {
               )}
             </div>
 
-            {/* Sugerencias de billetes rápidos */}
-            <div className="flex flex-wrap gap-1.5">
+            {/* Sugerencias de billetes rápidos (COP) */}
+            <div className="grid grid-cols-4 gap-1.5">
               <Button
                 type="button"
                 variant={received.trim() === "" || Number(received) === total ? "default" : "outline"}
                 size="sm"
-                className="h-7 text-xs flex-1 min-w-[70px] px-1 font-semibold"
+                className="h-8 text-xs font-bold px-1 active:scale-[0.96]"
                 onClick={() => setReceived(String(total))}
               >
                 Exacto
@@ -549,8 +578,10 @@ export default function PosTerminal() {
                 Math.ceil(total / 10000) * 10000,
                 Math.ceil(total / 20000) * 20000,
                 Math.ceil(total / 50000) * 50000,
+                10000, 20000, 50000, 100000,
               ]
                 .filter((v, i, a) => v > total && a.indexOf(v) === i)
+                .sort((a, b) => a - b)
                 .slice(0, 3)
                 .map((v) => (
                   <Button
@@ -558,7 +589,7 @@ export default function PosTerminal() {
                     type="button"
                     variant={Number(received) === v ? "default" : "outline"}
                     size="sm"
-                    className="h-7 text-xs flex-1 min-w-[70px] px-1 font-semibold"
+                    className="h-8 text-xs font-bold px-1 active:scale-[0.96]"
                     onClick={() => setReceived(String(v))}
                   >
                     {formatCurrency(v)}
@@ -566,14 +597,25 @@ export default function PosTerminal() {
                 ))}
             </div>
 
-            {/* Banner de cambio a devolver */}
+            {/* Banner de cambio a devolver con superficie de alta visibilidad */}
             {receivedNum > total && (
-              <div className="flex items-center justify-between p-2.5 rounded-xl bg-primary/10 border border-primary/20 text-foreground animate-in fade-in">
-                <span className="text-xs font-semibold">Cambio a entregar:</span>
-                <span className="text-base font-extrabold text-primary">
-                  {formatCurrency(change)}
-                </span>
-              </div>
+              <motion.div
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-950 dark:text-emerald-100 shadow-2xs"
+              >
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                    Cambio a entregar
+                  </span>
+                  <span className="text-lg font-black text-emerald-600 dark:text-emerald-300">
+                    {formatCurrency(change)}
+                  </span>
+                </div>
+                <div className="h-8 w-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-300 shrink-0">
+                  <IconCash className="h-4.5 w-4.5" />
+                </div>
+              </motion.div>
             )}
           </div>
         )}
@@ -637,7 +679,8 @@ export default function PosTerminal() {
             ) : (
               <>
                 <IconCircleCheck className="h-5 w-5 mr-2" />
-                {checkingOut ? "Procesando…" : `Cobrar ${cart.length > 0 ? formatCurrency(total) : ""}`}
+                <span>{checkingOut ? "Procesando…" : `Cobrar ${cart.length > 0 ? formatCurrency(total) : ""}`}</span>
+                <kbd className="pos-key ml-2 bg-primary-foreground/20 text-primary-foreground border-primary-foreground/30 hidden sm:inline-flex">F4</kbd>
               </>
             )}
           </Button>
@@ -785,15 +828,24 @@ export default function PosTerminal() {
         <div className="relative mb-2.5 sm:mb-4" data-tour="pos-search-input">
           <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
+            ref={searchInputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar o escanear código…"
-            className="pl-10 h-11 sm:h-12 text-base"
+            placeholder="Buscar producto o escanear código de barras…"
+            className="pl-10 pr-16 h-11 sm:h-12 text-base rounded-xl border-border/80 focus:border-primary shadow-2xs"
           />
-          {query && (
-            <button onClick={() => setQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 p-1">
-              <IconX className="h-4 w-4 text-muted-foreground" />
+          {query ? (
+            <button
+              onClick={() => setQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground active:scale-[0.96] transition-transform"
+              title="Borrar búsqueda (Esc)"
+            >
+              <IconX className="h-4 w-4" />
             </button>
+          ) : (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 hidden sm:flex items-center gap-1">
+              <kbd className="pos-key">F2</kbd>
+            </div>
           )}
         </div>
 
@@ -803,7 +855,7 @@ export default function PosTerminal() {
             <button
               type="button"
               onClick={() => setSelectedCategory("all")}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all shrink-0 active:scale-95 ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-transform duration-100 ease-out shrink-0 active:scale-[0.96] cursor-pointer ${
                 selectedCategory === "all"
                   ? "bg-primary text-primary-foreground shadow-xs shadow-primary/20"
                   : "bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -824,7 +876,7 @@ export default function PosTerminal() {
                   key={cat.id}
                   type="button"
                   onClick={() => setSelectedCategory(cat.id)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all shrink-0 active:scale-95 ${
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-transform duration-100 ease-out shrink-0 active:scale-[0.96] cursor-pointer ${
                     isSelected
                       ? "bg-primary text-primary-foreground shadow-xs shadow-primary/20"
                       : "bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -873,7 +925,7 @@ export default function PosTerminal() {
                       exit={{ opacity: 0, scale: 0.9 }}
                       transition={{ duration: 0.2, delay: Math.min(i * 0.02, 0.3) }}
                       whileHover={{ y: -2 }}
-                      whileTap={{ scale: 0.97 }}
+                      whileTap={{ scale: 0.96 }}
                       onClick={() => {
                         if (out) return toast.error("Producto sin stock")
                         if (exp.variant === "expired") return toast.error("Producto vencido, no se puede vender")
@@ -882,10 +934,10 @@ export default function PosTerminal() {
                         toast.success(`${p.name} agregado`)
                       }}
                       disabled={out}
-                      className={`group text-left rounded-xl border p-2.5 sm:p-3 transition-all relative disabled:opacity-50 disabled:cursor-not-allowed ${
+                      className={`group text-left rounded-2xl border p-2.5 sm:p-3 transition-all relative select-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                         inCartQty > 0
-                          ? "border-primary ring-2 ring-primary/20 bg-primary/[0.03] shadow-sm"
-                          : "bg-card hover:border-primary hover:shadow-md"
+                          ? "border-primary ring-2 ring-primary/20 bg-primary/[0.03] shadow-xs"
+                          : "bg-card hover:border-primary/80 hover:shadow-md"
                       }`}
                     >
                       <div className="flex items-start justify-between gap-1 mb-1.5">
@@ -905,7 +957,7 @@ export default function PosTerminal() {
                       </div>
                       <div className="flex gap-2 items-start mb-1">
                         {p.image && (
-                          <div className="h-10 w-10 rounded-lg border bg-muted/20 overflow-hidden shrink-0 shadow-2xs">
+                          <div className="h-10 w-10 rounded-lg border bg-muted/20 overflow-hidden shrink-0 shadow-2xs img-outline">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={p.image} alt={p.name} className="h-full w-full object-cover" />
                           </div>

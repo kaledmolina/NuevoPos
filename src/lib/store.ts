@@ -298,6 +298,7 @@ export const useAppStore = create<AppState>()(
           view: initialView,
           cart: [],
           sidebarOpen: false,
+          showLanding: false,
         })
       },
 

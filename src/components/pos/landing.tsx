@@ -14,7 +14,8 @@ import {
   CheckCircle2, DollarSign, Sparkles, Menu, X, ArrowLeftRight, Store,
   Pill, Hammer, Shirt, ShoppingBag, HardDrive, Printer, Layers, HelpCircle,
   ChevronRight, ChevronDown, Laptop, Smartphone, UtensilsCrossed, Coffee,
-  Flame, Percent, CircleCheck, Star, ExternalLink, RefreshCw, Zap
+  Flame, Percent, CircleCheck, Star, ExternalLink, RefreshCw, Zap, Crown,
+  Copy, CheckCheck
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ThemeToggle } from "@/components/theme-toggle"
@@ -377,7 +378,21 @@ export default function LandingPage() {
     }, 0)
   }, [mockCart])
 
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const copyToClipboard = (text: string, key: string) => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(text)
+      setCopiedKey(key)
+      toast.success(`"${text}" copiado al portapapeles`, { duration: 1500 })
+      setTimeout(() => setCopiedKey(null), 1800)
+    }
+  }
+
   const toggleMockProduct = (id: string) => {
+    const prod = MOCK_PRODUCTS.find((p) => p.id === id)
+    if (prod) {
+      toast.success(`"${prod.name}" añadido al pedido demo`, { duration: 1200 })
+    }
     setMockCart((prev) => {
       const current = prev[id] || 0
       if (current === 0) {
@@ -395,7 +410,17 @@ export default function LandingPage() {
     })
   }
 
-  const clearMockCart = () => setMockCart({})
+  const clearMockCart = () => {
+    setMockCart({})
+    toast.info("Orden demo vaciada")
+  }
+
+  const handleMockCheckout = () => {
+    toast.success("¡Venta demo procesada con éxito!", {
+      description: `Total: $${mockSubtotal.toFixed(2)} · Comprobante simulado`,
+    })
+    setMockCart({})
+  }
 
   const guide = activeRole === "admin" ? ADMIN_GUIDE : VENDEDOR_GUIDE
   const currentStep = guide[activeStep]
@@ -413,11 +438,20 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-[#FBFDFB] dark:bg-slate-950 text-foreground selection:bg-emerald-500/20 selection:text-emerald-700">
       
-      {/* Background soft ambient glows inspirados en el diseño de ClaPos */}
+      {/* Background ambient mesh and floating glows */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute -top-32 -left-32 w-[600px] h-[600px] rounded-full bg-emerald-400/10 dark:bg-emerald-500/5 blur-[120px]" />
-        <div className="absolute top-48 right-0 w-[500px] h-[500px] rounded-full bg-teal-300/10 dark:bg-teal-500/5 blur-[130px]" />
-        <div className="absolute top-[1200px] left-1/4 w-[700px] h-[700px] rounded-full bg-emerald-500/5 blur-[150px]" />
+        <div className="absolute inset-0 bg-[radial-gradient(#10b981_1px,transparent_1px)] [background-size:32px_32px] opacity-[0.035] dark:opacity-[0.06]" />
+        <motion.div
+          animate={{ x: [0, 25, 0], y: [0, -30, 0] }}
+          transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute -top-32 -left-32 w-[600px] h-[600px] rounded-full bg-emerald-400/15 dark:bg-emerald-500/10 blur-[130px]"
+        />
+        <motion.div
+          animate={{ x: [0, -30, 0], y: [0, 35, 0] }}
+          transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute top-48 -right-32 w-[550px] h-[550px] rounded-full bg-teal-300/15 dark:bg-teal-500/10 blur-[140px]"
+        />
+        <div className="absolute top-[1200px] left-1/4 w-[700px] h-[700px] rounded-full bg-emerald-500/5 blur-[160px]" />
       </div>
 
       {/* ========================================================= */}
@@ -594,12 +628,17 @@ export default function LandingPage() {
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
-            className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-50/80 dark:bg-emerald-950/40 px-3.5 py-1 text-xs font-semibold text-emerald-800 dark:text-emerald-300 shadow-xs mb-6"
+            className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-50/80 dark:bg-emerald-950/40 px-3.5 py-1 text-xs font-semibold text-emerald-800 dark:text-emerald-300 shadow-xs mb-6 backdrop-blur-xs"
           >
-            <span className="rounded-full bg-emerald-500 text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-              Nuevo
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
-            <span>Transacciones y control sin fricción para tu comercio</span>
+            <span className="rounded-full bg-emerald-500 text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+              OmniPOS 2.0
+            </span>
+            <span className="hidden sm:inline text-emerald-700/80 dark:text-emerald-300/80">·</span>
+            <span className="truncate">Control de inventario, punto de venta y arqueos en tiempo real</span>
           </motion.div>
 
           {/* Headline estilo ClaPos */}
@@ -607,10 +646,10 @@ export default function LandingPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.1 }}
-            className="text-4xl sm:text-6xl md:text-7xl font-extrabold tracking-tight text-slate-900 dark:text-white max-w-4xl mx-auto leading-[1.15]"
+            className="text-4xl sm:text-6xl md:text-7xl font-extrabold tracking-tight text-slate-900 dark:text-white max-w-4xl mx-auto leading-[1.12]"
           >
             Tu Solución{" "}
-            <span className="text-emerald-600 dark:text-emerald-400 underline decoration-emerald-300/40 decoration-wavy decoration-2">
+            <span className="bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-500 bg-clip-text text-transparent underline decoration-emerald-300/40 decoration-wavy decoration-2">
               Todo-En-Uno
             </span>
             <br />
@@ -638,9 +677,9 @@ export default function LandingPage() {
             <Button
               size="lg"
               onClick={goLogin}
-              className="w-full sm:w-auto h-12 px-8 rounded-full text-base font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl shadow-emerald-600/30 hover:shadow-emerald-600/40 transition-all hover:scale-105 active:scale-95"
+              className="w-full sm:w-auto h-12 px-8 rounded-full text-base font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl shadow-emerald-600/30 hover:shadow-emerald-600/40 transition-all hover:scale-105 active:scale-[0.96] cursor-pointer"
             >
-              Comenzar Ahora
+              Comenzar Ahora <ArrowRight className="h-4 w-4 ml-1.5" />
             </Button>
             <Button
               size="lg"
@@ -649,10 +688,10 @@ export default function LandingPage() {
                 const el = document.getElementById("mockup-interactive")
                 el?.scrollIntoView({ behavior: "smooth" })
               }}
-              className="w-full sm:w-auto h-12 px-8 rounded-full text-base font-medium border-slate-300 dark:border-slate-800 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xs hover:border-emerald-500 hover:text-emerald-600 transition-colors"
+              className="w-full sm:w-auto h-12 px-8 rounded-full text-base font-medium border-slate-300 dark:border-slate-800 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xs hover:border-emerald-500 hover:text-emerald-600 active:scale-[0.96] transition-all cursor-pointer"
             >
               <Play className="h-4 w-4 mr-2 fill-emerald-600 text-emerald-600" />
-              Ver Demostración
+              Ver Demostración Interactiva
             </Button>
           </motion.div>
 
@@ -674,12 +713,19 @@ export default function LandingPage() {
               {/* Header del Mockup */}
               <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-3.5 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/70 dark:bg-slate-900/80">
                 <div className="flex items-center gap-3">
-                  <button className="p-1 rounded-md text-slate-500 hover:text-slate-800 dark:hover:text-white">
+                  {/* macOS Traffic Lights Window Chrome */}
+                  <div className="flex items-center gap-1.5 mr-1 select-none">
+                    <span className="h-2.5 w-2.5 rounded-full bg-rose-400/90 border border-rose-500/30 inline-block" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-amber-400/90 border border-amber-500/30 inline-block" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/90 border border-emerald-500/30 inline-block" />
+                  </div>
+                  <button className="p-1 rounded-md text-slate-500 hover:text-slate-800 dark:hover:text-white transition-colors">
                     <Menu className="h-4 w-4" />
                   </button>
                   <div className="flex items-center gap-1.5">
                     <Zap className="h-4 w-4 text-emerald-600 fill-emerald-600" />
                     <span className="font-bold text-sm tracking-tight text-slate-800 dark:text-white">OmniPOS</span>
+                    <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded-md bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">v2.0 Demo</span>
                   </div>
                 </div>
 
@@ -800,14 +846,17 @@ export default function LandingPage() {
                     {filteredProducts.map((prod) => {
                       const count = mockCart[prod.id] || 0
                       return (
-                        <div
+                        <motion.div
                           key={prod.id}
+                          whileHover={{ y: -3 }}
+                          whileTap={{ scale: 0.96 }}
+                          transition={{ type: "spring", stiffness: 400, damping: 25 }}
                           onClick={() => toggleMockProduct(prod.id)}
                           className={cn(
                             "relative group rounded-xl border p-2.5 transition-all cursor-pointer select-none flex flex-col justify-between",
                             count > 0
-                              ? "border-emerald-500 bg-emerald-50/30 dark:bg-emerald-950/20 shadow-xs"
-                              : "border-slate-200/90 dark:border-slate-800 bg-card hover:border-emerald-300 hover:shadow-xs"
+                              ? "border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/30 shadow-xs ring-1 ring-emerald-500/30"
+                              : "border-slate-200/90 dark:border-slate-800 bg-card hover:border-emerald-300 hover:shadow-sm"
                           )}
                         >
                           {/* Badge de cantidad activa estilo ClaPos */}
@@ -818,7 +867,7 @@ export default function LandingPage() {
                           )}
 
                           {/* Imagen del producto */}
-                          <div className="relative h-20 w-full rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 mb-2 flex items-center justify-center">
+                          <div className="relative h-20 w-full rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 mb-2 flex items-center justify-center img-outline">
                             <img
                               src={prod.image}
                               alt={prod.name}
@@ -835,12 +884,12 @@ export default function LandingPage() {
                               <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400">
                                 ${prod.price.toFixed(2)}
                               </span>
-                              <span className="text-[10px] text-muted-foreground group-hover:text-emerald-600 transition-colors">
+                              <span className="text-[10px] text-muted-foreground group-hover:text-emerald-600 transition-colors font-medium">
                                 + Agregar
                               </span>
                             </div>
                           </div>
-                        </div>
+                        </motion.div>
                       )
                     })}
                   </div>
@@ -931,16 +980,19 @@ export default function LandingPage() {
                     <div className="flex gap-2 pt-1">
                       <Button
                         size="sm"
-                        onClick={goLogin}
-                        className="flex-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-9 shadow-sm"
+                        onClick={handleMockCheckout}
+                        disabled={mockSubtotal === 0}
+                        className="flex-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.96] text-white font-bold text-xs h-9 shadow-sm transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
                       >
+                        <ReceiptText className="h-3.5 w-3.5" />
                         Cobrar Orden (${mockSubtotal.toFixed(2)})
                       </Button>
                       <Button
                         size="sm"
                         variant="ghost"
                         onClick={clearMockCart}
-                        className="text-xs text-muted-foreground hover:text-foreground h-9 px-2"
+                        disabled={Object.keys(mockCart).length === 0}
+                        className="text-xs text-muted-foreground hover:text-foreground h-9 px-2 active:scale-[0.96] transition-all cursor-pointer"
                         title="Vaciar orden"
                       >
                         Limpiar
@@ -955,25 +1007,35 @@ export default function LandingPage() {
             </div>
 
             {/* Micro badges flotantes con métricas en las esquinas */}
-            <div className="hidden md:flex absolute -bottom-5 -left-4 items-center gap-2 rounded-2xl border border-emerald-500/20 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-3 shadow-xl ring-1 ring-emerald-500/10">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.6 }}
+              className="hidden md:flex absolute -bottom-5 -left-4 items-center gap-2.5 rounded-2xl border border-emerald-500/25 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-3 shadow-xl ring-1 ring-emerald-500/10 hover:scale-105 transition-transform"
+            >
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 shadow-xs">
                 <TrendingUp className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-xs font-extrabold text-slate-900 dark:text-white">+38% Velocidad</p>
                 <p className="text-[10px] text-muted-foreground">En atención en mostrador</p>
               </div>
-            </div>
+            </motion.div>
 
-            <div className="hidden md:flex absolute -top-5 -right-4 items-center gap-2 rounded-2xl border border-emerald-500/20 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-3 shadow-xl ring-1 ring-emerald-500/10">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.7 }}
+              className="hidden md:flex absolute -top-5 -right-4 items-center gap-2.5 rounded-2xl border border-emerald-500/25 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-3 shadow-xl ring-1 ring-emerald-500/10 hover:scale-105 transition-transform"
+            >
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 shadow-xs">
                 <CheckCircle2 className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-xs font-extrabold text-slate-900 dark:text-white">Caja 100% Cuadrada</p>
                 <p className="text-[10px] text-muted-foreground">Arqueo automático sin pérdidas</p>
               </div>
-            </div>
+            </motion.div>
 
           </motion.div>
 
@@ -1305,14 +1367,21 @@ export default function LandingPage() {
                   key={rubro.id}
                   onClick={() => setSelectedRubro(idx)}
                   className={cn(
-                    "flex items-center gap-2 px-4 py-2.5 rounded-full text-xs sm:text-sm font-semibold transition-all shrink-0 border",
+                    "relative flex items-center gap-2 px-4 py-2.5 rounded-full text-xs sm:text-sm font-semibold transition-all shrink-0 cursor-pointer active:scale-[0.96]",
                     active
-                      ? "bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-600/20"
-                      : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-emerald-400"
+                      ? "text-white shadow-md shadow-emerald-600/25"
+                      : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:border-emerald-400"
                   )}
                 >
-                  <Icon className="h-4 w-4" />
-                  <span>{rubro.name.split("&")[0]}</span>
+                  {active && (
+                    <motion.div
+                      layoutId="activeRubroTab"
+                      className="absolute inset-0 bg-emerald-600 rounded-full -z-10"
+                      transition={{ type: "spring", stiffness: 450, damping: 35 }}
+                    />
+                  )}
+                  <Icon className="h-4 w-4 relative z-10" />
+                  <span className="relative z-10">{rubro.name.split("&")[0]}</span>
                 </button>
               )
             })}
@@ -1745,7 +1814,7 @@ export default function LandingPage() {
       {/* 8. CREDENCIALES DE DEMO RÁPIDO (1-CLIC DIRECTO)           */}
       {/* ========================================================= */}
       <section id="credentials" className="py-20 sm:py-24 px-4 sm:px-6">
-        <div className="mx-auto max-w-4xl">
+        <div className="mx-auto max-w-5xl">
           
           <div className="text-center max-w-xl mx-auto mb-12">
             <span className="text-xs font-extrabold tracking-widest text-emerald-600 uppercase">
@@ -1755,13 +1824,13 @@ export default function LandingPage() {
               Prueba el Sistema en Vivo
             </h2>
             <p className="text-sm text-muted-foreground mt-2">
-              Haz clic en cualquiera de las cuentas de prueba para ingresar instantáneamente.
+              Haz clic en cualquiera de las 3 cuentas de prueba para ingresar instantáneamente con su rol.
             </p>
           </div>
 
-          <div className="grid sm:grid-cols-2 gap-5">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {/* Cuenta Admin */}
-            <div className="rounded-3xl border border-emerald-500/30 bg-emerald-50/40 dark:bg-emerald-950/20 p-6 flex flex-col justify-between hover:border-emerald-500/60 transition-all">
+            <div className="rounded-3xl border border-emerald-500/30 bg-emerald-50/40 dark:bg-emerald-950/20 p-6 flex flex-col justify-between hover:border-emerald-500/60 transition-all hover:shadow-lg hover:shadow-emerald-500/5 group">
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md">
@@ -1769,18 +1838,36 @@ export default function LandingPage() {
                   </div>
                   <div>
                     <h4 className="font-extrabold text-base text-slate-900 dark:text-white">Administrador</h4>
-                    <p className="text-xs text-muted-foreground">Acceso completo a inventario, compras, finanzas y reportes</p>
+                    <p className="text-xs text-muted-foreground">Inventario, compras, finanzas y reportes</p>
                   </div>
                 </div>
 
                 <div className="space-y-1.5 text-xs pt-3">
                   <div className="flex justify-between items-center bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
                     <span className="text-muted-foreground">Usuario:</span>
-                    <code className="font-mono font-bold text-slate-800 dark:text-slate-200">admin</code>
+                    <div className="flex items-center gap-1.5">
+                      <code className="font-mono font-bold text-slate-800 dark:text-slate-200">admin</code>
+                      <button
+                        onClick={() => copyToClipboard("admin", "admin-user")}
+                        className="p-1 rounded-md text-slate-400 hover:text-emerald-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        title="Copiar usuario"
+                      >
+                        {copiedKey === "admin-user" ? <CheckCheck className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
                   </div>
                   <div className="flex justify-between items-center bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
                     <span className="text-muted-foreground">PIN:</span>
-                    <code className="font-mono font-bold text-emerald-600">1234</code>
+                    <div className="flex items-center gap-1.5">
+                      <code className="font-mono font-bold text-emerald-600">1234</code>
+                      <button
+                        onClick={() => copyToClipboard("1234", "admin-pin")}
+                        className="p-1 rounded-md text-slate-400 hover:text-emerald-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        title="Copiar PIN"
+                      >
+                        {copiedKey === "admin-pin" ? <CheckCheck className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1788,14 +1875,14 @@ export default function LandingPage() {
               <Button
                 onClick={() => handleQuickLogin("admin", "1234")}
                 disabled={loggingIn === "admin"}
-                className="w-full mt-5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-10 shadow-sm"
+                className="w-full mt-5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-10 shadow-sm active:scale-[0.96] transition-all cursor-pointer"
               >
                 {loggingIn === "admin" ? "Iniciando..." : "Ingresar como Admin (1-Clic)"}
               </Button>
             </div>
 
             {/* Cuenta Vendedor */}
-            <div className="rounded-3xl border border-teal-500/30 bg-teal-50/40 dark:bg-teal-950/20 p-6 flex flex-col justify-between hover:border-teal-500/60 transition-all">
+            <div className="rounded-3xl border border-teal-500/30 bg-teal-50/40 dark:bg-teal-950/20 p-6 flex flex-col justify-between hover:border-teal-500/60 transition-all hover:shadow-lg hover:shadow-teal-500/5 group">
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-600 text-white shadow-md">
@@ -1803,18 +1890,36 @@ export default function LandingPage() {
                   </div>
                   <div>
                     <h4 className="font-extrabold text-base text-slate-900 dark:text-white">Vendedor / Cajero</h4>
-                    <p className="text-xs text-muted-foreground">Terminal POS rápido, cobros, comprobantes y arqueos</p>
+                    <p className="text-xs text-muted-foreground">Punto de venta, caja y arqueos</p>
                   </div>
                 </div>
 
                 <div className="space-y-1.5 text-xs pt-3">
                   <div className="flex justify-between items-center bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
                     <span className="text-muted-foreground">Usuario:</span>
-                    <code className="font-mono font-bold text-slate-800 dark:text-slate-200">vendedor</code>
+                    <div className="flex items-center gap-1.5">
+                      <code className="font-mono font-bold text-slate-800 dark:text-slate-200">vendedor</code>
+                      <button
+                        onClick={() => copyToClipboard("vendedor", "vendedor-user")}
+                        className="p-1 rounded-md text-slate-400 hover:text-teal-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        title="Copiar usuario"
+                      >
+                        {copiedKey === "vendedor-user" ? <CheckCheck className="h-3.5 w-3.5 text-teal-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
                   </div>
                   <div className="flex justify-between items-center bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
                     <span className="text-muted-foreground">PIN:</span>
-                    <code className="font-mono font-bold text-teal-600">0000</code>
+                    <div className="flex items-center gap-1.5">
+                      <code className="font-mono font-bold text-teal-600">0000</code>
+                      <button
+                        onClick={() => copyToClipboard("0000", "vendedor-pin")}
+                        className="p-1 rounded-md text-slate-400 hover:text-teal-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        title="Copiar PIN"
+                      >
+                        {copiedKey === "vendedor-pin" ? <CheckCheck className="h-3.5 w-3.5 text-teal-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1822,9 +1927,66 @@ export default function LandingPage() {
               <Button
                 onClick={() => handleQuickLogin("vendedor", "0000")}
                 disabled={loggingIn === "vendedor"}
-                className="w-full mt-5 rounded-full bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs h-10 shadow-sm"
+                className="w-full mt-5 rounded-full bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs h-10 shadow-sm active:scale-[0.96] transition-all cursor-pointer"
               >
                 {loggingIn === "vendedor" ? "Iniciando..." : "Ingresar como Vendedor (1-Clic)"}
+              </Button>
+            </div>
+
+            {/* Cuenta Superadmin */}
+            <div className="rounded-3xl border border-amber-500/30 bg-amber-50/40 dark:bg-amber-950/20 p-6 flex flex-col justify-between hover:border-amber-500/60 transition-all hover:shadow-lg hover:shadow-amber-500/5 group sm:col-span-2 lg:col-span-1">
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-md">
+                    <Crown className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-extrabold text-base text-slate-900 dark:text-white">Superadmin</h4>
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300">
+                        Maestro
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Acceso global y control maestro</p>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 text-xs pt-3">
+                  <div className="flex justify-between items-center bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
+                    <span className="text-muted-foreground">Usuario:</span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <code className="font-mono font-bold text-slate-800 dark:text-slate-200 truncate max-w-[130px]">kaledmoly@gmail.com</code>
+                      <button
+                        onClick={() => copyToClipboard("kaledmoly@gmail.com", "super-user")}
+                        className="p-1 rounded-md text-slate-400 hover:text-amber-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        title="Copiar usuario"
+                      >
+                        {copiedKey === "super-user" ? <CheckCheck className="h-3.5 w-3.5 text-amber-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
+                    <span className="text-muted-foreground">PIN:</span>
+                    <div className="flex items-center gap-1.5">
+                      <code className="font-mono font-bold text-amber-600">9999</code>
+                      <button
+                        onClick={() => copyToClipboard("9999", "super-pin")}
+                        className="p-1 rounded-md text-slate-400 hover:text-amber-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        title="Copiar PIN"
+                      >
+                        {copiedKey === "super-pin" ? <CheckCheck className="h-3.5 w-3.5 text-amber-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <Button
+                onClick={() => handleQuickLogin("kaledmoly@gmail.com", "9999")}
+                disabled={loggingIn === "kaledmoly@gmail.com"}
+                className="w-full mt-5 rounded-full bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs h-10 shadow-sm active:scale-[0.96] transition-all cursor-pointer"
+              >
+                {loggingIn === "kaledmoly@gmail.com" ? "Iniciando..." : "Ingresar como Superadmin (1-Clic)"}
               </Button>
             </div>
           </div>
@@ -1877,20 +2039,30 @@ export default function LandingPage() {
               return (
                 <div
                   key={idx}
-                  className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden transition-all"
+                  className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden transition-all shadow-xs"
                 >
                   <button
                     onClick={() => setExpandedFaq(isOpen ? null : idx)}
-                    className="w-full text-left p-5 flex items-center justify-between gap-4 font-bold text-sm text-slate-900 dark:text-white"
+                    className="w-full text-left p-5 flex items-center justify-between gap-4 font-bold text-sm text-slate-900 dark:text-white cursor-pointer select-none hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
                   >
                     <span>{faq.q}</span>
-                    <ChevronDown className={cn("h-4 w-4 text-emerald-600 shrink-0 transition-transform", isOpen && "rotate-180")} />
+                    <ChevronDown className={cn("h-4 w-4 text-emerald-600 shrink-0 transition-transform duration-200", isOpen && "rotate-180")} />
                   </button>
-                  {isOpen && (
-                    <div className="px-5 pb-5 text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed border-t border-slate-100 dark:border-slate-800 pt-3">
-                      {faq.a}
-                    </div>
-                  )}
+                  <AnimatePresence initial={false}>
+                    {isOpen && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.22, ease: "easeInOut" }}
+                        className="overflow-hidden"
+                      >
+                        <div className="px-5 pb-5 text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed border-t border-slate-100 dark:border-slate-800 pt-3">
+                          {faq.a}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               )
             })}
