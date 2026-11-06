@@ -41,18 +41,20 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 # Copiar artefactos standalone de Next.js
-COPY --from=builder /app/public ./public
+COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/scripts ./scripts
+COPY --from=builder --chown=node:node /app/prisma ./prisma
+COPY --from=builder --chown=node:node /app/scripts ./scripts
 
 # Copiar dependencias de node_modules completas para que los comandos de Prisma tengan todos sus submódulos
-COPY --from=deps /app/node_modules ./node_modules
-COPY docker-entrypoint.sh ./docker-entrypoint.sh
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --chown=node:node docker-entrypoint.sh ./docker-entrypoint.sh
 
-RUN chmod +x ./docker-entrypoint.sh
-RUN mkdir -p /app/public/uploads/products && chown -R node:node /app/public
+RUN chmod +x ./docker-entrypoint.sh && \
+    mkdir -p /app/public/uploads/products && \
+    chown -R node:node /app && \
+    chmod -R u+rwX /app
 
 USER node
 
