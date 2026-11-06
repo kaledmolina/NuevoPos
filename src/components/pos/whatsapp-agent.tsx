@@ -382,9 +382,10 @@ export default function WhatsAppAgentView() {
   const loadMessages = useCallback(async (phone: string, silent = false) => {
     try {
       if (!silent) setLoadingMessages(true)
-      const res = await apiFetch<{ ok: boolean; messages: Message[] }>(
-        `/api/whatsapp/messages?phone=${encodeURIComponent(phone)}`
-      )
+      const url = currentBranchId
+        ? `/api/whatsapp/messages?phone=${encodeURIComponent(phone)}&branchId=${encodeURIComponent(currentBranchId)}`
+        : `/api/whatsapp/messages?phone=${encodeURIComponent(phone)}`
+      const res = await apiFetch<{ ok: boolean; messages: Message[] }>(url)
       if (res && res.ok && res.messages) {
         setChatMessages((prev) => {
           // Solo actualizar el estado si realmente hay cambios para no disparar renders innecesarios
@@ -403,7 +404,7 @@ export default function WhatsAppAgentView() {
     } finally {
       if (!silent) setLoadingMessages(false)
     }
-  }, [])
+  }, [currentBranchId])
 
   // Refresco en tiempo real del chat activo cada 2.5s (sin recargar la página, solo con ventana activa)
   useEffect(() => {
@@ -677,8 +678,30 @@ export default function WhatsAppAgentView() {
         setSimText("")
         setSimModalOpen(false)
         setSelectedPhone(targetPhone)
+
+        // Actualización optimista inmediata en la UI con la respuesta de la IA generada
+        if (res.botReply) {
+          setChatMessages((prev) => [
+            ...prev,
+            {
+              id: "sim-inbound-" + Date.now(),
+              sender: "customer",
+              text,
+              status: "read",
+              createdAt: new Date().toISOString(),
+            },
+            {
+              id: "sim-bot-" + Date.now(),
+              sender: "bot",
+              text: res.botReply,
+              status: "delivered",
+              createdAt: new Date(Date.now() + 50).toISOString(),
+            },
+          ])
+        }
+
         await loadConversations(false)
-        await loadMessages(targetPhone, false)
+        await loadMessages(targetPhone, true)
         setTimeout(() => scrollToBottom(false), 60)
         if (res.orderNumber) {
           toast.success(`¡Orden #${res.orderNumber} creada automáticamente en la sede!`)

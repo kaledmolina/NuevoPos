@@ -1,4 +1,4 @@
-import { db } from "@/lib/db"
+import { db, ensureMySqlTextColumns } from "@/lib/db"
 
 export interface BotProcessResult {
   reply: string
@@ -27,6 +27,9 @@ export async function processWhatsAppMessage(params: {
   const cleanPhone = isTelegram ? (phone.startsWith("tg_") ? phone : `tg_${phone}`) : phone.replace(/[^0-9+]/g, "")
   const effectiveChannel = isTelegram ? "telegram" : "whatsapp"
   const text = message.trim()
+
+  // Asegurar compatibilidad de columnas TEXT en MySQL (evitar VARCHAR(191))
+  await ensureMySqlTextColumns().catch(() => {})
 
   // 1. Identificar la Sede y su Configuración
   let resolvedBranchId = branchId
@@ -373,8 +376,43 @@ export async function processWhatsAppMessage(params: {
         channel: effectiveChannel,
       },
     })
-  } catch (saveErr) {
+  } catch (saveErr: any) {
     console.error("[WhatsApp CRM Save Bot Reply Error]:", saveErr)
+    // Si MySQL rechaza por límite de columna (VARCHAR 191 en vez de TEXT), auto-reparar la tabla y reintentar
+    const errMsg = String(saveErr?.message || "")
+    if (errMsg.includes("Data too long") || errMsg.includes("too long for the column")) {
+      try {
+        console.log("🐬 Auto-reparando tabla WhatsAppMessage para admitir respuestas largas...")
+        await db.$executeRawUnsafe(`ALTER TABLE WhatsAppMessage MODIFY COLUMN text TEXT;`)
+        await db.whatsAppMessage.create({
+          data: {
+            phone: cleanPhone,
+            sender: "bot",
+            text: result.reply,
+            status: "delivered",
+            branchId: resolvedBranchId,
+            clientId: client.id,
+            orderId: createdOrderId,
+            channel: effectiveChannel,
+          },
+        })
+        console.log("✅ Respuesta del bot guardada con éxito tras auto-reparación MySQL.")
+      } catch (retryErr) {
+        // Fallback de emergencia si la BD sigue restringida: guardar versión resumida
+        await db.whatsAppMessage.create({
+          data: {
+            phone: cleanPhone,
+            sender: "bot",
+            text: result.reply.slice(0, 190),
+            status: "delivered",
+            branchId: resolvedBranchId,
+            clientId: client.id,
+            orderId: createdOrderId,
+            channel: effectiveChannel,
+          },
+        }).catch(() => {})
+      }
+    }
   }
 
   return result

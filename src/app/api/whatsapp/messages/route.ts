@@ -30,7 +30,6 @@ export async function GET(req: NextRequest) {
         OR: phoneFilter,
         sender: "customer",
         status: "unread",
-        ...branchFilter,
       },
     })
 
@@ -40,17 +39,15 @@ export async function GET(req: NextRequest) {
           OR: phoneFilter,
           sender: "customer",
           status: "unread",
-          ...branchFilter,
         },
         data: { status: "read" },
       })
     }
 
-    // Cargar historial de mensajes ordenado cronológicamente
+    // Cargar historial de mensajes ordenado cronológicamente para este cliente/teléfono
     const messages = await db.whatsAppMessage.findMany({
       where: {
         OR: phoneFilter,
-        ...branchFilter,
       },
       orderBy: { createdAt: "asc" },
       include: {
