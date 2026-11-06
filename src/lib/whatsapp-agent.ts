@@ -584,6 +584,16 @@ ${catalogContext}`
         orderTotal = createdOrder.total
         actionTaken = "order_created"
 
+        // Si el pedido ya quedó pagado (transferencia), pasar de inmediato a Ventas
+        if (createdOrder.paymentStatus === "pagado") {
+          try {
+            const { syncOrderToSale } = await import("@/lib/order-sale-sync")
+            await syncOrderToSale(createdOrder.id)
+          } catch (syncErr) {
+            console.warn("[Order -> Sale sync error]", syncErr)
+          }
+        }
+
         // Agregar pie de confirmación con el # de orden y recordatorio de pago
         const paymentSummary = isTransfer
           ? "💳 *Método de Pago:* Transferencia (No debes entregar dinero al repartidor)"

@@ -302,35 +302,50 @@ export default function WhatsAppAgentView() {
     }
   }, [currentBranchId, loadBranchConfig, loadConversations])
 
-  // Polling silencioso de conversaciones cada 8s
+  // Polling silencioso de conversaciones cada 3.5s
   useEffect(() => {
-    const interval = setInterval(() => loadConversations(false), 8000)
+    const interval = setInterval(() => loadConversations(false), 3500)
     return () => clearInterval(interval)
   }, [loadConversations])
 
-  // 3. Cargar mensajes del chat seleccionado
-  const loadMessages = useCallback(async (phone: string) => {
+  // 3. Cargar mensajes del chat seleccionado con soporte para refresco en tiempo real sin parpadeo
+  const loadMessages = useCallback(async (phone: string, silent = false) => {
     try {
-      setLoadingMessages(true)
+      if (!silent) setLoadingMessages(true)
       const res = await apiFetch<{ ok: boolean; messages: Message[] }>(
         `/api/whatsapp/messages?phone=${encodeURIComponent(phone)}`
       )
-      if (res && res.ok) {
-        setChatMessages(res.messages || [])
+      if (res && res.ok && res.messages) {
+        setChatMessages((prev) => {
+          // Solo actualizar el estado si realmente hay cambios para no disparar renders innecesarios
+          if (prev.length === res.messages.length) {
+            const lastPrev = prev[prev.length - 1]
+            const lastNew = res.messages[res.messages.length - 1]
+            if (lastPrev?.id === lastNew?.id && lastPrev?.status === lastNew?.status) {
+              return prev
+            }
+          }
+          return res.messages
+        })
       }
     } catch {
       // noop
     } finally {
-      setLoadingMessages(false)
+      if (!silent) setLoadingMessages(false)
     }
   }, [])
 
+  // Refresco en tiempo real del chat activo cada 1.5s (sin recargar la página)
   useEffect(() => {
-    if (selectedPhone) {
-      loadMessages(selectedPhone)
-    }
+    if (!selectedPhone) return
+    loadMessages(selectedPhone, false)
+    const interval = setInterval(() => {
+      loadMessages(selectedPhone, true)
+    }, 1500)
+    return () => clearInterval(interval)
   }, [selectedPhone, loadMessages])
 
+  // Scroll automático hacia el último mensaje
   useEffect(() => {
     chatScrollRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [chatMessages])
@@ -427,9 +442,22 @@ export default function WhatsAppAgentView() {
     }
   }
 
-  // Enviar mensaje manual desde el agente humano
+  // Enviar mensaje manual desde el agente humano con actualización optimista inmediata
   const handleSendAgentMessage = async () => {
     if (!selectedPhone || !agentReplyText.trim() || sendingReply) return
+
+    const textToSend = agentReplyText.trim()
+    setAgentReplyText("")
+
+    // Inserción optimista inmediata en la vista para respuesta instantánea
+    const optimisticMessage: Message = {
+      id: "temp-" + Date.now(),
+      text: textToSend,
+      sender: "agent",
+      status: "sent",
+      createdAt: new Date().toISOString(),
+    }
+    setChatMessages((prev) => [...prev, optimisticMessage])
 
     setSendingReply(true)
     try {
@@ -437,19 +465,19 @@ export default function WhatsAppAgentView() {
         method: "POST",
         body: JSON.stringify({
           phone: selectedPhone,
-          text: agentReplyText.trim(),
+          text: textToSend,
           branchId: currentBranchId,
         }),
       })
 
       if (res && res.ok) {
-        setAgentReplyText("")
-        loadMessages(selectedPhone)
-        loadConversations()
+        await loadMessages(selectedPhone, true)
+        loadConversations(false)
         toast.success("Mensaje enviado por WhatsApp")
       }
     } catch (e) {
       toast.error("Error al enviar mensaje: " + (e as Error).message)
+      loadMessages(selectedPhone, true)
     } finally {
       setSendingReply(false)
     }
@@ -480,8 +508,8 @@ export default function WhatsAppAgentView() {
       if (res && res.ok) {
         setSimText("")
         setSimModalOpen(false)
-        loadMessages(selectedPhone)
-        loadConversations()
+        loadMessages(selectedPhone, true)
+        loadConversations(false)
         if (res.orderNumber) {
           toast.success(`¡Orden #${res.orderNumber} creada automáticamente en la sede!`)
         } else {
@@ -930,9 +958,9 @@ export default function WhatsAppAgentView() {
                       <p className="text-[11px] text-zinc-500 flex items-center gap-1.5">
                         <span>Sede: <strong>{activeBranch?.name || "Principal"}</strong></span>
                         <span>·</span>
-                        <span className="flex items-center gap-1 text-zinc-900 dark:text-zinc-100 font-medium">
-                          <span className="h-1.5 w-1.5 rounded-full bg-zinc-950 dark:bg-white animate-pulse" />
-                          Chat en tiempo real
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200/60 dark:border-emerald-800/40">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
+                          En vivo (Auto-actualizado)
                         </span>
                       </p>
                     </div>

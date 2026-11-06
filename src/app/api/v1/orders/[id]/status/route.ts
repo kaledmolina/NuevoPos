@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getSession, logAudit } from "@/lib/auth"
 import { apiSuccess, apiError } from "@/lib/api-response"
+import { syncOrderToSale } from "@/lib/order-sale-sync"
 
 export const dynamic = "force-dynamic"
 
@@ -117,6 +118,15 @@ export async function PATCH(
         },
       })
     })
+
+    // Si el pedido quedó entregado o pagado, registrar o actualizar automáticamente su venta oficial
+    if (updated.paymentStatus === "pagado" || updated.status === "entregado") {
+      try {
+        await syncOrderToSale(updated.id)
+      } catch (err) {
+        console.error("Error sincronizando pedido a venta oficial:", err)
+      }
+    }
 
     await logAudit({
       action: "api_order_status_update",

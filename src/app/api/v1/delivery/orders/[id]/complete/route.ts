@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { requireRole, logAudit } from "@/lib/auth"
 import { apiSuccess, apiError } from "@/lib/api-response"
+import { syncOrderToSale } from "@/lib/order-sale-sync"
 
 export const dynamic = "force-dynamic"
 
@@ -58,6 +59,13 @@ export async function POST(
       role: session.role,
       detail: `Domiciliario ${session.name} completó la entrega del pedido ${order.orderNumber}`,
     })
+
+    // Registrar en ventas de inmediato
+    try {
+      await syncOrderToSale(updated.id)
+    } catch (err) {
+      console.error("Error al registrar venta desde entrega:", err)
+    }
 
     return apiSuccess({
       order: updated,

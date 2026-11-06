@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { nextInvoiceNumber } from "@/lib/format"
 import { requireAuth, getSession, logAudit } from "@/lib/auth"
 import { resolveBranchId, requireBranchAccess } from "@/lib/branch"
+import { syncAllPaidOrders } from "@/lib/order-sale-sync"
 
 export const dynamic = "force-dynamic"
 
@@ -150,6 +151,13 @@ export async function GET(req: NextRequest) {
   const status = searchParams.get("status")
 
   const branchId = await resolveBranchId(req)
+
+  // Sincronizar automáticamente cualquier pedido pagado o entregado hacia Ventas
+  try {
+    await syncAllPaidOrders(branchId)
+  } catch (err) {
+    console.error("Error al sincronizar pedidos pagados a ventas:", err)
+  }
 
   const where: Record<string, unknown> = {}
   if (branchId) {
