@@ -257,6 +257,21 @@ export default function WhatsAppAgentView() {
   const [copiedToken, setCopiedToken] = useState(false)
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null)
+  const prevMsgCountRef = useRef(0)
+
+  // Desplazamiento garantizado hacia el final del chat
+  const scrollToBottom = useCallback((smooth = false) => {
+    const el = messagesContainerRef.current
+    if (el) {
+      el.scrollTo({
+        top: el.scrollHeight + 1000,
+        behavior: smooth ? "smooth" : "auto",
+      })
+    } else {
+      chatScrollRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "auto" })
+    }
+  }, [])
 
   // 1. Cargar Configuración de la Sede
   const loadBranchConfig = useCallback(async (bId: string) => {
@@ -358,10 +373,26 @@ export default function WhatsAppAgentView() {
     return () => clearInterval(interval)
   }, [selectedPhone, loadMessages])
 
-  // Scroll automático hacia el último mensaje
+  // Scroll instantáneo al fondo al cargar mensajes o cambiar de chat
   useEffect(() => {
-    chatScrollRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [chatMessages])
+    if (chatMessages.length > 0) {
+      scrollToBottom(false)
+      const t1 = setTimeout(() => scrollToBottom(false), 60)
+      const t2 = setTimeout(() => scrollToBottom(false), 250)
+      return () => {
+        clearTimeout(t1)
+        clearTimeout(t2)
+      }
+    }
+  }, [selectedPhone, chatMessages.length, scrollToBottom])
+
+  // Scroll suave cuando llega un mensaje nuevo en tiempo real
+  useEffect(() => {
+    if (chatMessages.length > prevMsgCountRef.current && prevMsgCountRef.current > 0) {
+      scrollToBottom(true)
+    }
+    prevMsgCountRef.current = chatMessages.length
+  }, [chatMessages, scrollToBottom])
 
   // 4. Cargar plantillas
   const loadTemplates = useCallback(async () => {
@@ -471,6 +502,7 @@ export default function WhatsAppAgentView() {
       createdAt: new Date().toISOString(),
     }
     setChatMessages((prev) => [...prev, optimisticMessage])
+    setTimeout(() => scrollToBottom(true), 30)
 
     setSendingReply(true)
     try {
@@ -530,6 +562,7 @@ export default function WhatsAppAgentView() {
         setSelectedPhone(targetPhone)
         await loadConversations(false)
         await loadMessages(targetPhone, false)
+        setTimeout(() => scrollToBottom(false), 60)
         if (res.orderNumber) {
           toast.success(`¡Orden #${res.orderNumber} creada automáticamente en la sede!`)
         } else {
@@ -1068,7 +1101,10 @@ export default function WhatsAppAgentView() {
                 </div>
 
                 {/* Mensajes del chat scrollables */}
-                <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3 bg-zinc-50/30 dark:bg-zinc-950/20">
+                <div
+                  ref={messagesContainerRef}
+                  className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3 bg-zinc-50/30 dark:bg-zinc-950/20"
+                >
                   {loadingMessages ? (
                     <div className="py-12 text-center space-y-2">
                       <IconRefresh className="h-5 w-5 animate-spin mx-auto text-zinc-400" />
