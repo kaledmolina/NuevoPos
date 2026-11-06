@@ -34,6 +34,19 @@ export interface ConversationItem {
     deliveryAddress: string | null
     createdAt: string
     itemsCount: number
+    paymentMethod: string
+    paymentStatus: string
+    deliveryDriverName: string | null
+    deliveryDriverPhone: string | null
+    deliveryNotes: string | null
+    notes: string | null
+    items?: {
+      id: string
+      name: string
+      quantity: number
+      unitPrice: number
+      subtotal: number
+    }[]
   } | null
   totalOrders: number
 }
@@ -131,7 +144,10 @@ export async function GET(req: NextRequest) {
         },
         orderBy: { createdAt: "desc" },
         take: 1,
-        include: { _count: { select: { items: true } } },
+        include: {
+          _count: { select: { items: true } },
+          items: true,
+        },
       })
 
       const totalOrdersCount = await db.order.count({
@@ -153,6 +169,19 @@ export async function GET(req: NextRequest) {
             deliveryAddress: orders[0].deliveryAddress,
             createdAt: orders[0].createdAt.toISOString(),
             itemsCount: orders[0]._count.items,
+            paymentMethod: orders[0].paymentMethod || "efectivo",
+            paymentStatus: orders[0].paymentStatus || "pendiente",
+            deliveryDriverName: orders[0].deliveryDriverName,
+            deliveryDriverPhone: orders[0].deliveryDriverPhone,
+            deliveryNotes: orders[0].deliveryNotes,
+            notes: orders[0].notes,
+            items: orders[0].items.map((it) => ({
+              id: it.id,
+              name: it.productName,
+              quantity: it.quantity,
+              unitPrice: it.unitPrice,
+              subtotal: it.subtotal,
+            })),
           }
         : null
 

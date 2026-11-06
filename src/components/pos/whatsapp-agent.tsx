@@ -104,6 +104,19 @@ interface Conversation {
     deliveryAddress: string | null
     createdAt: string
     itemsCount: number
+    paymentMethod?: string
+    paymentStatus?: string
+    deliveryDriverName?: string | null
+    deliveryDriverPhone?: string | null
+    deliveryNotes?: string | null
+    notes?: string | null
+    items?: {
+      id: string
+      name: string
+      quantity: number
+      unitPrice: number
+      subtotal: number
+    }[]
   } | null
   totalOrders: number
 }
@@ -215,6 +228,12 @@ export default function WhatsAppAgentView() {
   const [templates, setTemplates] = useState<Template[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("")
   const [sendingBroadcast, setSendingBroadcast] = useState(false)
+
+  // Modal: Detalle y Gestión de Pedido desde el CRM
+  const [orderDetailModalOpen, setOrderDetailModalOpen] = useState(false)
+  const [customerOrdersModalOpen, setCustomerOrdersModalOpen] = useState(false)
+  const [customerOrdersList, setCustomerOrdersList] = useState<any[]>([])
+  const [loadingCustomerOrders, setLoadingCustomerOrders] = useState(false)
 
   // Modal: Simular mensaje entrante
   const [simModalOpen, setSimModalOpen] = useState(false)
@@ -778,18 +797,79 @@ export default function WhatsAppAgentView() {
     }
   }
 
-  // Actualizar estado de pedido en 1 clic
+  // Actualizar estado de envío / pedido en 1 clic
   const handleQuickUpdateOrderStatus = async (orderId: string, newStatus: string) => {
     try {
-      await apiFetch(`/api/v1/delivery/orders/${orderId}/status`, {
+      await apiFetch(`/api/v1/orders/${orderId}/status`, {
         method: "PATCH",
         body: JSON.stringify({ status: newStatus }),
       })
-      toast.success(`Pedido actualizado a "${newStatus}"`)
-      loadConversations()
-      if (selectedPhone) loadMessages(selectedPhone)
+      const labels: Record<string, string> = {
+        pendiente: "Pendiente",
+        confirmado: "Confirmado",
+        en_preparacion: "En Preparación",
+        en_camino: "En Camino con Domiciliario",
+        entregado: "Entregado con Éxito",
+        cancelado: "Cancelado",
+      }
+      toast.success(`Estado de pedido actualizado a: ${labels[newStatus] || newStatus}`)
+      await loadConversations()
+      if (selectedPhone) loadMessages(selectedPhone, true)
     } catch (e) {
-      toast.error("Error al actualizar pedido: " + (e as Error).message)
+      toast.error("Error al actualizar estado de pedido: " + (e as Error).message)
+    }
+  }
+
+  // Actualizar estado de pago en 1 clic (ej: Confirmar Pago / Marcar Pagado)
+  const handleQuickUpdatePaymentStatus = async (orderId: string, paymentStatus: "pagado" | "pendiente", paymentMethod?: string) => {
+    try {
+      await apiFetch(`/api/v1/orders/${orderId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          paymentStatus,
+          ...(paymentMethod ? { paymentMethod } : {}),
+        }),
+      })
+      if (paymentStatus === "pagado") {
+        toast.success("¡Pago verificado y registrado en Ventas oficial!")
+      } else {
+        toast.info("Pago marcado como pendiente")
+      }
+      await loadConversations()
+      if (selectedPhone) loadMessages(selectedPhone, true)
+    } catch (e) {
+      toast.error("Error al actualizar pago: " + (e as Error).message)
+    }
+  }
+
+  // Actualizar método de pago en 1 clic (Efectivo <-> Transferencia)
+  const handleQuickUpdatePaymentMethod = async (orderId: string, paymentMethod: "efectivo" | "transferencia") => {
+    try {
+      await apiFetch(`/api/v1/orders/${orderId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ paymentMethod }),
+      })
+      toast.success(`Forma de pago cambiada a: ${paymentMethod === "transferencia" ? "Transferencia" : "Efectivo"}`)
+      await loadConversations()
+      if (selectedPhone) loadMessages(selectedPhone, true)
+    } catch (e) {
+      toast.error("Error al actualizar forma de pago: " + (e as Error).message)
+    }
+  }
+
+  // Consultar todas las órdenes del cliente activo
+  const handleOpenCustomerOrders = async (phone: string) => {
+    setLoadingCustomerOrders(true)
+    setCustomerOrdersModalOpen(true)
+    try {
+      const res = await apiFetch<{ orders: any[] }>(`/api/v1/delivery/orders?search=${encodeURIComponent(phone)}&pageSize=50`)
+      if (res && res.orders) {
+        setCustomerOrdersList(res.orders)
+      }
+    } catch {
+      // noop
+    } finally {
+      setLoadingCustomerOrders(false)
     }
   }
 
@@ -1476,52 +1556,254 @@ export default function WhatsAppAgentView() {
                     <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
                       Último Pedido a Domicilio
                     </span>
-                    <Badge variant="outline" className="text-[9px] font-mono">
-                      {selectedConv.totalOrders} órdenes
-                    </Badge>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenCustomerOrders(selectedConv.phone)}
+                      className="text-[9px] font-mono px-2 py-0.5 rounded-md border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer flex items-center gap-1"
+                      title="Ver todos los pedidos de este cliente"
+                    >
+                      <IconPackage className="h-3 w-3" />
+                      {selectedConv.totalOrders} {selectedConv.totalOrders === 1 ? "orden" : "órdenes"}
+                    </button>
                   </div>
 
                   {selectedConv.latestOrder ? (
                     <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-800 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono font-bold text-xs text-zinc-950 dark:text-white">
+                      {/* Cabecera del pedido */}
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => setOrderDetailModalOpen(true)}
+                          className="font-mono font-black text-xs text-zinc-950 dark:text-white hover:underline flex items-center gap-1 cursor-pointer"
+                          title="Clic para ver detalle completo"
+                        >
                           #{selectedConv.latestOrder.orderNumber}
-                        </span>
-                        <Badge variant="outline" className="text-[9px] font-mono uppercase">
-                          {selectedConv.latestOrder.status}
-                        </Badge>
+                          <IconExternalLink className="h-3 w-3 text-zinc-400" />
+                        </button>
+                        {/* Badge de Estado de Envío */}
+                        {(() => {
+                          const st = selectedConv.latestOrder.status
+                          if (st === "entregado") {
+                            return <Badge className="text-[9px] font-mono uppercase bg-emerald-600 text-white">✅ Entregado</Badge>
+                          }
+                          if (st === "en_camino") {
+                            return <Badge className="text-[9px] font-mono uppercase bg-purple-600 text-white">🛵 En Camino</Badge>
+                          }
+                          if (st === "en_preparacion") {
+                            return <Badge className="text-[9px] font-mono uppercase bg-indigo-600 text-white">📦 Preparando</Badge>
+                          }
+                          if (st === "confirmado") {
+                            return <Badge className="text-[9px] font-mono uppercase bg-blue-600 text-white">👍 Confirmado</Badge>
+                          }
+                          if (st === "cancelado") {
+                            return <Badge className="text-[9px] font-mono uppercase bg-rose-600 text-white">❌ Cancelado</Badge>
+                          }
+                          return <Badge className="text-[9px] font-mono uppercase bg-amber-500 text-white">🕒 Pendiente</Badge>
+                        })()}
                       </div>
 
-                      <div className="flex items-center justify-between text-xs">
+                      {/* Total del Pedido */}
+                      <div className="flex items-center justify-between text-xs pt-0.5">
                         <span className="text-zinc-500">Total a Cobrar:</span>
-                        <span className="font-bold font-mono text-zinc-950 dark:text-white">
+                        <span className="font-black font-mono text-sm text-zinc-950 dark:text-white">
                           {formatCurrency(selectedConv.latestOrder.total)}
                         </span>
                       </div>
 
-                      {/* Stepper de 1 clic para cambiar estado del pedido */}
+                      {/* SECCIÓN 1: CONTROL Y CONFIRMACIÓN DE PAGO */}
+                      <div
+                        className={cn(
+                          "p-2.5 rounded-xl border space-y-2 text-xs transition-all",
+                          selectedConv.latestOrder.paymentStatus === "pagado"
+                            ? "bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50"
+                            : selectedConv.latestOrder.paymentMethod === "transferencia"
+                            ? "bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/50"
+                            : "bg-blue-50/60 dark:bg-zinc-900 border-blue-200 dark:border-zinc-800"
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-1 flex-wrap">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                            Estado del Pago
+                          </span>
+                          {selectedConv.latestOrder.paymentStatus === "pagado" ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-600 text-white shadow-2xs">
+                              <IconCheck className="h-3 w-3" /> Pagado / Confirmado
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500 text-white shadow-2xs">
+                              Pendiente de Pago
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Medio de pago toggle rápido */}
+                        <div className="flex items-center justify-between text-[11px] gap-2 pt-0.5">
+                          <span className="text-zinc-500">Medio de Pago:</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleQuickUpdatePaymentMethod(selectedConv.latestOrder!.id, "efectivo")}
+                              className={cn(
+                                "px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer",
+                                selectedConv.latestOrder.paymentMethod !== "transferencia"
+                                  ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 font-bold"
+                                  : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700"
+                              )}
+                            >
+                              💵 Efectivo
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickUpdatePaymentMethod(selectedConv.latestOrder!.id, "transferencia")}
+                              className={cn(
+                                "px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer",
+                                selectedConv.latestOrder.paymentMethod === "transferencia"
+                                  ? "bg-purple-600 text-white font-bold"
+                                  : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700"
+                              )}
+                            >
+                              💳 Transferencia
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Explicación de cobro domiciliario */}
+                        <div className="text-[11px] leading-snug">
+                          {selectedConv.latestOrder.paymentStatus === "pagado" ? (
+                            <p className="text-emerald-700 dark:text-emerald-300 font-medium">
+                              ✓ Pago liquidado. El domiciliario <strong>NO debe cobrar</strong> dinero ($0 COP). Sincronizado a Ventas.
+                            </p>
+                          ) : selectedConv.latestOrder.paymentMethod === "transferencia" ? (
+                            <p className="text-amber-700 dark:text-amber-300 font-medium">
+                              ⚠️ Pago por transferencia. Verifica el comprobante antes de despachar el pedido.
+                            </p>
+                          ) : (
+                            <p className="text-blue-700 dark:text-blue-300 font-medium">
+                              💵 Cobro contraentrega: El domiciliario <strong>DEBE cobrar {formatCurrency(selectedConv.latestOrder.total)}</strong> al entregar.
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Botón de Confirmación de Pago */}
+                        {selectedConv.latestOrder.paymentStatus !== "pagado" ? (
+                          <Button
+                            size="sm"
+                            type="button"
+                            onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pagado")}
+                            className="w-full h-7 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-2xs gap-1.5 cursor-pointer mt-1"
+                          >
+                            <IconCheck className="h-3.5 w-3.5" />
+                            Confirmar Pago Recibido (Marcar Pagado)
+                          </Button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pendiente")}
+                            className="text-[10px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 underline cursor-pointer block pt-0.5 text-center w-full"
+                          >
+                            Revertir a pago pendiente
+                          </button>
+                        )}
+                      </div>
+
+                      {/* SECCIÓN 2: CAMBIAR ESTADO DE ENVÍO */}
                       <div className="pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 space-y-1.5">
-                        <span className="text-[10px] font-bold text-zinc-400 block">Cambiar estado rápido:</span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">
+                            Estado de Envío:
+                          </span>
+                          <span className="text-[10px] text-zinc-400">1 clic para cambiar</span>
+                        </div>
                         <div className="grid grid-cols-3 gap-1">
                           <button
+                            type="button"
                             onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "en_preparacion")}
-                            className="py-1 px-1 rounded-md text-[10px] font-semibold bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100 transition-colors"
+                            className={cn(
+                              "py-1 px-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer",
+                              selectedConv.latestOrder.status === "en_preparacion"
+                                ? "bg-indigo-600 text-white font-bold shadow-2xs"
+                                : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100"
+                            )}
                           >
-                            Preparar
+                            📦 Preparar
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "en_camino")}
-                            className="py-1 px-1 rounded-md text-[10px] font-semibold bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-white dark:hover:bg-zinc-100 dark:text-zinc-950 transition-colors"
+                            className={cn(
+                              "py-1 px-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer",
+                              selectedConv.latestOrder.status === "en_camino"
+                                ? "bg-purple-600 text-white font-bold shadow-2xs"
+                                : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100"
+                            )}
                           >
-                            En Camino
+                            🛵 En Camino
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "entregado")}
-                            className="py-1 px-1 rounded-md text-[10px] font-semibold bg-zinc-950 hover:bg-zinc-800 text-white dark:bg-white dark:hover:bg-zinc-100 dark:text-zinc-950 transition-colors"
+                            className={cn(
+                              "py-1 px-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer",
+                              selectedConv.latestOrder.status === "entregado"
+                                ? "bg-emerald-600 text-white font-bold shadow-2xs"
+                                : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100"
+                            )}
                           >
-                            Entregado
+                            ✅ Entregado
                           </button>
                         </div>
+                        <div className="flex items-center justify-between pt-1 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "pendiente")}
+                            className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white underline cursor-pointer"
+                          >
+                            🕒 Dejar Pendiente
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (confirm("¿Estás seguro de cancelar este pedido? Se restaurará el inventario.")) {
+                                handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "cancelado")
+                              }
+                            }}
+                            className="text-rose-500 hover:text-rose-700 underline cursor-pointer"
+                          >
+                            ❌ Cancelar Pedido
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* SECCIÓN 3: REPARTIDOR & PRODUCTOS */}
+                      <div className="pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 space-y-1.5 text-[11px]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-zinc-500 flex items-center gap-1">
+                            <IconTruckDelivery className="h-3.5 w-3.5" /> Domiciliario:
+                          </span>
+                          <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                            {selectedConv.latestOrder.deliveryDriverName || "Sin conductor"}
+                          </span>
+                        </div>
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-zinc-500 shrink-0 flex items-center gap-1">
+                            <IconMapPin className="h-3.5 w-3.5" /> Entrega:
+                          </span>
+                          <span className="font-medium text-right text-zinc-900 dark:text-zinc-100 line-clamp-2">
+                            {selectedConv.latestOrder.deliveryAddress || "Dirección según chat"}
+                          </span>
+                        </div>
+
+                        {/* Botón para ver items */}
+                        <Button
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                          onClick={() => setOrderDetailModalOpen(true)}
+                          className="w-full h-7 text-[11px] rounded-lg mt-1 gap-1 cursor-pointer"
+                        >
+                          <IconFileText className="h-3 w-3" />
+                          Ver Detalle Completo ({selectedConv.latestOrder.itemsCount} productos)
+                        </Button>
                       </div>
                     </div>
                   ) : (
@@ -2470,6 +2752,313 @@ export default function WhatsAppAgentView() {
               className="bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 font-bold"
             >
               {sendingBroadcast ? "Enviando…" : "Enviar por WhatsApp"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal 4: Detalle Completo y Gestión del Pedido */}
+      <Dialog open={orderDetailModalOpen} onOpenChange={setOrderDetailModalOpen}>
+        <DialogContent className="max-w-lg rounded-2xl">
+          {selectedConv?.latestOrder && (
+            <>
+              <DialogHeader>
+                <div className="flex items-center justify-between">
+                  <DialogTitle className="text-base font-bold flex items-center gap-2">
+                    <IconPackage className="h-4 w-4" /> Pedido #{selectedConv.latestOrder.orderNumber}
+                  </DialogTitle>
+                  <Badge variant="outline" className="font-mono text-[10px]">
+                    {new Date(selectedConv.latestOrder.createdAt).toLocaleDateString([], {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </Badge>
+                </div>
+                <DialogDescription className="text-xs">
+                  Cliente: <strong>{selectedConv.client?.name || selectedConv.phone}</strong> · Sede:{" "}
+                  <strong>{activeBranch?.name || "Principal"}</strong>
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-3.5 pt-2 text-xs">
+                {/* 1. Control de Pago en Modal */}
+                <div
+                  className={cn(
+                    "p-3 rounded-xl border space-y-2",
+                    selectedConv.latestOrder.paymentStatus === "pagado"
+                      ? "bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50"
+                      : selectedConv.latestOrder.paymentMethod === "transferencia"
+                      ? "bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/50"
+                      : "bg-blue-50/60 dark:bg-zinc-900 border-blue-200 dark:border-zinc-800"
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[11px] uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
+                      Gestión de Pago
+                    </span>
+                    {selectedConv.latestOrder.paymentStatus === "pagado" ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-600 text-white">
+                        <IconCheck className="h-3 w-3" /> Pago Confirmado / Pagado
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500 text-white">
+                        Pendiente de Pago
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs pt-1">
+                    <span className="text-zinc-500">Forma de pago registrada:</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleQuickUpdatePaymentMethod(selectedConv.latestOrder!.id, "efectivo")}
+                        className={cn(
+                          "px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer",
+                          selectedConv.latestOrder.paymentMethod !== "transferencia"
+                            ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 font-bold"
+                            : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border"
+                        )}
+                      >
+                        💵 Efectivo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickUpdatePaymentMethod(selectedConv.latestOrder!.id, "transferencia")}
+                        className={cn(
+                          "px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer",
+                          selectedConv.latestOrder.paymentMethod === "transferencia"
+                            ? "bg-purple-600 text-white font-bold"
+                            : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border"
+                        )}
+                      >
+                        💳 Transferencia
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="pt-1">
+                    {selectedConv.latestOrder.paymentStatus !== "pagado" ? (
+                      <Button
+                        size="sm"
+                        onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pagado")}
+                        className="w-full h-8 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl gap-1.5 cursor-pointer shadow-2xs"
+                      >
+                        <IconCheck className="h-4 w-4" />
+                        Confirmar Pago Recibido (Marcar Pagado y Pasar a Ventas)
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pendiente")}
+                        className="w-full h-7 text-[11px] text-zinc-600 dark:text-zinc-300 border-zinc-300 dark:border-zinc-700 cursor-pointer"
+                      >
+                        Revertir estado a Pendiente de Pago
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. Control de Estado de Envío */}
+                <div className="space-y-1.5 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[11px] uppercase tracking-wider text-zinc-500">
+                      Estado del Domicilio / Envío
+                    </span>
+                    <Badge variant="outline" className="font-mono text-[10px] uppercase">
+                      Actual: {selectedConv.latestOrder.status}
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5 pt-1">
+                    {[
+                      { key: "pendiente", label: "🕒 Pendiente" },
+                      { key: "en_preparacion", label: "📦 Preparar" },
+                      { key: "en_camino", label: "🛵 En Camino" },
+                      { key: "entregado", label: "✅ Entregado" },
+                    ].map((st) => (
+                      <button
+                        key={st.key}
+                        type="button"
+                        onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, st.key)}
+                        className={cn(
+                          "py-1.5 px-1 rounded-lg text-[10px] font-semibold text-center transition-all cursor-pointer",
+                          selectedConv.latestOrder?.status === st.key
+                            ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 font-bold shadow-2xs"
+                            : "bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100"
+                        )}
+                      >
+                        {st.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 3. Items del Pedido */}
+                <div className="space-y-1.5">
+                  <span className="font-bold text-[11px] uppercase tracking-wider text-zinc-400 block">
+                    Productos Solicitados ({selectedConv.latestOrder.items?.length || selectedConv.latestOrder.itemsCount})
+                  </span>
+                  <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 max-h-48 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800">
+                    {selectedConv.latestOrder.items && selectedConv.latestOrder.items.length > 0 ? (
+                      selectedConv.latestOrder.items.map((it) => (
+                        <div key={it.id} className="py-1.5 flex items-center justify-between text-xs">
+                          <div>
+                            <span className="font-bold text-zinc-950 dark:text-white">
+                              {it.quantity} × {it.name}
+                            </span>
+                            <span className="text-[10px] text-zinc-400 block font-mono">
+                              Unitario: {formatCurrency(it.unitPrice)}
+                            </span>
+                          </div>
+                          <span className="font-mono font-bold text-zinc-950 dark:text-white">
+                            {formatCurrency(it.subtotal)}
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-zinc-400 py-2 text-center text-xs">Desglose de productos registrado en orden</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* 4. Datos de Entrega y Notas */}
+                <div className="space-y-1 text-xs text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-950 p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                  <p>
+                    <strong>Dirección de Entrega:</strong>{" "}
+                    {selectedConv.latestOrder.deliveryAddress || "Dirección según conversación"}
+                  </p>
+                  {selectedConv.latestOrder.deliveryDriverName && (
+                    <p>
+                      <strong>Domiciliario Asignado:</strong> {selectedConv.latestOrder.deliveryDriverName}{" "}
+                      {selectedConv.latestOrder.deliveryDriverPhone ? `(${selectedConv.latestOrder.deliveryDriverPhone})` : ""}
+                    </p>
+                  )}
+                  {selectedConv.latestOrder.deliveryNotes && (
+                    <p className="text-[11px] text-zinc-500 italic">
+                      <strong>Instrucciones:</strong> {selectedConv.latestOrder.deliveryNotes}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button variant="outline" size="sm" onClick={() => setOrderDetailModalOpen(false)}>
+                  Cerrar
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal 5: Historial de Órdenes del Cliente */}
+      <Dialog open={customerOrdersModalOpen} onOpenChange={setCustomerOrdersModalOpen}>
+        <DialogContent className="max-w-2xl rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <IconPackage className="h-4 w-4" /> Historial de Pedidos del Cliente
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Todos los pedidos registrados para <strong>{selectedConv?.client?.name || selectedConv?.phone}</strong> en esta sede.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 pt-2 max-h-[60vh] overflow-y-auto">
+            {loadingCustomerOrders ? (
+              <div className="py-8 text-center text-zinc-400 text-xs">
+                <IconRefresh className="h-5 w-5 animate-spin mx-auto mb-2 text-zinc-400" />
+                Cargando pedidos del cliente…
+              </div>
+            ) : customerOrdersList.length === 0 ? (
+              <div className="py-8 text-center text-zinc-400 text-xs">
+                No se encontraron órdenes registradas para este número.
+              </div>
+            ) : (
+              customerOrdersList.map((ord) => (
+                <div
+                  key={ord.id}
+                  className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/50 space-y-2 text-xs"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-bold text-zinc-950 dark:text-white">
+                      #{ord.orderNumber}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <Badge variant="outline" className="text-[9px] uppercase font-mono">
+                        {ord.status}
+                      </Badge>
+                      {ord.paymentStatus === "pagado" ? (
+                        <Badge className="text-[9px] bg-emerald-600 text-white font-mono">
+                          Pagado
+                        </Badge>
+                      ) : (
+                        <Badge className="text-[9px] bg-amber-500 text-white font-mono">
+                          {ord.paymentMethod === "transferencia" ? "Transf. Pendiente" : "Efectivo Pendiente"}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                    <span>{new Date(ord.createdAt).toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                    <span className="font-mono font-bold text-zinc-950 dark:text-white text-xs">
+                      {formatCurrency(ord.total)}
+                    </span>
+                  </div>
+
+                  {/* Acciones rápidas para esta orden */}
+                  <div className="flex items-center justify-between pt-1 border-t border-zinc-200/60 dark:border-zinc-800/60">
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleQuickUpdateOrderStatus(ord.id, "en_preparacion")}
+                        className="px-2 py-0.5 rounded text-[10px] font-semibold bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 transition-colors"
+                      >
+                        Preparar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickUpdateOrderStatus(ord.id, "en_camino")}
+                        className="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 hover:bg-purple-200 transition-colors"
+                      >
+                        En Camino
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickUpdateOrderStatus(ord.id, "entregado")}
+                        className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 hover:bg-emerald-200 transition-colors"
+                      >
+                        Entregado
+                      </button>
+                    </div>
+
+                    {ord.paymentStatus !== "pagado" && (
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          handleQuickUpdatePaymentStatus(ord.id, "pagado")
+                          setCustomerOrdersList((prev) =>
+                            prev.map((o) => (o.id === ord.id ? { ...o, paymentStatus: "pagado" } : o))
+                          )
+                        }}
+                        className="h-6 text-[10px] px-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg"
+                      >
+                        <IconCheck className="h-3 w-3 mr-0.5" /> Confirmar Pago
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <DialogFooter className="pt-2">
+            <Button variant="outline" size="sm" onClick={() => setCustomerOrdersModalOpen(false)}>
+              Cerrar
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -17,11 +17,12 @@ export async function PATCH(
     const { id } = await params
     const body = await req.json().catch(() => ({}))
 
-    const newStatus = (body.status || "").toString().trim().toLowerCase()
+    const rawStatus = body.status ? String(body.status).trim().toLowerCase() : null
     const cancelReason = body.cancelReason ? String(body.cancelReason).trim() : null
-    const paymentStatus = body.paymentStatus ? String(body.paymentStatus).trim() : null
+    const paymentStatus = body.paymentStatus ? String(body.paymentStatus).trim().toLowerCase() : null
+    const paymentMethod = body.paymentMethod ? String(body.paymentMethod).trim().toLowerCase() : null
 
-    if (!newStatus || !VALID_STATUSES.includes(newStatus)) {
+    if (rawStatus && !VALID_STATUSES.includes(rawStatus)) {
       return apiError(`Estado inválido. Estados permitidos: ${VALID_STATUSES.join(", ")}`, 400)
     }
 
@@ -38,6 +39,8 @@ export async function PATCH(
       return apiError("Pedido no encontrado", 404)
     }
 
+    const newStatus = rawStatus || order.status
+
     // Seguridad: verificar pertenencia al negocio si es admin o vendedor
     if (
       session &&
@@ -49,18 +52,18 @@ export async function PATCH(
       return apiError("No tienes autorización para modificar pedidos de otro comercio", 403)
     }
 
-    if (order.status === "cancelado") {
+    if (order.status === "cancelado" && rawStatus && rawStatus !== "cancelado") {
       return apiError("Este pedido ya se encuentra cancelado y no puede cambiar de estado", 400)
     }
 
-    if (order.status === "entregado" && newStatus !== "entregado") {
-      return apiError("Este pedido ya ha sido entregado exitosamente y su ciclo ha concluido", 400)
+    if (order.status === "entregado" && rawStatus && rawStatus !== "entregado") {
+      return apiError("Este pedido ya ha sido entregado exitosamente y no puede retroceder de estado", 400)
     }
 
     // Permisos:
     // Si es cliente, solo puede cancelar si el pedido sigue en "pendiente"
     if (session && session.role === "cliente") {
-      if (newStatus !== "cancelado") {
+      if (rawStatus && rawStatus !== "cancelado") {
         return apiError("Los clientes solo pueden solicitar la cancelación de sus pedidos pendientes", 403)
       }
       if (order.status !== "pendiente") {
@@ -70,31 +73,34 @@ export async function PATCH(
 
     // Si es domiciliario, puede cambiar entre en_preparacion -> en_camino -> entregado
     if (session && session.role === "domiciliario") {
-      if (!["en_camino", "entregado"].includes(newStatus)) {
+      if (rawStatus && !["en_camino", "entregado"].includes(rawStatus)) {
         return apiError("Los domiciliarios solo pueden actualizar pedidos a 'en_camino' o 'entregado'", 403)
       }
     }
 
-    const updateData: Record<string, unknown> = {
-      status: newStatus,
+    const updateData: Record<string, unknown> = {}
+
+    if (rawStatus) {
+      updateData.status = newStatus
+      if (newStatus === "en_camino" && !order.dispatchedAt) {
+        updateData.dispatchedAt = new Date()
+      }
+      if (newStatus === "entregado") {
+        updateData.deliveredAt = new Date()
+        updateData.paymentStatus = "pagado"
+      }
+      if (newStatus === "cancelado") {
+        updateData.cancelledAt = new Date()
+        updateData.cancelReason = cancelReason || "Cancelado por solicitud del usuario"
+      }
     }
 
     if (paymentStatus) {
       updateData.paymentStatus = paymentStatus
     }
 
-    if (newStatus === "en_camino" && !order.dispatchedAt) {
-      updateData.dispatchedAt = new Date()
-    }
-
-    if (newStatus === "entregado") {
-      updateData.deliveredAt = new Date()
-      updateData.paymentStatus = "pagado"
-    }
-
-    if (newStatus === "cancelado") {
-      updateData.cancelledAt = new Date()
-      updateData.cancelReason = cancelReason || "Cancelado por solicitud del usuario"
+    if (paymentMethod) {
+      updateData.paymentMethod = paymentMethod
     }
 
     // Transacción: si se cancela, restaurar stock de los productos
