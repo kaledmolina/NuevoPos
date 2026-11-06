@@ -359,8 +359,12 @@ export default function OrdersView() {
 
   // Abrir modal de asignación de conductor
   const handleOpenAssign = (order: Order) => {
+    if (order.status === "cancelado") {
+      toast.error("No se puede asignar conductor a un pedido cancelado")
+      return
+    }
     setSelectedOrder(order)
-    setDispatchNow(order.status !== "en_camino")
+    setDispatchNow(order.status !== "en_camino" && order.status !== "entregado")
 
     // Si ya tiene conductor asignado, prellenar
     if (order.deliveryDriverId && staffDrivers.some((d) => d.id === order.deliveryDriverId)) {
@@ -427,7 +431,7 @@ export default function OrdersView() {
       })
 
       // 2. Si se marcó despacho inmediato, cambiar estado a 'en_camino'
-      if (dispatchNow && selectedOrder.status !== "en_camino") {
+      if (dispatchNow && !["en_camino", "entregado", "cancelado"].includes(selectedOrder.status)) {
         await apiFetch(`/api/v1/orders/${selectedOrder.id}/status`, {
           method: "PATCH",
           body: JSON.stringify({
@@ -1550,21 +1554,30 @@ export default function OrdersView() {
                 </div>
               )}
 
-              {/* Checkbox: Despachar de inmediato */}
-              <label className="flex items-center gap-2.5 p-3 rounded-xl border bg-muted/20 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={dispatchNow}
-                  onChange={(e) => setDispatchNow(e.target.checked)}
-                  className="rounded h-4 w-4 text-foreground focus:ring-foreground"
-                />
-                <div className="text-xs">
-                  <p className="font-bold text-foreground">Marcar como "En Camino" de inmediato</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    El pedido cambiará de estado y registrará la hora de salida del repartidor.
+              {/* Checkbox: Despachar de inmediato (solo si el pedido aún no está entregado) */}
+              {selectedOrder.status !== "entregado" ? (
+                <label className="flex items-center gap-2.5 p-3 rounded-xl border bg-muted/20 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={dispatchNow}
+                    onChange={(e) => setDispatchNow(e.target.checked)}
+                    className="rounded h-4 w-4 text-foreground focus:ring-foreground"
+                  />
+                  <div className="text-xs">
+                    <p className="font-bold text-foreground">Marcar como "En Camino" de inmediato</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      El pedido cambiará de estado y registrará la hora de salida del repartidor.
+                    </p>
+                  </div>
+                </label>
+              ) : (
+                <div className="p-3 rounded-xl border bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300 text-xs">
+                  <p className="font-bold">Pedido ya entregado</p>
+                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                    Se actualizará el conductor asignado en el registro histórico sin alterar el estado de entrega.
                   </p>
                 </div>
-              </label>
+              )}
             </div>
           )}
 

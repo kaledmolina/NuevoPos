@@ -36,8 +36,12 @@ export async function POST(
       return apiError("No tienes autorización para modificar pedidos de otro comercio", 403)
     }
 
-    if (["entregado", "cancelado"].includes(order.status)) {
-      return apiError(`No se puede asignar un domiciliario a un pedido ${order.status}`, 400)
+    if (order.status === "cancelado") {
+      return apiError("No se puede asignar un domiciliario a un pedido cancelado", 400)
+    }
+
+    if (order.status === "entregado" && session.role === "domiciliario") {
+      return apiError("Los domiciliarios no pueden auto-asignarse un pedido que ya figura como entregado", 403)
     }
 
     let driverId = (body.driverId || "").toString().trim()
