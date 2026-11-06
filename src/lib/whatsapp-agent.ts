@@ -2,7 +2,7 @@ import { db } from "@/lib/db"
 
 export interface BotProcessResult {
   reply: string
-  actionTaken?: "order_created" | "stock_checked" | "credit_checked" | "menu_shown" | "registered_client" | "ai_answered"
+  actionTaken?: "order_created" | "stock_checked" | "credit_checked" | "menu_shown" | "registered_client" | "ai_answered" | "order_status_checked"
   orderNumber?: string
   total?: number
   items?: { name: string; quantity: number; subtotal: number }[]
@@ -145,7 +145,49 @@ export async function processWhatsAppMessage(params: {
       }
     }
 
-    // Regla 2: Pedido a domicilio por reglas
+    // Regla 2: Seguimiento de pedido activo en tiempo real
+    else if (
+      lowerText.includes("como va") ||
+      lowerText.includes("mi pedido") ||
+      lowerText.includes("mi orden") ||
+      lowerText.includes("donde esta") ||
+      lowerText.includes("donde viene") ||
+      lowerText.includes("ya salio") ||
+      lowerText.includes("estado de mi")
+    ) {
+      const lastOrder = await db.order.findFirst({
+        where: {
+          OR: [{ customerPhone: cleanPhone }, ...(client.id ? [{ clientId: client.id }] : [])],
+          ...(branchFilter || {}),
+        },
+        orderBy: { createdAt: "desc" },
+      })
+
+      if (lastOrder) {
+        const statusMap: Record<string, string> = {
+          pendiente: "🟡 Pendiente (En cola de atención en tienda)",
+          confirmado: "🟢 Confirmado (Confirmado en tienda)",
+          en_preparacion: "🔵 En Preparación (Empacando tus productos)",
+          en_camino: "🟣 En Camino (Despachado y en ruta hacia tu dirección)",
+          entregado: "✅ Entregado (Completado con éxito)",
+          cancelado: "🔴 Cancelado",
+        }
+        const stText = statusMap[lastOrder.status] || lastOrder.status.toUpperCase()
+        const driver = lastOrder.deliveryDriverName ? `\n🛵 *Repartidor:* ${lastOrder.deliveryDriverName}` : ""
+        result = {
+          reply: `📦 *Estado de tu Pedido #${lastOrder.orderNumber}*\n\n⏱️ *Estado actual:* ${stText}${driver}\n📍 *Dirección:* ${lastOrder.deliveryAddress || "N/A"}\n💵 *Total:* $${lastOrder.total.toLocaleString("es-CO")} (${lastOrder.paymentMethod})\n\n¡Gracias por tu paciencia! Ante cualquier duda estamos a tu servicio.`,
+          actionTaken: "order_status_checked",
+          orderNumber: lastOrder.orderNumber,
+        }
+      } else {
+        result = {
+          reply: `👋 Hola, *${client.name}*. No encontramos ningún pedido activo a tu nombre en este momento.\n\n¿Deseas pedir algún producto a domicilio?`,
+          actionTaken: "order_status_checked",
+        }
+      }
+    }
+
+    // Regla 3: Pedido a domicilio por reglas
     else if (
       (lowerText.includes("manda") ||
         lowerText.includes("envia") ||
@@ -398,6 +440,42 @@ async function processWithLLMAI(params: {
 
   const clientBalance = client.creditAccount?.balance || 0
 
+  // 1.1 Consultar el pedido más reciente del cliente para trazabilidad y estado en tiempo real
+  const activeOrder = await db.order.findFirst({
+    where: {
+      OR: [
+        { customerPhone: cleanPhone },
+        ...(client.id ? [{ clientId: client.id }] : []),
+      ],
+      ...(branchFilter || {}),
+    },
+    orderBy: { createdAt: "desc" },
+    include: {
+      items: true,
+    },
+  })
+
+  let orderTrackingContext = "El cliente no tiene pedidos registrados en el sistema."
+  if (activeOrder) {
+    const statusMap: Record<string, string> = {
+      pendiente: "🟡 Pendiente (Recibido en tienda, en fila de alistamiento)",
+      confirmado: "🟢 Confirmado (Confirmado por el comercio)",
+      en_preparacion: "🔵 En Preparación (Empacando y alistando en el local)",
+      en_camino: "🟣 En Camino (Despachado y en ruta hacia tu dirección)",
+      entregado: "✅ Entregado (Completado y entregado con éxito)",
+      cancelado: "🔴 Cancelado",
+    }
+    const currentStatusDesc = statusMap[activeOrder.status] || activeOrder.status.toUpperCase()
+    const driverText = activeOrder.deliveryDriverName ? ` | Repartidor asignado: ${activeOrder.deliveryDriverName}` : ""
+    const itemsText = activeOrder.items.map((i) => `${i.quantity}x ${i.productName}`).join(", ")
+
+    orderTrackingContext = `Orden #${activeOrder.orderNumber}:
+- Estado actual en tiempo real: ${currentStatusDesc}
+- Productos: ${itemsText}
+- Total: $${activeOrder.total.toLocaleString("es-CO")} (${activeOrder.paymentMethod})
+- Dirección de entrega: ${activeOrder.deliveryAddress || "N/A"}${driverText}`
+  }
+
   // 2. Historial condensado: Últimos 4 mensajes (ahorro de tokens)
   const recentMsgs = await db.whatsAppMessage.findMany({
     where: { phone: cleanPhone },
@@ -413,7 +491,7 @@ async function processWithLLMAI(params: {
 
   // 3. Prompt de sistema ultra-conciso y optimizado
   const systemPrompt = `Eres el asistente virtual comercial de "${branchName}" por WhatsApp.
-Tu misión: Atender con calidez, consultar precios, sugerir productos y tomar pedidos a domicilio.
+Tu misión: Atender con calidez, consultar precios, sugerir productos, dar estado de pedidos en tiempo real y tomar órdenes a domicilio.
 
 REGLAS DE ORO (Ahorro de tokens y precisión):
 1. Responde SIEMPRE en español de forma concisa (MÁXIMO 3 líneas o viñetas limpias de WhatsApp).
@@ -425,7 +503,19 @@ REGLAS DE ORO (Ahorro de tokens y precisión):
 - Si el cliente quiere pedir pero NO indicó cómo pagará, pregúntale: "¿Cómo deseas pagar? ¿En efectivo o transferencia (Nequi / Daviplata)? Si es en efectivo, ¿con cuánto cancelas para llevarte el cambio?".
 - Si el cliente ya indicó productos válidos, dirección y método de pago (o si ya confirmó su pedido), confirma el resumen y añade al final de tu respuesta EXACTAMENTE este bloque técnico:
 [ORDEN_AUTO: {"items": [{"name": "nombre del producto del catalogo", "qty": 1}], "address": "dirección completa", "paymentMethod": "efectivo" | "transferencia", "cashPaid": 50000}]
+7. CONSULTAS Y ESTADO DE PEDIDOS (TRAZABILIDAD EN TIEMPO REAL):
+Si el cliente pregunta cómo va su pedido, dónde está, si ya salió o por el estado de su orden:
+- Consulta OBLIGATORIAMENTE la sección "ÚLTIMO PEDIDO DEL CLIENTE" abajo.
+- Si el estado es "En Camino": Infórmale con alegría que su pedido #${activeOrder?.orderNumber || ""} YA ESTÁ EN CAMINO a su dirección (${activeOrder?.deliveryAddress || ""})${activeOrder?.deliveryDriverName ? ` con el repartidor ${activeOrder.deliveryDriverName}` : ""} 🛵.
+- Si el estado es "En Preparación": Indícale que lo estamos alistando y empacando en la tienda y pronto saldrá a reparto.
+- Si el estado es "Pendiente" o "Confirmado": Indícale que fue recibido y está en fila de alistamiento.
+- Si el estado es "Entregado": Confírmale que figura entregado con éxito.
+- NUNCA inventes que está en proceso si ya está "En Camino".
+
 ${config.aiSystemPrompt ? `Instrucciones especiales de la sede: ${config.aiSystemPrompt}` : ""}${specificNotFoundNote}
+
+ÚLTIMO PEDIDO DEL CLIENTE:
+${orderTrackingContext}
 
 CATÁLOGO DE ESTA SEDE (${branchName}):
 ${catalogContext}`
