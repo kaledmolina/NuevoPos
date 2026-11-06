@@ -279,3 +279,61 @@ export async function POST(req: NextRequest) {
     )
   }
 }
+
+/**
+ * DELETE: Limpiar historial de mensajes de un chat o eliminar contacto completo del CRM
+ */
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url)
+    const phone = searchParams.get("phone")
+    const action = searchParams.get("action") || "clear_chat" // "clear_chat" | "delete_contact"
+
+    if (!phone) {
+      return NextResponse.json({ error: "El teléfono es requerido" }, { status: 400 })
+    }
+
+    const cleanPhone = String(phone).replace(/[^0-9+]/g, "")
+    const altPhone = cleanPhone.replace("+", "")
+
+    // 1. Eliminar todos los mensajes asociados a este teléfono
+    const deletedMsgs = await db.whatsAppMessage.deleteMany({
+      where: {
+        OR: [{ phone: cleanPhone }, { phone: altPhone }],
+      },
+    })
+
+    // 2. Si se solicitó eliminar el contacto completamente
+    if (action === "delete_contact") {
+      const client = await db.client.findFirst({
+        where: {
+          OR: [{ phone: cleanPhone }, { phone: altPhone }],
+        },
+      })
+
+      if (client) {
+        // Desvincular o eliminar cuenta fiado
+        await db.creditAccount.deleteMany({ where: { clientId: client.id } }).catch(() => {})
+        // Desvincular órdenes
+        await db.order.updateMany({ where: { clientId: client.id }, data: { clientId: null } }).catch(() => {})
+        // Eliminar cliente
+        await db.client.delete({ where: { id: client.id } }).catch(() => {})
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      deletedMessagesCount: deletedMsgs.count,
+      actionTaken: action,
+      message:
+        action === "delete_contact"
+          ? "Contacto y conversaciones eliminados con éxito"
+          : "Historial de chat limpiado con éxito",
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Error al procesar eliminación: " + (error as Error).message },
+      { status: 500 }
+    )
+  }
+}

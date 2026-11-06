@@ -44,9 +44,12 @@ export async function GET(req: NextRequest) {
           ]
         }
       } else if (session.role === "admin" || session.role === "vendedor") {
-        // Administradores y vendedores ven los pedidos de su propio negocio
+        // Administradores y vendedores ven los pedidos de su propio negocio (por tenant directo o por su sede)
         if (session.tenantId) {
-          where.tenantId = session.tenantId
+          where.OR = [
+            { tenantId: session.tenantId },
+            { branch: { tenantId: session.tenantId } },
+          ]
         }
       }
     }

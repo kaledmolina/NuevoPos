@@ -28,6 +28,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
   IconBrandWhatsapp,
   IconSend,
   IconRobot,
@@ -50,6 +57,8 @@ import {
   IconSpeakerphone,
   IconDotsVertical,
   IconPencil,
+  IconTrash,
+  IconUserX,
   IconFileText,
   IconBuildingStore,
   IconKey,
@@ -525,6 +534,43 @@ export default function WhatsAppAgentView() {
     setContactModalOpen(true)
   }
 
+  // Vaciar mensajes del chat
+  const handleClearChat = async () => {
+    if (!selectedPhone) return
+    if (!window.confirm("¿Estás seguro de que deseas vaciar todos los mensajes de este chat? Esta acción no se puede deshacer.")) {
+      return
+    }
+    try {
+      await apiFetch(`/api/whatsapp/conversations?phone=${encodeURIComponent(selectedPhone)}&action=clear_chat`, {
+        method: "DELETE",
+      })
+      toast.success("Historial de mensajes vaciado correctamente")
+      setChatMessages([])
+      loadConversations(false)
+    } catch (err: any) {
+      toast.error(err.message || "Error al vaciar el chat")
+    }
+  }
+
+  // Eliminar contacto por completo del CRM
+  const handleDeleteContact = async () => {
+    if (!selectedPhone) return
+    if (!window.confirm("¿Eliminar este contacto y todo su historial? Se borrarán sus mensajes y el registro del cliente.")) {
+      return
+    }
+    try {
+      await apiFetch(`/api/whatsapp/conversations?phone=${encodeURIComponent(selectedPhone)}&action=delete_contact`, {
+        method: "DELETE",
+      })
+      toast.success("Contacto eliminado con éxito")
+      setSelectedPhone(null)
+      setChatMessages([])
+      loadConversations(false)
+    } catch (err: any) {
+      toast.error(err.message || "Error al eliminar el contacto")
+    }
+  }
+
   // Enviar campaña de promoción
   const handleSendBroadcast = async (onlyCurrentContact = true) => {
     if (!selectedTemplateId) {
@@ -912,6 +958,30 @@ export default function WhatsAppAgentView() {
                       <IconPencil className="h-3 w-3" />
                       Editar
                     </Button>
+
+                    {/* Menú de opciones adicionales (Vaciar chat / Eliminar contacto) */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0 rounded-lg text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+                        >
+                          <IconDotsVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-52 text-xs rounded-xl shadow-lg">
+                        <DropdownMenuItem onClick={handleClearChat} className="cursor-pointer gap-2 text-amber-600 focus:text-amber-700">
+                          <IconTrash className="h-3.5 w-3.5" />
+                          Vaciar Historial del Chat
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={handleDeleteContact} className="cursor-pointer gap-2 text-rose-600 focus:text-rose-700">
+                          <IconUserX className="h-3.5 w-3.5" />
+                          Eliminar Contacto del CRM
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
 
@@ -1212,6 +1282,26 @@ export default function WhatsAppAgentView() {
                   >
                     <IconSpeakerphone className="h-4 w-4" />
                     Enviar Plantilla Promocional
+                  </Button>
+                </div>
+
+                {/* 5. Acciones de Gestión de Chat y Contacto */}
+                <div className="pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 space-y-1.5">
+                  <Button
+                    onClick={handleClearChat}
+                    variant="outline"
+                    className="w-full h-8 text-[11px] rounded-xl gap-1.5 border-zinc-200 dark:border-zinc-800 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/20"
+                  >
+                    <IconTrash className="h-3.5 w-3.5" />
+                    Vaciar Mensajes del Chat
+                  </Button>
+                  <Button
+                    onClick={handleDeleteContact}
+                    variant="outline"
+                    className="w-full h-8 text-[11px] rounded-xl gap-1.5 border-zinc-200 dark:border-zinc-800 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+                  >
+                    <IconUserX className="h-3.5 w-3.5" />
+                    Eliminar Contacto del CRM
                   </Button>
                 </div>
               </div>

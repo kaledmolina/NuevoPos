@@ -876,12 +876,29 @@ export default function OrdersView() {
                           <span className="font-mono font-bold text-xs sm:text-sm text-foreground">
                             {order.orderNumber}
                           </span>
-                          <Badge
-                            variant="outline"
-                            className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full", statusCfg.color, statusCfg.bg, statusCfg.border)}
+                          <Select
+                            value={order.status}
+                            onValueChange={(val) => handleUpdateStatus(order.id, val)}
                           >
-                            {statusCfg.label}
-                          </Badge>
+                            <SelectTrigger
+                              className={cn(
+                                "h-6 text-[10px] font-bold rounded-full border px-2 gap-1 w-auto transition-all cursor-pointer shadow-2xs",
+                                statusCfg.color,
+                                statusCfg.bg,
+                                statusCfg.border
+                              )}
+                            >
+                              <SelectValue>{statusCfg.label}</SelectValue>
+                            </SelectTrigger>
+                            <SelectContent className="text-xs rounded-xl shadow-lg">
+                              <SelectItem value="pendiente" className="cursor-pointer">🟡 Pendiente</SelectItem>
+                              <SelectItem value="confirmado" className="cursor-pointer">🟢 Confirmado</SelectItem>
+                              <SelectItem value="en_preparacion" className="cursor-pointer">🔵 En Preparación</SelectItem>
+                              <SelectItem value="en_camino" className="cursor-pointer">🟣 En Camino</SelectItem>
+                              <SelectItem value="entregado" className="cursor-pointer">✅ Entregado</SelectItem>
+                              <SelectItem value="cancelado" className="cursor-pointer text-rose-600">🔴 Cancelado</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                         <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-0.5">
                           <IconClock className="h-3 w-3" />
@@ -953,9 +970,15 @@ export default function OrdersView() {
                             <span className="text-xs font-mono font-bold text-foreground block">
                               {formatCurrency(order.total)}
                             </span>
-                            <span className="text-[10px] text-muted-foreground capitalize block">
-                              {order.paymentMethod}
-                            </span>
+                            {order.paymentMethod === "transferencia" || order.paymentStatus === "pagado" ? (
+                              <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded mt-0.5">
+                                💳 $0 a entregar
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded mt-0.5">
+                                💵 Cobrar efectivo
+                              </span>
+                            )}
                           </div>
                         </div>
 
@@ -1143,19 +1166,44 @@ export default function OrdersView() {
                           <p className="text-[10px] text-muted-foreground truncate">{order.deliveryNotes}</p>
                         )}
                       </TableCell>
-                      <TableCell className="font-mono font-bold text-xs">
-                        {formatCurrency(order.total)}
-                        <span className="block text-[10px] font-normal text-muted-foreground capitalize">
-                          {order.paymentMethod}
-                        </span>
+                      <TableCell className="font-mono text-xs">
+                        <div className="font-bold text-foreground">
+                          {formatCurrency(order.total)}
+                        </div>
+                        {order.paymentMethod === "transferencia" || order.paymentStatus === "pagado" ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded-md mt-0.5">
+                            💳 Pagado ($0 a entregar)
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded-md mt-0.5">
+                            💵 Cobrar en efectivo
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full", statusCfg.color, statusCfg.bg, statusCfg.border)}
+                        <Select
+                          value={order.status}
+                          onValueChange={(val) => handleUpdateStatus(order.id, val)}
                         >
-                          {statusCfg.label}
-                        </Badge>
+                          <SelectTrigger
+                            className={cn(
+                              "h-7 text-[11px] font-bold rounded-full border px-2.5 gap-1.5 w-[145px] transition-all cursor-pointer shadow-2xs",
+                              statusCfg.color,
+                              statusCfg.bg,
+                              statusCfg.border
+                            )}
+                          >
+                            <SelectValue>{statusCfg.label}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent className="text-xs rounded-xl shadow-lg">
+                            <SelectItem value="pendiente" className="cursor-pointer">🟡 Pendiente</SelectItem>
+                            <SelectItem value="confirmado" className="cursor-pointer">🟢 Confirmado</SelectItem>
+                            <SelectItem value="en_preparacion" className="cursor-pointer">🔵 En Preparación</SelectItem>
+                            <SelectItem value="en_camino" className="cursor-pointer">🟣 En Camino</SelectItem>
+                            <SelectItem value="entregado" className="cursor-pointer">✅ Entregado</SelectItem>
+                            <SelectItem value="cancelado" className="cursor-pointer text-rose-600">🔴 Cancelado</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell>
                         {order.deliveryDriverName ? (
@@ -1506,17 +1554,35 @@ export default function OrdersView() {
                 {detailOrder?.orderNumber}
               </span>
               {detailOrder && (
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    "text-xs font-semibold px-2.5 py-0.5 rounded-full",
-                    STATUS_CONFIG[detailOrder.status]?.color,
-                    STATUS_CONFIG[detailOrder.status]?.bg,
-                    STATUS_CONFIG[detailOrder.status]?.border
-                  )}
-                >
-                  {STATUS_CONFIG[detailOrder.status]?.label || detailOrder.status}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground font-medium">Estado:</span>
+                  <Select
+                    value={detailOrder.status}
+                    onValueChange={(val) => {
+                      handleUpdateStatus(detailOrder.id, val)
+                      setDetailOrder({ ...detailOrder, status: val })
+                    }}
+                  >
+                    <SelectTrigger
+                      className={cn(
+                        "h-7 text-xs font-bold rounded-full border px-2.5 gap-1.5 w-[145px] transition-all cursor-pointer shadow-2xs",
+                        STATUS_CONFIG[detailOrder.status]?.color,
+                        STATUS_CONFIG[detailOrder.status]?.bg,
+                        STATUS_CONFIG[detailOrder.status]?.border
+                      )}
+                    >
+                      <SelectValue>{STATUS_CONFIG[detailOrder.status]?.label || detailOrder.status}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent className="text-xs rounded-xl shadow-lg">
+                      <SelectItem value="pendiente" className="cursor-pointer">🟡 Pendiente</SelectItem>
+                      <SelectItem value="confirmado" className="cursor-pointer">🟢 Confirmado</SelectItem>
+                      <SelectItem value="en_preparacion" className="cursor-pointer">🔵 En Preparación</SelectItem>
+                      <SelectItem value="en_camino" className="cursor-pointer">🟣 En Camino</SelectItem>
+                      <SelectItem value="entregado" className="cursor-pointer">✅ Entregado</SelectItem>
+                      <SelectItem value="cancelado" className="cursor-pointer text-rose-600">🔴 Cancelado</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               )}
             </div>
             <DialogTitle className="text-lg font-bold text-foreground">
@@ -1683,6 +1749,34 @@ export default function OrdersView() {
                     <span className="text-zinc-950 dark:text-white font-mono font-black">{formatCurrency(detailOrder.total)}</span>
                   </div>
                 </div>
+              </div>
+
+              {/* Liquidación y Control para el Domiciliario */}
+              <div
+                className={cn(
+                  "p-3 rounded-xl border text-xs space-y-1.5",
+                  detailOrder.paymentMethod === "transferencia" || detailOrder.paymentStatus === "pagado"
+                    ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 text-emerald-900 dark:text-emerald-200"
+                    : "bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/40 text-amber-900 dark:text-amber-200"
+                )}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold flex items-center gap-1.5 uppercase text-[10px] tracking-wider">
+                    {detailOrder.paymentMethod === "transferencia" || detailOrder.paymentStatus === "pagado"
+                      ? "💳 Pago Electrónico / Anticipado"
+                      : "💵 Pago Contraentrega en Efectivo"}
+                  </span>
+                  <span className="font-mono font-bold text-xs">
+                    {detailOrder.paymentMethod === "transferencia" || detailOrder.paymentStatus === "pagado"
+                      ? "Cobrar: $0"
+                      : `Cobrar: ${formatCurrency(detailOrder.total)}`}
+                  </span>
+                </div>
+                <p className="text-[11px] leading-relaxed">
+                  {detailOrder.paymentMethod === "transferencia" || detailOrder.paymentStatus === "pagado"
+                    ? "✅ Este pedido ya fue pagado por transferencia previa. El domiciliario NO debe cobrar dinero al cliente ni debe entregar dinero en caja ($0 COP)."
+                    : `⚠️ Cobro en efectivo. El domiciliario DEBE cobrar ${formatCurrency(detailOrder.total)} al cliente y entregarlo en la caja del negocio al regresar.`}
+                </p>
               </div>
             </div>
           )}

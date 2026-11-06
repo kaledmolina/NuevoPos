@@ -421,8 +421,10 @@ REGLAS DE ORO (Ahorro de tokens y precisión):
 3. Si el cliente pregunta qué productos hay, qué venden o pide el catálogo, lista los productos disponibles indicando su precio exacto y disponibilidad.
 4. Si el cliente pide o menciona un producto que NO está en el catálogo, indícale amablemente que no lo manejas en esta sede y recomiéndale los que sí tienes disponibles.
 5. Datos del cliente: Nombre "${client.name}". Fiado / saldo pendiente: $${clientBalance.toLocaleString("es-CO")}.
-6. TOMA DE PEDIDOS: Si el cliente confirma un pedido a domicilio con cantidad, producto que SÍ esté en el catálogo y dirección de entrega, confirma el total y añade al final de tu respuesta EXACTAMENTE este bloque técnico:
-[ORDEN_AUTO: {"items": [{"name": "nombre del producto del catalogo", "qty": 1}], "address": "dirección completa"}]
+6. MÉTODO DE PAGO Y TOMA DE PEDIDOS:
+- Si el cliente quiere pedir pero NO indicó cómo pagará, pregúntale: "¿Cómo deseas pagar? ¿En efectivo o transferencia (Nequi / Daviplata)? Si es en efectivo, ¿con cuánto cancelas para llevarte el cambio?".
+- Si el cliente ya indicó productos válidos, dirección y método de pago (o si ya confirmó su pedido), confirma el resumen y añade al final de tu respuesta EXACTAMENTE este bloque técnico:
+[ORDEN_AUTO: {"items": [{"name": "nombre del producto del catalogo", "qty": 1}], "address": "dirección completa", "paymentMethod": "efectivo" | "transferencia", "cashPaid": 50000}]
 ${config.aiSystemPrompt ? `Instrucciones especiales de la sede: ${config.aiSystemPrompt}` : ""}${specificNotFoundNote}
 
 CATÁLOGO DE ESTA SEDE (${branchName}):
@@ -523,21 +525,48 @@ ${catalogContext}`
           }).catch(() => {})
         }
 
+        // Determinar método de pago y calcular si el domiciliario debe cobrar
+        const methodRaw = (orderPayload.paymentMethod || "").toLowerCase()
+        const isTransfer =
+          methodRaw.includes("transf") ||
+          methodRaw.includes("nequi") ||
+          methodRaw.includes("davi") ||
+          methodRaw.includes("tarjeta") ||
+          methodRaw.includes("banc")
+
+        const paymentMethod = isTransfer ? "transferencia" : "efectivo"
+        const paymentStatus = isTransfer ? "pagado" : "pendiente"
+
+        const cashPaid = Number(orderPayload.cashPaid) || 0
+        let paymentNote = ""
+        if (!isTransfer) {
+          if (cashPaid > subtotal) {
+            const change = cashPaid - subtotal
+            paymentNote = `💵 Pago en Efectivo: Paga con $${cashPaid.toLocaleString("es-CO")} (Llevar cambio de $${change.toLocaleString("es-CO")}). El domiciliario DEBE cobrar $${subtotal.toLocaleString("es-CO")} y entregarlos a la empresa.`
+          } else {
+            paymentNote = `💵 Pago en Efectivo: Cobrar $${subtotal.toLocaleString("es-CO")} contraentrega. El domiciliario DEBE entregar $${subtotal.toLocaleString("es-CO")} a la empresa.`
+          }
+        } else {
+          paymentNote = `💳 Pago por Transferencia (Nequi/Daviplata): Ya pagado previamente. El domiciliario NO debe recibir ni entregar dinero.`
+        }
+
         const createdOrder = await db.order.create({
           data: {
             orderNumber: genOrderNum,
+            tenantId: branch?.tenantId || null,
             branchId,
             clientId: client.id,
             customerName: client.name,
             customerPhone: cleanPhone,
             deliveryAddress: finalAddress,
-            deliveryNotes: `Generado por ${providerName} IA (${branchName}).`,
+            deliveryNotes: paymentNote,
+            notes: `Generado automáticamente por ${providerName} IA (${branchName}).`,
             subtotal,
             tax: 0,
             deliveryFee: 0,
             total: subtotal,
-            paymentMethod: "efectivo",
-            paymentStatus: "pendiente",
+            paymentMethod,
+            paymentStatus,
             status: "pendiente",
             items: {
               create: itemsToCreate.map((it) => ({
@@ -555,8 +584,12 @@ ${catalogContext}`
         orderTotal = createdOrder.total
         actionTaken = "order_created"
 
-        // Agregar pie de confirmación con el # de orden
-        rawReply += `\n\n📦 *Pedido Generado:* #${createdOrder.orderNumber}\n💵 *Total:* $${subtotal.toLocaleString("es-CO")}\n📍 *Entrega:* ${finalAddress}`
+        // Agregar pie de confirmación con el # de orden y recordatorio de pago
+        const paymentSummary = isTransfer
+          ? "💳 *Método de Pago:* Transferencia (No debes entregar dinero al repartidor)"
+          : `💵 *Método de Pago:* Efectivo ($${subtotal.toLocaleString("es-CO")} a cobrar al recibir)`
+
+        rawReply += `\n\n📦 *Pedido Generado:* #${createdOrder.orderNumber}\n${paymentSummary}\n📍 *Entrega:* ${finalAddress}`
       }
     } catch (parseErr) {
       console.warn(`[${providerName} Order Parse Error]`, parseErr)

@@ -5,6 +5,7 @@ set -e
 if echo "$DATABASE_URL" | grep -q "^mysql"; then
   echo "🐬 Configurando Prisma para MySQL..."
   sed -i 's/provider = "sqlite"/provider = "mysql"/' prisma/schema.prisma
+  rm -rf node_modules/.prisma
   ./node_modules/.bin/prisma generate
 fi
 
