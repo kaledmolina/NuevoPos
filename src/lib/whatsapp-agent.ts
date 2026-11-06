@@ -331,35 +331,70 @@ async function processWithLLMAI(params: {
     ? "https://openrouter.ai/api/v1/chat/completions"
     : "https://api.deepseek.com/chat/completions"
 
-  // 1. Ahorro de Tokens: Extracción de palabras clave para filtrar catálogo
-  const cleanTokens = message
+  // 1. Ahorro de Tokens & Contexto Real del Catálogo de la Sede
+  // Palabras generales de consulta que NO son nombres de productos
+  const GENERAL_QUERY_WORDS = new Set([
+    "hola", "buenas", "buenos", "dias", "tardes", "noches", "por", "favor", "gracias",
+    "para", "quiero", "tienen", "tiene", "venden", "vende", "hay", "que", "cual", "cuales",
+    "productos", "producto", "catalogo", "disponible", "disponibles", "lista", "precios",
+    "precio", "costo", "cuanto", "vale", "muestrame", "menu", "servicios", "articulos",
+    "stock", "medicamentos", "medicamento", "remedios", "remedio", "droga", "drogas", "farmacia"
+  ])
+
+  const messageWords = message
     .toLowerCase()
     .replace(/[^a-záéíóúñ0-9\s]/gi, " ")
     .split(/\s+/)
-    .filter((w) => w.length > 2 && !["hola", "buenas", "dias", "tardes", "por", "favor", "gracias", "para", "quiero", "tienen"].includes(w))
+    .filter((w) => w.length >= 2)
 
-  // Buscar solo los 6 productos más relevantes de ESTA SEDE
-  const products = await db.product.findMany({
+  const specificKeywords = messageWords.filter((w) => !GENERAL_QUERY_WORDS.has(w) && w.length > 2)
+
+  // Siempre obtener los productos destacados / disponibles de esta sede (máximo 8 para ahorrar tokens)
+  const defaultBranchProducts = await db.product.findMany({
     where: {
       active: true,
       ...branchFilter,
-      ...(cleanTokens.length > 0
-        ? {
-            OR: cleanTokens.map((t) => ({
-              name: { contains: t },
-            })),
-          }
-        : { stock: { gt: 0 } }),
+      stock: { gt: 0 },
     },
     select: { id: true, name: true, price: true, stock: true, unit: true },
-    take: 6,
+    orderBy: { stock: "desc" },
+    take: 8,
   })
+
+  // Si el usuario mencionó palabras específicas (ej. alcohol, ibuprofeno, acetaminofen), buscarlas
+  let matchedProducts: typeof defaultBranchProducts = []
+  if (specificKeywords.length > 0) {
+    matchedProducts = await db.product.findMany({
+      where: {
+        active: true,
+        ...branchFilter,
+        OR: specificKeywords.map((k) => ({
+          name: { contains: k },
+        })),
+      },
+      select: { id: true, name: true, price: true, stock: true, unit: true },
+      take: 6,
+    })
+  }
+
+  // Combinar los productos que coinciden con los destacados sin duplicados
+  const combinedProductsMap = new Map<string, (typeof defaultBranchProducts)[0]>()
+  for (const p of matchedProducts) combinedProductsMap.set(p.id, p)
+  for (const p of defaultBranchProducts) {
+    if (combinedProductsMap.size < 8) combinedProductsMap.set(p.id, p)
+  }
+  const products = Array.from(combinedProductsMap.values())
 
   const catalogContext = products.length > 0
     ? products
         .map((p) => `- ${p.name} | Precio: $${p.price.toLocaleString("es-CO")} | Stock: ${p.stock} ${p.unit}s`)
         .join("\n")
-    : "Sin coincidencias específicas. Pide al cliente el nombre del producto."
+    : "Catálogo vacío para esta sede. Informa que pronto se cargarán existencias."
+
+  // Nota para el LLM si buscó algo específico que NO existe en la sede
+  const specificNotFoundNote = specificKeywords.length > 0 && matchedProducts.length === 0
+    ? `\n⚠️ ATENCIÓN: El cliente consultó por "${specificKeywords.join(", ")}", pero NO está en el catálogo de esta sede. Infórmale con amabilidad que no disponemos de ese artículo y ofrécele los que sí tenemos en la lista de abajo.`
+    : ""
 
   const clientBalance = client.creditAccount?.balance || 0
 
@@ -377,16 +412,18 @@ async function processWithLLMAI(params: {
   }))
 
   // 3. Prompt de sistema ultra-conciso y optimizado
-  const systemPrompt = `Eres el asistente IA de "${branchName}" por WhatsApp.
-Tu misión: Atender con calidez, consultar precios y tomar pedidos a domicilio.
+  const systemPrompt = `Eres el asistente virtual comercial de "${branchName}" por WhatsApp.
+Tu misión: Atender con calidez, consultar precios, sugerir productos y tomar pedidos a domicilio.
 
-REGLAS DE ORO:
-1. Responde en español en MÁXIMO 3 líneas usando formato WhatsApp (*negrita* y viñetas).
-2. SOLO cotiza los productos listados en el catálogo de esta sede adjunto. No inventes precios ni productos.
-3. El cliente se llama "${client.name}". Su saldo fiado es: $${clientBalance.toLocaleString("es-CO")}.
-4. Si el cliente pide a domicilio indicando productos y dirección (ej. Calle/Carrera/#), confirma el pedido y añade al final exactamente:
-[ORDEN_AUTO: {"items": [{"name": "nombre exacto", "qty": 1}], "address": "dirección"}]
-${config.aiSystemPrompt ? `Instrucciones extra: ${config.aiSystemPrompt}` : ""}
+REGLAS DE ORO (Ahorro de tokens y precisión):
+1. Responde SIEMPRE en español de forma concisa (MÁXIMO 3 líneas o viñetas limpias de WhatsApp).
+2. CATÁLOGO REAL: SOLO cotiza y vende los productos listados en el "CATÁLOGO DE ESTA SEDE". NUNCA inventes productos ni precios.
+3. Si el cliente pregunta qué productos hay, qué venden o pide el catálogo, lista los productos disponibles indicando su precio exacto y disponibilidad.
+4. Si el cliente pide o menciona un producto que NO está en el catálogo, indícale amablemente que no lo manejas en esta sede y recomiéndale los que sí tienes disponibles.
+5. Datos del cliente: Nombre "${client.name}". Fiado / saldo pendiente: $${clientBalance.toLocaleString("es-CO")}.
+6. TOMA DE PEDIDOS: Si el cliente confirma un pedido a domicilio con cantidad, producto que SÍ esté en el catálogo y dirección de entrega, confirma el total y añade al final de tu respuesta EXACTAMENTE este bloque técnico:
+[ORDEN_AUTO: {"items": [{"name": "nombre del producto del catalogo", "qty": 1}], "address": "dirección completa"}]
+${config.aiSystemPrompt ? `Instrucciones especiales de la sede: ${config.aiSystemPrompt}` : ""}${specificNotFoundNote}
 
 CATÁLOGO DE ESTA SEDE (${branchName}):
 ${catalogContext}`
@@ -432,18 +469,39 @@ ${catalogContext}`
   let orderTotal: number | undefined
   let actionTaken: BotProcessResult["actionTaken"] = "ai_answered"
 
-  // 5. Detectar si DeepSeek generó una orden automática
-  const orderTagMatch = rawReply.match(/\[ORDEN_AUTO:\s*({[\s\S]*?})\]/)
+  // 5. Detectar si la IA generó una orden automática
+  const orderTagMatch = rawReply.match(/\[ORDEN_AUTO:\s*(\{[\s\S]*\})\s*\]/)
+
+  // Limpiar SIEMPRE el tag técnico de la respuesta que ve el cliente en WhatsApp
+  rawReply = rawReply.replace(/\[ORDEN_AUTO:\s*\{[\s\S]*\}\s*\]/g, "").trim()
+
   if (orderTagMatch && config.autoCreateOrders) {
     try {
       const orderPayload = JSON.parse(orderTagMatch[1])
-      // Limpiar el tag técnico de la respuesta que ve el cliente
-      rawReply = rawReply.replace(orderTagMatch[0], "").trim()
-
       const itemsToCreate: { product: any; qty: number }[] = []
+
       if (Array.isArray(orderPayload.items)) {
         for (const it of orderPayload.items) {
-          const match = products.find((p) => p.name.toLowerCase().includes(String(it.name).toLowerCase()))
+          const rawName = String(it.name || "").toLowerCase().trim()
+          if (!rawName) continue
+
+          // 1. Buscar en los productos cargados
+          let match: (typeof products)[0] | null | undefined = products.find((p) =>
+            p.name.toLowerCase().includes(rawName) || rawName.includes(p.name.toLowerCase())
+          )
+
+          // 2. Si no estaba en el subconjunto, buscar en toda la BD de esta sede
+          if (!match) {
+            match = await db.product.findFirst({
+              where: {
+                active: true,
+                ...branchFilter,
+                name: { contains: rawName },
+              },
+              select: { id: true, name: true, price: true, stock: true, unit: true },
+            })
+          }
+
           if (match) {
             itemsToCreate.push({ product: match, qty: Math.max(1, Number(it.qty) || 1) })
           }
@@ -455,7 +513,15 @@ ${catalogContext}`
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "")
         const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString()
         const genOrderNum = `PED-${dateStr}-${randomSuffix}`
-        const finalAddress = orderPayload.address || client.address || "Dirección WhatsApp"
+        const finalAddress = orderPayload.address || client.address || "Dirección por WhatsApp"
+
+        // Actualizar dirección del cliente si no tenía
+        if (orderPayload.address && !client.address) {
+          await db.client.update({
+            where: { id: client.id },
+            data: { address: orderPayload.address },
+          }).catch(() => {})
+        }
 
         const createdOrder = await db.order.create({
           data: {
@@ -465,7 +531,7 @@ ${catalogContext}`
             customerName: client.name,
             customerPhone: cleanPhone,
             deliveryAddress: finalAddress,
-            deliveryNotes: `Generado por DeepSeek IA (${branchName}).`,
+            deliveryNotes: `Generado por ${providerName} IA (${branchName}).`,
             subtotal,
             tax: 0,
             deliveryFee: 0,
@@ -493,7 +559,7 @@ ${catalogContext}`
         rawReply += `\n\n📦 *Pedido Generado:* #${createdOrder.orderNumber}\n💵 *Total:* $${subtotal.toLocaleString("es-CO")}\n📍 *Entrega:* ${finalAddress}`
       }
     } catch (parseErr) {
-      console.warn("[DeepSeek Order Parse Error]", parseErr)
+      console.warn(`[${providerName} Order Parse Error]`, parseErr)
     }
   }
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 
 export const dynamic = "force-dynamic"
 
-export interface CuratedModel {
+interface CuratedModel {
   id: string
   name: string
   provider: string
@@ -11,7 +11,7 @@ export interface CuratedModel {
   contextLength: string
 }
 
-export const CURATED_OPENROUTER_MODELS: CuratedModel[] = [
+const CURATED_OPENROUTER_MODELS: CuratedModel[] = [
   {
     id: "deepseek/deepseek-chat",
     name: "DeepSeek V3 (Chat)",

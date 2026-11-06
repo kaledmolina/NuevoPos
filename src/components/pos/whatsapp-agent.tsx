@@ -963,7 +963,7 @@ export default function WhatsAppAgentView() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleSimulateInbound("Hola, ¿tienen leche y arroz disponible?")}
+                        onClick={() => handleSimulateInbound("Hola, ¿qué productos tienen disponibles?")}
                         className="text-xs h-7"
                       >
                         Enviar mensaje de prueba como cliente
@@ -1751,7 +1751,7 @@ export default function WhatsAppAgentView() {
               <Textarea
                 value={simText}
                 onChange={(e) => setSimText(e.target.value)}
-                placeholder="Ej: Hola, ¿tienen leche y arroz? Mándame 2 a la Calle 15 # 4-20"
+                placeholder="Ej: Hola, ¿cuánto vale el Alcohol? Mándame 2 a la Carrera 15 # 45-20"
                 className="text-xs h-20 rounded-xl resize-none"
               />
             </div>
@@ -1760,10 +1760,10 @@ export default function WhatsAppAgentView() {
               <span className="text-[11px] font-bold text-zinc-400 block">Pruebas rápidas:</span>
               <div className="flex flex-wrap gap-1.5">
                 {[
-                  "Hola, ¿cuánto vale la leche?",
+                  "Hola, ¿qué productos tienen disponibles?",
+                  "¿Cuánto vale el Alcohol Antiséptico y el Acetaminofén?",
+                  "Envíame 1 Alcohol Antiséptico a la Carrera 15 # 45-20",
                   "¿Cuánto debo de fiado?",
-                  "Envíame 2 bolsas de arroz a la Carrera 10 # 5-20",
-                  "¿Qué productos tienen disponibles?",
                 ].map((preset, idx) => (
                   <button
                     key={idx}
