@@ -90,10 +90,13 @@ export async function processWhatsAppMessage(params: {
   let result: BotProcessResult | null = null
   let createdOrderId: string | null = null
 
-  // 3. INTENTO 1: Si DeepSeek IA está habilitado y tiene API Key en esta Sede
-  if (config?.aiEnabled && config?.deepseekApiKey) {
+  // 3. INTENTO 1: Si la IA (OpenRouter o DeepSeek) está habilitada y tiene API Key en esta Sede
+  const isOpenerConfigured = config?.aiProvider === "openrouter" && !!config?.openrouterApiKey
+  const isDeepSeekConfigured = (config?.aiProvider !== "openrouter" || !config?.openrouterApiKey) && !!config?.deepseekApiKey
+
+  if (config?.aiEnabled && (isOpenerConfigured || isDeepSeekConfigured)) {
     try {
-      result = await processWithDeepSeekAI({
+      result = await processWithLLMAI({
         message,
         cleanPhone,
         client,
@@ -109,8 +112,8 @@ export async function processWhatsAppMessage(params: {
         if (ord) createdOrderId = ord.id
       }
     } catch (aiErr) {
-      console.warn("[DeepSeek AI Fallback]", (aiErr as Error).message)
-      // Si falla DeepSeek (ej. token agotado o red), continúa al motor local abajo
+      console.warn("[LLM AI Fallback]", (aiErr as Error).message)
+      // Si falla el proveedor principal (ej. token agotado o red), continúa al motor local abajo
       result = null
     }
   }
@@ -298,10 +301,11 @@ export async function processWhatsAppMessage(params: {
 }
 
 /**
- * Módulo de Inteligencia Artificial con DeepSeek
+ * Módulo de Inteligencia Artificial con soporte Dual: OpenRouter & DeepSeek
+ * Permite seleccionar cualquier modelo (Claude 3.5, GPT-4o, Llama 3.3, Gemini 2.0, DeepSeek V3/R1)
  * Optimizado para mínimo consumo de tokens con RAG ultraliviano
  */
-async function processWithDeepSeekAI(params: {
+async function processWithLLMAI(params: {
   message: string
   cleanPhone: string
   client: any
@@ -312,6 +316,20 @@ async function processWithDeepSeekAI(params: {
   const branchId = branch?.id
   const branchName = branch?.name || "Sede Principal"
   const branchFilter = branchId ? { branchId } : {}
+
+  // Determinar proveedor activo (OpenRouter o DeepSeek)
+  const isOpener =
+    config.aiProvider === "openrouter" && !!config.openrouterApiKey
+  const providerName = isOpener ? "OpenRouter" : "DeepSeek"
+  const apiKey = isOpener
+    ? config.openrouterApiKey?.trim()
+    : config.deepseekApiKey?.trim()
+  const model = isOpener
+    ? (config.openrouterModel || "deepseek/deepseek-chat").trim()
+    : (config.deepseekModel || "deepseek-chat").trim()
+  const endpoint = isOpener
+    ? "https://openrouter.ai/api/v1/chat/completions"
+    : "https://api.deepseek.com/chat/completions"
 
   // 1. Ahorro de Tokens: Extracción de palabras clave para filtrar catálogo
   const cleanTokens = message
@@ -373,17 +391,22 @@ ${config.aiSystemPrompt ? `Instrucciones extra: ${config.aiSystemPrompt}` : ""}
 CATÁLOGO DE ESTA SEDE (${branchName}):
 ${catalogContext}`
 
-  // 4. Invocación a la API oficial de DeepSeek
-  const apiKey = config.deepseekApiKey?.trim()
-  const model = config.deepseekModel || "deepseek-chat"
+  // 4. Invocación a la API oficial (OpenRouter o DeepSeek)
   const maxTokens = config.maxTokensPerReply || 250
 
-  const res = await fetch("https://api.deepseek.com/chat/completions", {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+  }
+
+  if (isOpener) {
+    headers["HTTP-Referer"] = "https://omnipos.pro"
+    headers["X-Title"] = "OmniPOS WhatsApp AI Agent"
+  }
+
+  const res = await fetch(endpoint, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers,
     body: JSON.stringify({
       model,
       messages: [
@@ -398,7 +421,7 @@ ${catalogContext}`
 
   if (!res.ok) {
     const errorText = await res.text()
-    throw new Error(`DeepSeek API error (${res.status}): ${errorText}`)
+    throw new Error(`${providerName} API error (${res.status}): ${errorText}`)
   }
 
   const aiData = await res.json()
@@ -480,6 +503,6 @@ ${catalogContext}`
     orderNumber,
     total: orderTotal,
     tokensUsed,
-    modelUsed: model,
+    modelUsed: `${providerName}: ${model}`,
   }
 }

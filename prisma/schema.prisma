@@ -419,7 +419,7 @@ model WhatsAppTemplate {
 }
 
 
-// Configuracion de WhatsApp e IA DeepSeek por Sede
+// Configuracion de WhatsApp e IA (DeepSeek & OpenRouter) por Sede
 model WhatsAppConfig {
   id                   String   @id @default(cuid())
   branchId             String   @unique
@@ -428,8 +428,11 @@ model WhatsAppConfig {
   metaPhoneNumberId    String?  // ID de numero en Meta Cloud API
   metaAccessToken      String?  // Token de acceso de Meta Cloud API
   metaVerifyToken      String?  @default("omnipos_verify_token_2026")
+  aiProvider           String   @default("deepseek") // "deepseek" | "openrouter"
   deepseekApiKey       String?  // Token de API de DeepSeek (sk-...)
   deepseekModel        String   @default("deepseek-chat") // "deepseek-chat" | "deepseek-reasoner"
+  openrouterApiKey     String?  // Token de API de OpenRouter (sk-or-v1-...)
+  openrouterModel      String   @default("deepseek/deepseek-chat") // Modelo seleccionado en OpenRouter
   aiEnabled            Boolean  @default(true)
   aiSystemPrompt       String?
   welcomeMessage       String?

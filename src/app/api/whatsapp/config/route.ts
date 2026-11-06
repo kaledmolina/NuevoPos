@@ -40,7 +40,9 @@ export async function GET(req: NextRequest) {
           branchId: targetBranchId,
           phoneNumber: targetBranch?.phone || "",
           metaVerifyToken: `omnipos_verify_${targetBranchId.slice(-6)}`,
+          aiProvider: "deepseek",
           deepseekModel: "deepseek-chat",
+          openrouterModel: "deepseek/deepseek-chat",
           aiEnabled: true,
           autoCreateOrders: true,
           maxTokensPerReply: 250,
@@ -54,9 +56,13 @@ export async function GET(req: NextRequest) {
     const maskedConfig = {
       ...config,
       hasDeepSeekKey: !!config.deepseekApiKey,
+      hasOpenRouterKey: !!config.openrouterApiKey,
       hasMetaToken: !!config.metaAccessToken,
       deepseekApiKeyMasked: config.deepseekApiKey
         ? `${config.deepseekApiKey.slice(0, 5)}••••••••${config.deepseekApiKey.slice(-4)}`
+        : "",
+      openrouterApiKeyMasked: config.openrouterApiKey
+        ? `${config.openrouterApiKey.slice(0, 8)}••••••••${config.openrouterApiKey.slice(-4)}`
         : "",
       metaAccessTokenMasked: config.metaAccessToken
         ? `${config.metaAccessToken.slice(0, 6)}••••••••${config.metaAccessToken.slice(-4)}`
@@ -89,8 +95,11 @@ export async function POST(req: NextRequest) {
       metaPhoneNumberId,
       metaAccessToken,
       metaVerifyToken,
+      aiProvider,
       deepseekApiKey,
       deepseekModel,
+      openrouterApiKey,
+      openrouterModel,
       aiEnabled,
       aiSystemPrompt,
       welcomeMessage,
@@ -110,7 +119,9 @@ export async function POST(req: NextRequest) {
       phoneNumber: phoneNumber ?? null,
       metaPhoneNumberId: metaPhoneNumberId ?? null,
       metaVerifyToken: metaVerifyToken || "omnipos_verify_token_2026",
+      aiProvider: aiProvider || "deepseek",
       deepseekModel: deepseekModel || "deepseek-chat",
+      openrouterModel: openrouterModel || "deepseek/deepseek-chat",
       aiEnabled: Boolean(aiEnabled),
       aiSystemPrompt: aiSystemPrompt ?? null,
       welcomeMessage: welcomeMessage ?? null,
@@ -119,11 +130,26 @@ export async function POST(req: NextRequest) {
     }
 
     // Solo actualizar tokens si se enviaron valores reales no enmascarados
-    if (deepseekApiKey && !deepseekApiKey.includes("••••")) {
-      dataToUpdate.deepseekApiKey = deepseekApiKey.trim()
+    if (deepseekApiKey !== undefined) {
+      if (deepseekApiKey === "") {
+        dataToUpdate.deepseekApiKey = null
+      } else if (!deepseekApiKey.includes("••••")) {
+        dataToUpdate.deepseekApiKey = deepseekApiKey.trim()
+      }
     }
-    if (metaAccessToken && !metaAccessToken.includes("••••")) {
-      dataToUpdate.metaAccessToken = metaAccessToken.trim()
+    if (openrouterApiKey !== undefined) {
+      if (openrouterApiKey === "") {
+        dataToUpdate.openrouterApiKey = null
+      } else if (!openrouterApiKey.includes("••••")) {
+        dataToUpdate.openrouterApiKey = openrouterApiKey.trim()
+      }
+    }
+    if (metaAccessToken !== undefined) {
+      if (metaAccessToken === "") {
+        dataToUpdate.metaAccessToken = null
+      } else if (!metaAccessToken.includes("••••")) {
+        dataToUpdate.metaAccessToken = metaAccessToken.trim()
+      }
     }
 
     const updated = await db.whatsAppConfig.upsert({
@@ -140,6 +166,7 @@ export async function POST(req: NextRequest) {
       config: {
         ...updated,
         hasDeepSeekKey: !!updated.deepseekApiKey,
+        hasOpenRouterKey: !!updated.openrouterApiKey,
         hasMetaToken: !!updated.metaAccessToken,
       },
       message: "Configuración de WhatsApp e IA guardada exitosamente para la sede.",

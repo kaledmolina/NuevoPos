@@ -4,12 +4,21 @@ import { db } from "@/lib/db"
 export const dynamic = "force-dynamic"
 
 /**
- * POST: Probar conexión con la API de DeepSeek
+ * POST: Probar conexión con la API de DeepSeek u OpenRouter
  */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { apiKey, model = "deepseek-chat", branchId } = body
+    const {
+      provider = "deepseek",
+      apiKey,
+      model,
+      branchId,
+    } = body
+
+    const isOpener = provider === "openrouter"
+    const defaultModel = isOpener ? "deepseek/deepseek-chat" : "deepseek-chat"
+    const chosenModel = model || defaultModel
 
     let resolvedKey = apiKey
 
@@ -17,29 +26,43 @@ export async function POST(req: NextRequest) {
     if ((!resolvedKey || resolvedKey.includes("••••")) && branchId) {
       const cfg = await db.whatsAppConfig.findUnique({
         where: { branchId },
-        select: { deepseekApiKey: true },
+        select: { deepseekApiKey: true, openrouterApiKey: true },
       })
-      resolvedKey = cfg?.deepseekApiKey
+      resolvedKey = isOpener ? cfg?.openrouterApiKey : cfg?.deepseekApiKey
     }
 
     if (!resolvedKey || resolvedKey.includes("••••")) {
       return NextResponse.json(
-        { ok: false, error: "No se proporcionó una clave de API válida de DeepSeek." },
+        {
+          ok: false,
+          error: `No se proporcionó una clave de API válida de ${isOpener ? "OpenRouter" : "DeepSeek"}.`,
+        },
         { status: 400 }
       )
     }
 
     const startTime = Date.now()
 
+    const url = isOpener
+      ? "https://openrouter.ai/api/v1/chat/completions"
+      : "https://api.deepseek.com/chat/completions"
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${resolvedKey.trim()}`,
+    }
+
+    if (isOpener) {
+      headers["HTTP-Referer"] = "https://omnipos.pro"
+      headers["X-Title"] = "OmniPOS AI Agent"
+    }
+
     // Llamada ultra liviana de prueba (5 tokens)
-    const response = await fetch("https://api.deepseek.com/chat/completions", {
+    const response = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${resolvedKey.trim()}`,
-      },
+      headers,
       body: JSON.stringify({
-        model: model || "deepseek-chat",
+        model: chosenModel,
         messages: [
           { role: "system", content: "Responde únicamente 'OK'." },
           { role: "user", content: "Ping" },
@@ -63,7 +86,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           ok: false,
-          error: `Error de DeepSeek (${response.status}): ${parsedMsg}`,
+          error: `Error de ${isOpener ? "OpenRouter" : "DeepSeek"} (${response.status}): ${parsedMsg}`,
           latencyMs,
         },
         { status: 400 }
@@ -75,16 +98,17 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      message: "¡Conexión con DeepSeek exitosa!",
-      model: data.model || model,
+      message: `¡Conexión con ${isOpener ? "OpenRouter" : "DeepSeek"} exitosa!`,
+      provider: isOpener ? "openrouter" : "deepseek",
+      model: data.model || chosenModel,
       reply: reply.trim(),
       latencyMs,
       tokensUsed: data.usage?.total_tokens || 0,
     })
   } catch (error) {
-    console.error("[DeepSeek Test Error]:", error)
+    console.error("[AI Test Error]:", error)
     return NextResponse.json(
-      { ok: false, error: (error as Error).message || "Error al conectar con DeepSeek" },
+      { ok: false, error: (error as Error).message || "Error al conectar con la API de IA" },
       { status: 500 }
     )
   }

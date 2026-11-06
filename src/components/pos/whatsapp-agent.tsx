@@ -119,6 +119,19 @@ interface Template {
   content: string
 }
 
+export const CURATED_OPENROUTER_MODELS = [
+  { id: "deepseek/deepseek-chat", name: "DeepSeek V3 (Chat)", provider: "DeepSeek", badge: "🔥 Recomendado / Económico" },
+  { id: "deepseek/deepseek-r1", name: "DeepSeek R1", provider: "DeepSeek", badge: "🧠 Razonamiento Profundo" },
+  { id: "google/gemini-2.0-flash-exp:free", name: "Google Gemini 2.0 Flash", provider: "Google", badge: "✨ Gratis / Ultra Rápido" },
+  { id: "meta-llama/llama-3.3-70b-instruct", name: "Meta Llama 3.3 70B", provider: "Meta", badge: "⚡ Inteligente & Veloz" },
+  { id: "anthropic/claude-3.5-haiku", name: "Claude 3.5 Haiku", provider: "Anthropic", badge: "🚀 Máxima Velocidad" },
+  { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet", provider: "Anthropic", badge: "👑 Calidad Superior" },
+  { id: "openai/gpt-4o-mini", name: "OpenAI GPT-4o Mini", provider: "OpenAI", badge: "💡 Barato & Fiable" },
+  { id: "openai/gpt-4o", name: "OpenAI GPT-4o", provider: "OpenAI", badge: "🌟 Gama Alta" },
+  { id: "mistralai/mistral-large-2411", name: "Mistral Large", provider: "Mistral", badge: "🇪🇺 Fluido en Español" },
+  { id: "qwen/qwen-2.5-72b-instruct", name: "Qwen 2.5 72B", provider: "Alibaba", badge: "📊 Alta Precisión" },
+]
+
 interface BranchConfig {
   id?: string
   branchId: string
@@ -126,16 +139,21 @@ interface BranchConfig {
   metaPhoneNumberId?: string | null
   metaAccessToken?: string | null
   metaVerifyToken?: string | null
+  aiProvider?: "deepseek" | "openrouter"
   deepseekApiKey?: string | null
   deepseekModel: string
+  openrouterApiKey?: string | null
+  openrouterModel?: string
   aiEnabled: boolean
   aiSystemPrompt?: string | null
   welcomeMessage?: string | null
   autoCreateOrders: boolean
   maxTokensPerReply: number
   hasDeepSeekKey?: boolean
+  hasOpenRouterKey?: boolean
   hasMetaToken?: boolean
   deepseekApiKeyMasked?: string
+  openrouterApiKeyMasked?: string
   metaAccessTokenMasked?: string
 }
 
@@ -194,8 +212,11 @@ export default function WhatsAppAgentView() {
     metaPhoneNumberId: "",
     metaAccessToken: "",
     metaVerifyToken: "omnipos_verify_token_2026",
+    aiProvider: "deepseek",
     deepseekApiKey: "",
     deepseekModel: "deepseek-chat",
+    openrouterApiKey: "",
+    openrouterModel: "deepseek/deepseek-chat",
     aiEnabled: true,
     aiSystemPrompt: "",
     welcomeMessage: "",
@@ -204,9 +225,12 @@ export default function WhatsAppAgentView() {
   })
   const [loadingConfig, setLoadingConfig] = useState(false)
   const [savingConfig, setSavingConfig] = useState(false)
-  const [testingDeepSeek, setTestingDeepSeek] = useState(false)
+  const [testingAi, setTestingAi] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
+  const [showOpenRouterKey, setShowOpenRouterKey] = useState(false)
   const [showMetaToken, setShowMetaToken] = useState(false)
+  const [isCustomModel, setIsCustomModel] = useState(false)
+  const [customOpenRouterModel, setCustomOpenRouterModel] = useState("")
   const [copiedUrl, setCopiedUrl] = useState(false)
   const [copiedToken, setCopiedToken] = useState(false)
 
@@ -219,9 +243,18 @@ export default function WhatsAppAgentView() {
       setLoadingConfig(true)
       const res = await apiFetch<{ ok: boolean; config: BranchConfig }>(`/api/whatsapp/config?branchId=${encodeURIComponent(bId)}`)
       if (res && res.config) {
+        const loadedModel = res.config.openrouterModel || "deepseek/deepseek-chat"
+        const isPreset = CURATED_OPENROUTER_MODELS.some((m) => m.id === loadedModel)
+        setIsCustomModel(!isPreset && !!loadedModel)
+        if (!isPreset && loadedModel) {
+          setCustomOpenRouterModel(loadedModel)
+        }
         setConfig({
           ...res.config,
+          aiProvider: res.config.aiProvider || "deepseek",
+          openrouterModel: loadedModel,
           deepseekApiKey: res.config.deepseekApiKeyMasked || "",
+          openrouterApiKey: res.config.openrouterApiKeyMasked || "",
           metaAccessToken: res.config.metaAccessTokenMasked || "",
         })
       }
@@ -319,10 +352,16 @@ export default function WhatsAppAgentView() {
     if (!currentBranchId) return
     setSavingConfig(true)
     try {
+      const finalOpenRouterModel =
+        isCustomModel && customOpenRouterModel.trim()
+          ? customOpenRouterModel.trim()
+          : config.openrouterModel || "deepseek/deepseek-chat"
+
       const res = await apiFetch<{ ok: boolean; message: string }>("/api/whatsapp/config", {
         method: "POST",
         body: JSON.stringify({
           ...config,
+          openrouterModel: finalOpenRouterModel,
           branchId: currentBranchId,
         }),
       })
@@ -337,9 +376,17 @@ export default function WhatsAppAgentView() {
     }
   }
 
-  // Probar conexión directa con DeepSeek
-  const handleTestDeepSeek = async () => {
-    setTestingDeepSeek(true)
+  // Probar conexión directa con DeepSeek u OpenRouter
+  const handleTestAi = async (overrideProvider?: "deepseek" | "openrouter") => {
+    const prov = overrideProvider || config.aiProvider || "deepseek"
+    const isOpener = prov === "openrouter"
+    const chosenModel = isOpener
+      ? isCustomModel && customOpenRouterModel.trim()
+        ? customOpenRouterModel.trim()
+        : config.openrouterModel || "deepseek/deepseek-chat"
+      : config.deepseekModel
+
+    setTestingAi(true)
     try {
       const res = await apiFetch<{
         ok: boolean
@@ -347,25 +394,27 @@ export default function WhatsAppAgentView() {
         latencyMs: number
         model: string
         reply: string
+        provider?: string
         error?: string
       }>("/api/whatsapp/test-deepseek", {
         method: "POST",
         body: JSON.stringify({
-          apiKey: config.deepseekApiKey,
-          model: config.deepseekModel,
+          provider: prov,
+          apiKey: isOpener ? config.openrouterApiKey : config.deepseekApiKey,
+          model: chosenModel,
           branchId: currentBranchId,
         }),
       })
 
       if (res && res.ok) {
-        toast.success(`¡DeepSeek Conectado! Latencia: ${res.latencyMs}ms (${res.model})`)
+        toast.success(`¡${isOpener ? "OpenRouter" : "DeepSeek"} Conectado! Modelo: ${res.model} (${res.latencyMs}ms)`)
       } else {
-        toast.error(res.error || "No se pudo conectar con DeepSeek")
+        toast.error(res.error || `No se pudo conectar con ${isOpener ? "OpenRouter" : "DeepSeek"}`)
       }
     } catch (e) {
       toast.error("Error de conexión: " + (e as Error).message)
     } finally {
-      setTestingDeepSeek(false)
+      setTestingAi(false)
     }
   }
 
@@ -567,7 +616,17 @@ export default function WhatsAppAgentView() {
               <h1 className="text-lg sm:text-xl font-black tracking-tight text-zinc-950 dark:text-white">
                 Agente IA WhatsApp & CRM
               </h1>
-              {config.hasDeepSeekKey ? (
+              {config.aiProvider === "openrouter" ? (
+                config.hasOpenRouterKey ? (
+                  <Badge variant="outline" className="text-[10px] font-mono tracking-wider bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30">
+                    ⚡ OpenRouter ({config.openrouterModel?.split("/")[1] || config.openrouterModel || "deepseek-chat"})
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[10px] font-mono text-amber-600 dark:text-amber-400 border-dashed border-amber-400">
+                    OpenRouter Pendiente
+                  </Badge>
+                )
+              ) : config.hasDeepSeekKey ? (
                 <Badge variant="outline" className="text-[10px] font-mono tracking-wider bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100">
                   ⚡ DeepSeek ({config.deepseekModel})
                 </Badge>
@@ -865,7 +924,14 @@ export default function WhatsAppAgentView() {
                         <span className="text-zinc-500">IA Pausada para este chat (Atención humana exclusiva)</span>
                       ) : (
                         <span>
-                          Bot IA Activo: {config.hasDeepSeekKey ? `DeepSeek (${config.deepseekModel})` : "Motor Local"}
+                          Bot IA Activo:{" "}
+                          {config.aiProvider === "openrouter"
+                            ? config.hasOpenRouterKey
+                              ? `OpenRouter (${config.openrouterModel?.split("/")[1] || config.openrouterModel})`
+                              : "Motor Local"
+                            : config.hasDeepSeekKey
+                            ? `DeepSeek (${config.deepseekModel})`
+                            : "Motor Local"}
                         </span>
                       )}
                     </span>
@@ -922,7 +988,9 @@ export default function WhatsAppAgentView() {
                             ) : isBot ? (
                               <>
                                 <IconRobot className="h-2.5 w-2.5" />
-                                <span>OmniPOS Bot IA (DeepSeek)</span>
+                                <span>
+                                  OmniPOS Bot IA ({config.aiProvider === "openrouter" ? "OpenRouter" : "DeepSeek"})
+                                </span>
                               </>
                             ) : (
                               <>
@@ -1239,14 +1307,14 @@ export default function WhatsAppAgentView() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Tarjeta 1: Inteligencia Artificial DeepSeek */}
+            {/* Tarjeta 1: Motor de Inteligencia Artificial Dual (OpenRouter & DeepSeek) */}
             <Card className="rounded-2xl border-zinc-200 dark:border-zinc-800 shadow-sm">
               <CardHeader className="p-4 pb-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <IconCpu className="h-4 w-4 text-zinc-900 dark:text-zinc-100" />
                     <CardTitle className="text-sm font-bold text-zinc-950 dark:text-white">
-                      Motor de IA DeepSeek
+                      Motor de IA (OpenRouter & DeepSeek)
                     </CardTitle>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1261,62 +1329,227 @@ export default function WhatsAppAgentView() {
                   </div>
                 </div>
                 <p className="text-xs text-zinc-500">
-                  Conecta DeepSeek para responder dudas, cotizar productos y generar pedidos a domicilio automáticamente.
+                  Usa OpenRouter para seleccionar cualquier modelo (Claude 3.5, GPT-4o, Gemini 2.0, Llama 3.3) o conecta DeepSeek directo.
                 </p>
               </CardHeader>
 
               <CardContent className="p-4 space-y-3.5">
-                {/* DeepSeek API Key */}
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
-                      DeepSeek API Key (Token Secreto) *
-                    </Label>
-                    <a
-                      href="https://platform.deepseek.com/api_keys"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-[10px] text-zinc-500 hover:text-zinc-950 dark:hover:text-white underline flex items-center gap-0.5"
-                    >
-                      Obtener Token en DeepSeek <IconExternalLink className="h-2.5 w-2.5" />
-                    </a>
-                  </div>
-                  <div className="relative">
-                    <Input
-                      type={showApiKey ? "text" : "password"}
-                      value={config.deepseekApiKey || ""}
-                      onChange={(e) => setConfig((c) => ({ ...c, deepseekApiKey: e.target.value }))}
-                      placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-                      className="pr-10 h-9 text-xs font-mono bg-zinc-50 dark:bg-zinc-950"
-                    />
+                {/* Selector de Proveedor de IA */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                    Proveedor de Inteligencia Artificial
+                  </Label>
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => setShowApiKey(!showApiKey)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+                      onClick={() => setConfig((c) => ({ ...c, aiProvider: "openrouter" }))}
+                      className={cn(
+                        "flex flex-col items-start p-2.5 rounded-xl border text-left transition-all cursor-pointer",
+                        config.aiProvider === "openrouter"
+                          ? "border-purple-500 bg-purple-500/10 ring-1 ring-purple-500 text-purple-950 dark:text-purple-200"
+                          : "border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-900/50"
+                      )}
                     >
-                      {showApiKey ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
+                      <div className="flex items-center gap-1.5 w-full justify-between">
+                        <span className="text-xs font-bold flex items-center gap-1">
+                          🟣 OpenRouter
+                        </span>
+                        <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300">
+                          Multi-Modelo
+                        </Badge>
+                      </div>
+                      <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-1">
+                        Claude, GPT-4o, Gemini, Llama, DeepSeek
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setConfig((c) => ({ ...c, aiProvider: "deepseek" }))}
+                      className={cn(
+                        "flex flex-col items-start p-2.5 rounded-xl border text-left transition-all cursor-pointer",
+                        config.aiProvider !== "openrouter"
+                          ? "border-blue-500 bg-blue-500/10 ring-1 ring-blue-500 text-blue-950 dark:text-blue-200"
+                          : "border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-900/50"
+                      )}
+                    >
+                      <div className="flex items-center gap-1.5 w-full justify-between">
+                        <span className="text-xs font-bold flex items-center gap-1">
+                          🔵 DeepSeek Directo
+                        </span>
+                        <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">
+                          Oficial
+                        </Badge>
+                      </div>
+                      <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-1">
+                        API oficial de DeepSeek (Chat V3 / Reasoner R1)
+                      </span>
                     </button>
                   </div>
                 </div>
 
-                {/* Modelo DeepSeek & Límite de Tokens */}
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div className="space-y-1">
-                    <Label className="text-xs font-bold">Modelo DeepSeek</Label>
-                    <Select
-                      value={config.deepseekModel}
-                      onValueChange={(val) => setConfig((c) => ({ ...c, deepseekModel: val }))}
-                    >
-                      <SelectTrigger className="h-9 text-xs rounded-xl bg-zinc-50 dark:bg-zinc-950">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="text-xs rounded-xl">
-                        <SelectItem value="deepseek-chat">deepseek-chat (V3 - Rápido & Económico)</SelectItem>
-                        <SelectItem value="deepseek-reasoner">deepseek-reasoner (R1 - Razonamiento)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                {/* BLOQUE OPENROUTER */}
+                {config.aiProvider === "openrouter" && (
+                  <div className="space-y-3 pt-1 border-t border-purple-500/20">
+                    {/* OpenRouter API Key */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                          OpenRouter API Key (Token Secreto) *
+                        </Label>
+                        <a
+                          href="https://openrouter.ai/keys"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[10px] text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-0.5"
+                        >
+                          Obtener Token en OpenRouter <IconExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      </div>
+                      <div className="relative">
+                        <Input
+                          type={showOpenRouterKey ? "text" : "password"}
+                          value={config.openrouterApiKey || ""}
+                          onChange={(e) => setConfig((c) => ({ ...c, openrouterApiKey: e.target.value }))}
+                          placeholder="sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxx"
+                          className="pr-10 h-9 text-xs font-mono bg-zinc-50 dark:bg-zinc-950"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowOpenRouterKey(!showOpenRouterKey)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+                        >
+                          {showOpenRouterKey ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
 
+                    {/* Selector de Modelo OpenRouter */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-bold">Modelo de Inteligencia Artificial (OpenRouter)</Label>
+                        <a
+                          href="https://openrouter.ai/models"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[10px] text-zinc-500 hover:text-zinc-950 dark:hover:text-white underline flex items-center gap-0.5"
+                        >
+                          Ver 200+ modelos <IconExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      </div>
+                      <Select
+                        value={isCustomModel ? "__custom__" : (config.openrouterModel || "deepseek/deepseek-chat")}
+                        onValueChange={(val) => {
+                          if (val === "__custom__") {
+                            setIsCustomModel(true)
+                          } else {
+                            setIsCustomModel(false)
+                            setConfig((c) => ({ ...c, openrouterModel: val }))
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-9 text-xs rounded-xl bg-zinc-50 dark:bg-zinc-950">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="text-xs rounded-xl max-h-72">
+                          {CURATED_OPENROUTER_MODELS.map((m) => (
+                            <SelectItem key={m.id} value={m.id} className="py-1.5">
+                              <div className="flex items-center justify-between gap-2 w-full">
+                                <span className="font-semibold">{m.name}</span>
+                                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">
+                                  {m.badge}
+                                </span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="__custom__" className="py-1.5 font-bold text-purple-600 dark:text-purple-400">
+                            ✏️ Otro modelo (Escribir ID personalizado)
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Campo de ID de modelo personalizado */}
+                    {isCustomModel && (
+                      <div className="space-y-1 p-2 rounded-xl bg-purple-500/5 border border-purple-500/20">
+                        <Label className="text-[11px] font-bold text-purple-700 dark:text-purple-300">
+                          ID Exacto del Modelo en OpenRouter
+                        </Label>
+                        <Input
+                          type="text"
+                          value={customOpenRouterModel}
+                          onChange={(e) => {
+                            setCustomOpenRouterModel(e.target.value)
+                            setConfig((c) => ({ ...c, openrouterModel: e.target.value }))
+                          }}
+                          placeholder="Ej: google/gemini-2.0-flash-exp:free o meta-llama/llama-3.2-3b-instruct"
+                          className="h-8 text-xs font-mono bg-white dark:bg-zinc-950"
+                        />
+                        <span className="text-[10px] text-zinc-500">
+                          Puedes copiar cualquier ID disponible en el catálogo de openrouter.ai/models.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* BLOQUE DEEPSEEK DIRECTO */}
+                {config.aiProvider !== "openrouter" && (
+                  <div className="space-y-3 pt-1 border-t border-blue-500/20">
+                    {/* DeepSeek API Key */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                          DeepSeek API Key (Token Secreto) *
+                        </Label>
+                        <a
+                          href="https://platform.deepseek.com/api_keys"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[10px] text-zinc-500 hover:text-zinc-950 dark:hover:text-white underline flex items-center gap-0.5"
+                        >
+                          Obtener Token en DeepSeek <IconExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      </div>
+                      <div className="relative">
+                        <Input
+                          type={showApiKey ? "text" : "password"}
+                          value={config.deepseekApiKey || ""}
+                          onChange={(e) => setConfig((c) => ({ ...c, deepseekApiKey: e.target.value }))}
+                          placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+                          className="pr-10 h-9 text-xs font-mono bg-zinc-50 dark:bg-zinc-950"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+                        >
+                          {showApiKey ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Modelo DeepSeek */}
+                    <div className="space-y-1">
+                      <Label className="text-xs font-bold">Modelo DeepSeek</Label>
+                      <Select
+                        value={config.deepseekModel}
+                        onValueChange={(val) => setConfig((c) => ({ ...c, deepseekModel: val }))}
+                      >
+                        <SelectTrigger className="h-9 text-xs rounded-xl bg-zinc-50 dark:bg-zinc-950">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="text-xs rounded-xl">
+                          <SelectItem value="deepseek-chat">deepseek-chat (V3 - Rápido & Económico)</SelectItem>
+                          <SelectItem value="deepseek-reasoner">deepseek-reasoner (R1 - Razonamiento)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tokens Máximos & Botón de Prueba */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                   <div className="space-y-1">
                     <Label className="text-xs font-bold">Tokens Máx. por Respuesta</Label>
                     <Input
@@ -1326,20 +1559,23 @@ export default function WhatsAppAgentView() {
                       className="h-9 text-xs font-mono bg-zinc-50 dark:bg-zinc-950"
                     />
                   </div>
-                </div>
 
-                {/* Botón de Test DeepSeek */}
-                <div className="pt-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleTestDeepSeek}
-                    disabled={testingDeepSeek}
-                    className="w-full text-xs h-8 rounded-xl gap-1.5 border-zinc-300 dark:border-zinc-700"
-                  >
-                    <IconBolt className={cn("h-3.5 w-3.5", testingDeepSeek && "animate-spin")} />
-                    {testingDeepSeek ? "Probando conexión…" : "⚡ Probar Conexión con DeepSeek"}
-                  </Button>
+                  <div className="space-y-1 flex flex-col justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => handleTestAi()}
+                      disabled={testingAi}
+                      className="w-full text-xs h-9 rounded-xl gap-1.5 border-zinc-300 dark:border-zinc-700 cursor-pointer"
+                    >
+                      <IconBolt className={cn("h-3.5 w-3.5", testingAi && "animate-spin")} />
+                      {testingAi
+                        ? "Probando conexión…"
+                        : config.aiProvider === "openrouter"
+                        ? "⚡ Probar OpenRouter"
+                        : "⚡ Probar DeepSeek"}
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Directivas / System Prompt de la sede */}
@@ -1499,7 +1735,13 @@ export default function WhatsAppAgentView() {
               <IconRobot className="h-4 w-4" /> Simular Mensaje de Cliente
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Prueba la respuesta autónoma de DeepSeek IA con el catálogo exclusivo de <strong>{activeBranch?.name || "esta sede"}</strong>.
+              Prueba la respuesta autónoma de{" "}
+              <strong>
+                {config.aiProvider === "openrouter"
+                  ? `OpenRouter (${config.openrouterModel || "deepseek/deepseek-chat"})`
+                  : `DeepSeek IA (${config.deepseekModel})`}
+              </strong>{" "}
+              con el catálogo exclusivo de <strong>{activeBranch?.name || "esta sede"}</strong>.
             </DialogDescription>
           </DialogHeader>
 
