@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   IconBrandWhatsapp,
+  IconBrandTelegram,
   IconSend,
   IconRobot,
   IconUser,
@@ -75,6 +76,7 @@ import { cn } from "@/lib/utils"
 
 interface Conversation {
   phone: string
+  channel?: "whatsapp" | "telegram"
   client: {
     id: string
     name: string
@@ -148,6 +150,9 @@ interface BranchConfig {
   metaPhoneNumberId?: string | null
   metaAccessToken?: string | null
   metaVerifyToken?: string | null
+  telegramBotToken?: string | null
+  telegramBotUsername?: string | null
+  telegramEnabled?: boolean
   aiProvider?: "deepseek" | "openrouter"
   deepseekApiKey?: string | null
   deepseekModel: string
@@ -161,9 +166,11 @@ interface BranchConfig {
   hasDeepSeekKey?: boolean
   hasOpenRouterKey?: boolean
   hasMetaToken?: boolean
+  hasTelegramToken?: boolean
   deepseekApiKeyMasked?: string
   openrouterApiKeyMasked?: string
   metaAccessTokenMasked?: string
+  telegramBotTokenMasked?: string
 }
 
 export default function WhatsAppAgentView() {
@@ -180,7 +187,7 @@ export default function WhatsAppAgentView() {
   const [loadingConv, setLoadingConv] = useState(true)
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null)
   const [searchFilter, setSearchFilter] = useState("")
-  const [statusFilter, setStatusFilter] = useState<"all" | "unread" | "with_orders">("all")
+  const [statusFilter, setStatusFilter] = useState<"all" | "whatsapp" | "telegram" | "unread" | "with_orders">("all")
 
   // Mensajes del chat seleccionado
   const [chatMessages, setChatMessages] = useState<Message[]>([])
@@ -214,14 +221,18 @@ export default function WhatsAppAgentView() {
   const [simText, setSimText] = useState("")
   const [simPhone, setSimPhone] = useState("+573105551234")
   const [simCustomerName, setSimCustomerName] = useState("Carlos Mendoza")
+  const [simChannel, setSimChannel] = useState<"whatsapp" | "telegram">("whatsapp")
   const [simulating, setSimulating] = useState(false)
 
   const openSimModal = () => {
     if (selectedPhone) {
       setSimPhone(selectedPhone)
-      setSimCustomerName(selectedConv?.client?.name || "Cliente WhatsApp")
+      const isTg = selectedPhone.startsWith("tg_") || selectedConv?.channel === "telegram"
+      setSimChannel(isTg ? "telegram" : "whatsapp")
+      setSimCustomerName(selectedConv?.client?.name || (isTg ? "Usuario Telegram" : "Cliente WhatsApp"))
     } else {
       setSimPhone("+573105551234")
+      setSimChannel("whatsapp")
       setSimCustomerName("Carlos Mendoza")
     }
     setSimModalOpen(true)
@@ -234,6 +245,9 @@ export default function WhatsAppAgentView() {
     metaPhoneNumberId: "",
     metaAccessToken: "",
     metaVerifyToken: "omnipos_verify_token_2026",
+    telegramBotToken: "",
+    telegramBotUsername: "",
+    telegramEnabled: false,
     aiProvider: "deepseek",
     deepseekApiKey: "",
     deepseekModel: "deepseek-chat",
@@ -248,13 +262,16 @@ export default function WhatsAppAgentView() {
   const [loadingConfig, setLoadingConfig] = useState(false)
   const [savingConfig, setSavingConfig] = useState(false)
   const [testingAi, setTestingAi] = useState(false)
+  const [testingTelegram, setTestingTelegram] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
   const [showOpenRouterKey, setShowOpenRouterKey] = useState(false)
   const [showMetaToken, setShowMetaToken] = useState(false)
+  const [showTelegramToken, setShowTelegramToken] = useState(false)
   const [isCustomModel, setIsCustomModel] = useState(false)
   const [customOpenRouterModel, setCustomOpenRouterModel] = useState("")
   const [copiedUrl, setCopiedUrl] = useState(false)
   const [copiedToken, setCopiedToken] = useState(false)
+  const [copiedTgWebhook, setCopiedTgWebhook] = useState(false)
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
@@ -293,6 +310,9 @@ export default function WhatsAppAgentView() {
           deepseekApiKey: res.config.deepseekApiKeyMasked || "",
           openrouterApiKey: res.config.openrouterApiKeyMasked || "",
           metaAccessToken: res.config.metaAccessTokenMasked || "",
+          telegramBotToken: res.config.telegramBotTokenMasked || res.config.telegramBotToken || "",
+          telegramBotUsername: res.config.telegramBotUsername || "",
+          telegramEnabled: Boolean(res.config.telegramEnabled),
         })
       }
     } catch {
@@ -486,11 +506,84 @@ export default function WhatsAppAgentView() {
     }
   }
 
+  // Probar y conectar Bot de Telegram
+  const handleTestTelegram = async () => {
+    if (!config.telegramBotToken?.trim()) {
+      toast.error("Ingresa el Bot Token proporcionado por @BotFather")
+      return
+    }
+    setTestingTelegram(true)
+    try {
+      const res = await apiFetch<{
+        ok: boolean
+        bot: { id: number; first_name: string; username: string }
+        webhookUrl: string
+        webhookSet: boolean
+        webhookStatusNote: string
+        message: string
+        error?: string
+      }>("/api/telegram/test", {
+        method: "POST",
+        body: JSON.stringify({
+          token: config.telegramBotToken,
+          branchId: currentBranchId,
+          action: "connect",
+        }),
+      })
+
+      if (res && res.ok) {
+        toast.success(res.message || `¡Bot ${res.bot.username} conectado!`)
+        if (res.webhookStatusNote) {
+          toast.info(res.webhookStatusNote)
+        }
+        setConfig((c) => ({
+          ...c,
+          telegramBotUsername: res.bot.username,
+          telegramEnabled: true,
+          hasTelegramToken: true,
+        }))
+        loadBranchConfig(currentBranchId)
+      } else {
+        toast.error(res.error || "No se pudo conectar con el bot de Telegram")
+      }
+    } catch (e) {
+      toast.error("Error al conectar Telegram: " + (e as Error).message)
+    } finally {
+      setTestingTelegram(false)
+    }
+  }
+
+  // Desvincular Bot de Telegram
+  const handleDisconnectTelegram = async () => {
+    if (!confirm("¿Deseas desvincular el bot de Telegram de esta sede?")) return
+    try {
+      await apiFetch("/api/telegram/test", {
+        method: "POST",
+        body: JSON.stringify({
+          branchId: currentBranchId,
+          action: "disconnect",
+        }),
+      })
+      toast.success("Bot de Telegram desvinculado con éxito")
+      setConfig((c) => ({
+        ...c,
+        telegramBotToken: "",
+        telegramBotUsername: "",
+        telegramEnabled: false,
+        hasTelegramToken: false,
+      }))
+      loadBranchConfig(currentBranchId)
+    } catch (e) {
+      toast.error("Error al desvincular: " + (e as Error).message)
+    }
+  }
+
   // Enviar mensaje manual desde el agente humano con actualización optimista inmediata
   const handleSendAgentMessage = async () => {
     if (!selectedPhone || !agentReplyText.trim() || sendingReply) return
 
     const textToSend = agentReplyText.trim()
+    const isTg = selectedPhone.startsWith("tg_") || selectedConv?.channel === "telegram"
     setAgentReplyText("")
 
     // Inserción optimista inmediata en la vista para respuesta instantánea
@@ -518,7 +611,7 @@ export default function WhatsAppAgentView() {
       if (res && res.ok) {
         await loadMessages(selectedPhone, true)
         loadConversations(false)
-        toast.success("Mensaje enviado por WhatsApp")
+        toast.success(isTg ? "Mensaje enviado por Telegram" : "Mensaje enviado por WhatsApp")
       }
     } catch (e) {
       toast.error("Error al enviar mensaje: " + (e as Error).message)
@@ -531,8 +624,8 @@ export default function WhatsAppAgentView() {
   // Simular mensaje de entrada con IA DeepSeek u OpenRouter
   const handleSimulateInbound = async (presetText?: string) => {
     const text = (presetText || simText).trim()
-    const targetPhone = (simPhone || selectedPhone || "+573105551234").trim()
-    const targetName = (simCustomerName || selectedConv?.client?.name || "Carlos Mendoza").trim()
+    const targetPhone = (simPhone || selectedPhone || (simChannel === "telegram" ? "tg_573105551234" : "+573105551234")).trim()
+    const targetName = (simCustomerName || selectedConv?.client?.name || (simChannel === "telegram" ? "Carlos (Telegram)" : "Carlos Mendoza")).trim()
 
     if (!text) {
       toast.error("Ingresa el mensaje a simular")
@@ -553,6 +646,7 @@ export default function WhatsAppAgentView() {
           customerName: targetName,
           message: text,
           branchId: currentBranchId,
+          channel: simChannel,
         }),
       })
 
@@ -699,11 +793,14 @@ export default function WhatsAppAgentView() {
     }
   }
 
-  const copyToClipboard = (text: string, type: "url" | "token") => {
+  const copyToClipboard = (text: string, type: "url" | "token" | "tg_url") => {
     navigator.clipboard.writeText(text)
     if (type === "url") {
       setCopiedUrl(true)
       setTimeout(() => setCopiedUrl(false), 2000)
+    } else if (type === "tg_url") {
+      setCopiedTgWebhook(true)
+      setTimeout(() => setCopiedTgWebhook(false), 2000)
     } else {
       setCopiedToken(true)
       setTimeout(() => setCopiedToken(false), 2000)
@@ -715,14 +812,21 @@ export default function WhatsAppAgentView() {
     ? `${window.location.origin}/api/whatsapp/webhook`
     : "https://tudominio.com/api/whatsapp/webhook"
 
+  const tgWebhookUrl = typeof window !== "undefined"
+    ? `${window.location.origin}/api/telegram/webhook?branchId=${currentBranchId}`
+    : `https://tudominio.com/api/telegram/webhook?branchId=${currentBranchId}`
+
   // Filtrado de conversaciones
   const filteredConversations = conversations.filter((c) => {
+    const isTg = c.channel === "telegram" || c.phone.startsWith("tg_")
     const matchesSearch =
       c.phone.includes(searchFilter) ||
       (c.client?.name || "").toLowerCase().includes(searchFilter.toLowerCase()) ||
       (c.lastMessage?.text || "").toLowerCase().includes(searchFilter.toLowerCase())
 
     if (!matchesSearch) return false
+    if (statusFilter === "whatsapp") return !isTg
+    if (statusFilter === "telegram") return isTg
     if (statusFilter === "unread") return c.unreadCount > 0
     if (statusFilter === "with_orders") return c.latestOrder !== null
     return true
@@ -741,7 +845,7 @@ export default function WhatsAppAgentView() {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-lg sm:text-xl font-black tracking-tight text-zinc-950 dark:text-white">
-                Agente IA WhatsApp & CRM
+                Agente IA Omnicanal & CRM
               </h1>
               {config.aiProvider === "openrouter" ? (
                 config.hasOpenRouterKey ? (
@@ -762,9 +866,15 @@ export default function WhatsAppAgentView() {
                   DeepSeek Pendiente
                 </Badge>
               )}
+              {config.telegramBotUsername && config.telegramEnabled && (
+                <Badge variant="outline" className="text-[10px] font-mono tracking-wider bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30 gap-1">
+                  <IconBrandTelegram className="h-3 w-3 text-blue-500" />
+                  Telegram ({config.telegramBotUsername})
+                </Badge>
+              )}
             </div>
             <p className="text-xs text-zinc-600 dark:text-zinc-400">
-              Atención 24/7, consultas de catálogo, pedidos automáticos y fiados por sede.
+              Omnicanal 24/7 (WhatsApp + Telegram), catálogo inteligente, pedidos automáticos y fiados por sede.
             </p>
           </div>
         </div>
@@ -833,7 +943,7 @@ export default function WhatsAppAgentView() {
               )}
             >
               <IconCpu className="h-3.5 w-3.5" />
-              IA & Meta por Sede
+              Canales & IA por Sede
             </button>
           </div>
         </div>
@@ -860,7 +970,7 @@ export default function WhatsAppAgentView() {
                 />
               </div>
 
-              <div className="flex items-center justify-between text-[11px] gap-1">
+              <div className="flex items-center justify-between text-[11px] gap-1 flex-wrap">
                 <button
                   onClick={() => setStatusFilter("all")}
                   className={cn(
@@ -869,6 +979,24 @@ export default function WhatsAppAgentView() {
                   )}
                 >
                   Todos
+                </button>
+                <button
+                  onClick={() => setStatusFilter("whatsapp")}
+                  className={cn(
+                    "px-1.5 py-0.5 rounded-md font-semibold transition-colors cursor-pointer flex items-center gap-1",
+                    statusFilter === "whatsapp" ? "bg-emerald-600 text-white" : "text-zinc-500 hover:text-foreground"
+                  )}
+                >
+                  <IconBrandWhatsapp className="h-3 w-3" /> WA
+                </button>
+                <button
+                  onClick={() => setStatusFilter("telegram")}
+                  className={cn(
+                    "px-1.5 py-0.5 rounded-md font-semibold transition-colors cursor-pointer flex items-center gap-1",
+                    statusFilter === "telegram" ? "bg-blue-600 text-white" : "text-zinc-500 hover:text-foreground"
+                  )}
+                >
+                  <IconBrandTelegram className="h-3 w-3" /> TG
                 </button>
                 <button
                   onClick={() => setStatusFilter("unread")}
@@ -886,7 +1014,7 @@ export default function WhatsAppAgentView() {
                     statusFilter === "with_orders" ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950" : "text-zinc-500 hover:text-foreground"
                   )}
                 >
-                  Con pedidos
+                  Pedidos
                 </button>
               </div>
             </div>
@@ -910,13 +1038,14 @@ export default function WhatsAppAgentView() {
                   <IconMessageCircle className="h-8 w-8 text-zinc-300 dark:text-zinc-700 mx-auto" />
                   <p className="font-semibold">Sin conversaciones aún en esta sede</p>
                   <p className="text-[11px] text-zinc-400">
-                    Usa "+ Simular Mensaje" para probar el bot de DeepSeek con clientes ficticios.
+                    Usa "+ Simular Mensaje" para probar el bot con WhatsApp o Telegram.
                   </p>
                 </div>
               ) : (
                 filteredConversations.map((c) => {
                   const isSelected = selectedPhone === c.phone
-                  const displayName = c.client?.name || `Contacto (${c.phone.slice(-4)})`
+                  const isTg = c.channel === "telegram" || c.phone.startsWith("tg_")
+                  const displayName = c.client?.name || (isTg ? `Telegram (@${c.phone.replace("tg_", "")})` : `Contacto (${c.phone.slice(-4)})`)
                   return (
                     <button
                       key={c.phone}
@@ -929,9 +1058,23 @@ export default function WhatsAppAgentView() {
                       )}
                     >
                       <div className="relative shrink-0">
-                        <div className="h-9 w-9 rounded-full bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-bold flex items-center justify-center text-xs">
+                        <div className={cn(
+                          "h-9 w-9 rounded-full font-bold flex items-center justify-center text-xs",
+                          isTg
+                            ? "bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200"
+                            : "bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                        )}>
                           {displayName.slice(0, 2).toUpperCase()}
                         </div>
+                        {isTg ? (
+                          <span className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-white dark:bg-zinc-900 shadow-xs flex items-center justify-center border border-zinc-200 dark:border-zinc-800">
+                            <IconBrandTelegram className="h-2.5 w-2.5 text-blue-500" />
+                          </span>
+                        ) : (
+                          <span className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-white dark:bg-zinc-900 shadow-xs flex items-center justify-center border border-zinc-200 dark:border-zinc-800">
+                            <IconBrandWhatsapp className="h-2.5 w-2.5 text-emerald-500" />
+                          </span>
+                        )}
                         {c.unreadCount > 0 && (
                           <span className="absolute -top-1 -right-1 h-4 min-w-[16px] px-1 bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 rounded-full text-[9px] font-bold flex items-center justify-center">
                             {c.unreadCount}
@@ -952,6 +1095,15 @@ export default function WhatsAppAgentView() {
                         </p>
 
                         <div className="flex items-center gap-1.5 pt-0.5 flex-wrap">
+                          {isTg ? (
+                            <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/30 gap-0.5">
+                              <IconBrandTelegram className="h-2.5 w-2.5" /> Telegram
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900 bg-emerald-50/50 dark:bg-emerald-950/30 gap-0.5">
+                              <IconBrandWhatsapp className="h-2.5 w-2.5" /> WhatsApp
+                            </Badge>
+                          )}
                           {c.latestOrder && (
                             <Badge variant="outline" className="text-[9px] py-0 px-1.5 font-mono uppercase border-zinc-300 dark:border-zinc-700">
                               📦 {c.latestOrder.status}
@@ -996,27 +1148,49 @@ export default function WhatsAppAgentView() {
                 {/* Cabecera del chat */}
                 <div className="p-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/60 flex items-center justify-between gap-3 shrink-0">
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="h-9 w-9 rounded-full bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 font-bold flex items-center justify-center text-xs shrink-0">
-                      {(selectedConv.client?.name || selectedPhone).slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-bold text-xs truncate text-zinc-950 dark:text-white">
-                          {selectedConv.client?.name || `Contacto (${selectedPhone.slice(-4)})`}
-                        </p>
-                        <Badge variant="outline" className="text-[9px] font-mono border-zinc-300 dark:border-zinc-700">
-                          {selectedPhone}
-                        </Badge>
-                      </div>
-                      <p className="text-[11px] text-zinc-500 flex items-center gap-1.5">
-                        <span>Sede: <strong>{activeBranch?.name || "Principal"}</strong></span>
-                        <span>·</span>
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200/60 dark:border-emerald-800/40">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
-                          En vivo (Auto-actualizado)
-                        </span>
-                      </p>
-                    </div>
+                    {(() => {
+                      const isTg = selectedPhone.startsWith("tg_") || selectedConv.channel === "telegram"
+                      const displayName = selectedConv.client?.name || (isTg ? `Telegram (@${selectedPhone.replace("tg_", "")})` : `Contacto (${selectedPhone.slice(-4)})`)
+                      return (
+                        <>
+                          <div className={cn(
+                            "h-9 w-9 rounded-full font-bold flex items-center justify-center text-xs shrink-0 relative",
+                            isTg ? "bg-blue-600 text-white" : "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950"
+                          )}>
+                            {displayName.slice(0, 2).toUpperCase()}
+                            {isTg && (
+                              <span className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full bg-white dark:bg-zinc-900 flex items-center justify-center">
+                                <IconBrandTelegram className="h-2.5 w-2.5 text-blue-500" />
+                              </span>
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="font-bold text-xs truncate text-zinc-950 dark:text-white">
+                                {displayName}
+                              </p>
+                              {isTg ? (
+                                <Badge variant="outline" className="text-[9px] font-mono border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 gap-1">
+                                  <IconBrandTelegram className="h-3 w-3 text-blue-500" /> Telegram ID: {selectedPhone.replace("tg_", "")}
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[9px] font-mono border-zinc-300 dark:border-zinc-700 gap-1">
+                                  <IconBrandWhatsapp className="h-3 w-3 text-emerald-600" /> {selectedPhone}
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-zinc-500 flex items-center gap-1.5">
+                              <span>Sede: <strong>{activeBranch?.name || "Principal"}</strong></span>
+                              <span>·</span>
+                              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200/60 dark:border-emerald-800/40">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
+                                En vivo (Auto-actualizado)
+                              </span>
+                            </p>
+                          </div>
+                        </>
+                      )
+                    })()}
                   </div>
 
                   {/* Acciones de cabecera */}
@@ -1204,7 +1378,7 @@ export default function WhatsAppAgentView() {
                           handleSendAgentMessage()
                         }
                       }}
-                      placeholder="Escribe una respuesta como Agente Humano…"
+                      placeholder={selectedPhone.startsWith("tg_") || selectedConv?.channel === "telegram" ? "Escribe una respuesta como Agente Humano (se despachará por Telegram)..." : "Escribe una respuesta como Agente Humano (se despachará por WhatsApp)..."}
                       className="h-10 text-xs rounded-xl bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 flex-1"
                     />
                     <Button
@@ -1867,7 +2041,136 @@ export default function WhatsAppAgentView() {
                 </CardContent>
               </Card>
 
-              {/* Tarjeta 3: Optimización y Ahorro de Tokens */}
+              {/* Tarjeta 3: Conexión Telegram (BotFather) */}
+              <Card className="rounded-2xl border-zinc-200 dark:border-zinc-800 shadow-sm">
+                <CardHeader className="p-4 pb-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <IconBrandTelegram className="h-4 w-4 text-blue-500" />
+                      <CardTitle className="text-sm font-bold text-zinc-950 dark:text-white">
+                        Conexión Telegram (BotFather)
+                      </CardTitle>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
+                        {config.telegramEnabled ? "Activo" : "Inactivo"}
+                      </span>
+                      <Switch
+                        checked={Boolean(config.telegramEnabled)}
+                        onCheckedChange={(checked) => setConfig((c) => ({ ...c, telegramEnabled: checked }))}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-zinc-500">
+                    Conecta un bot oficial de Telegram creado en @BotFather para responder clientes y tomar pedidos por Telegram.
+                  </p>
+                </CardHeader>
+
+                <CardContent className="p-4 space-y-3">
+                  {/* Token de Telegram */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-bold">Telegram Bot Token (HTTP API)</Label>
+                      <a
+                        href="https://t.me/BotFather"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-medium"
+                      >
+                        Crear Bot en @BotFather <IconExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                    <div className="relative">
+                      <Input
+                        type={showTelegramToken ? "text" : "password"}
+                        value={config.telegramBotToken || ""}
+                        onChange={(e) => setConfig((c) => ({ ...c, telegramBotToken: e.target.value }))}
+                        placeholder="1234567890:ABCdefGhIJKlmNoPQRsTUVwxyZ_1234567"
+                        className="pr-10 h-9 text-xs font-mono bg-zinc-50 dark:bg-zinc-950"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowTelegramToken(!showTelegramToken)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer"
+                      >
+                        {showTelegramToken ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Bot Conectado Info */}
+                  {config.telegramBotUsername && (
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 text-xs">
+                      <div className="flex items-center gap-2">
+                        <IconBrandTelegram className="h-4 w-4 text-blue-500 shrink-0" />
+                        <div>
+                          <p className="font-bold text-blue-950 dark:text-blue-100">
+                            Bot Vinculado: <span className="font-mono text-blue-600 dark:text-blue-400">{config.telegramBotUsername}</span>
+                          </p>
+                          <p className="text-[11px] text-blue-800 dark:text-blue-300">
+                            Atendiendo clientes de {activeBranch?.name || "esta sede"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <a
+                          href={`https://t.me/${config.telegramBotUsername.replace("@", "")}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11px] font-semibold text-blue-700 dark:text-blue-300 hover:underline px-2 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-blue-200 dark:border-blue-800 flex items-center gap-1"
+                        >
+                          Abrir Chat <IconExternalLink className="h-3 w-3" />
+                        </a>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={handleDisconnectTelegram}
+                          className="h-7 text-[11px] text-rose-600 hover:text-rose-700 px-2 cursor-pointer"
+                        >
+                          Desvincular
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Botón de Conexión & Webhook */}
+                  <div className="space-y-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleTestTelegram}
+                      disabled={testingTelegram}
+                      className="w-full text-xs h-9 rounded-xl gap-1.5 border-blue-200 dark:border-blue-900 hover:bg-blue-50 dark:hover:bg-blue-950/50 text-blue-700 dark:text-blue-300 cursor-pointer"
+                    >
+                      <IconBrandTelegram className={cn("h-4 w-4 text-blue-500", testingTelegram && "animate-spin")} />
+                      {testingTelegram ? "Verificando con Telegram…" : "Probar y Conectar Bot de Telegram"}
+                    </Button>
+
+                    {/* Webhook URL Helper */}
+                    <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-200 dark:border-zinc-800 space-y-1.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 block">
+                        URL Webhook de Telegram para esta sede
+                      </span>
+                      <div className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-white dark:bg-zinc-900 border text-[11px] font-mono">
+                        <span className="truncate">{tgWebhookUrl}</span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => copyToClipboard(tgWebhookUrl, "tg_url")}
+                          className="h-6 text-[10px] px-2 cursor-pointer"
+                        >
+                          {copiedTgWebhook ? <IconCheck className="h-3 w-3 text-emerald-600" /> : <IconCopy className="h-3 w-3" />}
+                        </Button>
+                      </div>
+                      <p className="text-[10px] text-zinc-500">
+                        Al hacer clic en &quot;Probar y Conectar&quot;, OmniPOS registra este webhook automáticamente en los servidores de Telegram.
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Tarjeta 4: Optimización y Ahorro de Tokens */}
               <Card className="rounded-2xl border-zinc-200 dark:border-zinc-800 shadow-sm bg-zinc-50/50 dark:bg-zinc-950/40">
                 <CardHeader className="p-4 pb-2">
                   <div className="flex items-center gap-2">
@@ -1920,14 +2223,53 @@ export default function WhatsAppAgentView() {
           </DialogHeader>
 
           <div className="space-y-3 pt-2">
+            {/* Selector de Canal a Simular */}
+            <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+              <span className="text-[11px] font-semibold text-zinc-500">Canal de entrada:</span>
+              <div className="flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSimChannel("whatsapp")
+                    if (simPhone.startsWith("tg_")) setSimPhone("+573105551234")
+                  }}
+                  className={cn(
+                    "px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer",
+                    simChannel === "whatsapp"
+                      ? "bg-emerald-600 text-white shadow-2xs"
+                      : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
+                  )}
+                >
+                  <IconBrandWhatsapp className="h-3.5 w-3.5" /> WhatsApp
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSimChannel("telegram")
+                    if (!simPhone.startsWith("tg_")) setSimPhone("tg_573105551234")
+                  }}
+                  className={cn(
+                    "px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer",
+                    simChannel === "telegram"
+                      ? "bg-blue-600 text-white shadow-2xs"
+                      : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
+                  )}
+                >
+                  <IconBrandTelegram className="h-3.5 w-3.5" /> Telegram
+                </button>
+              </div>
+            </div>
+
             {/* Datos del Cliente simulado */}
             <div className="grid grid-cols-2 gap-2 pb-2 border-b border-zinc-100 dark:border-zinc-800">
               <div className="space-y-1">
-                <Label className="text-[11px] font-semibold">Teléfono / WhatsApp</Label>
+                <Label className="text-[11px] font-semibold">
+                  {simChannel === "telegram" ? "Telegram Chat ID / User" : "Teléfono / WhatsApp"}
+                </Label>
                 <Input
                   value={simPhone}
                   onChange={(e) => setSimPhone(e.target.value)}
-                  placeholder="+573105551234"
+                  placeholder={simChannel === "telegram" ? "tg_573105551234" : "+573105551234"}
                   className="h-8 text-xs font-mono rounded-lg"
                 />
               </div>
@@ -1936,7 +2278,7 @@ export default function WhatsAppAgentView() {
                 <Input
                   value={simCustomerName}
                   onChange={(e) => setSimCustomerName(e.target.value)}
-                  placeholder="Carlos Mendoza"
+                  placeholder={simChannel === "telegram" ? "Carlos (Telegram)" : "Carlos Mendoza"}
                   className="h-8 text-xs rounded-lg"
                 />
               </div>
@@ -1956,6 +2298,7 @@ export default function WhatsAppAgentView() {
               <span className="text-[11px] font-bold text-zinc-400 block">Pruebas rápidas:</span>
               <div className="flex flex-wrap gap-1.5">
                 {[
+                  "/start",
                   "Hola, ¿qué productos tienen disponibles?",
                   "¿Cuánto vale el Alcohol Antiséptico y el Acetaminofén?",
                   "Envíame 1 Alcohol Antiséptico a la Carrera 15 # 45-20",

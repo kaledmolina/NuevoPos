@@ -10,7 +10,13 @@ export async function POST(req: NextRequest) {
     const branchId = branchAccess instanceof NextResponse ? null : branchAccess.branchId
 
     const body = await req.json()
-    const { message, phone = "+573001234567", customerName = "Cliente de Prueba", branchId: bodyBranchId } = body
+    const {
+      message,
+      phone = "+573001234567",
+      customerName = "Cliente de Prueba",
+      branchId: bodyBranchId,
+      channel = "whatsapp",
+    } = body
     const targetBranchId = bodyBranchId || (branchAccess instanceof NextResponse ? null : branchAccess.branchId)
 
     if (!message || typeof message !== "string") {
@@ -22,6 +28,7 @@ export async function POST(req: NextRequest) {
       customerName,
       message,
       branchId: targetBranchId,
+      channel,
     })
 
     return NextResponse.json({

@@ -389,6 +389,7 @@ model OrderItem {
 model WhatsAppMessage {
   id        String   @id @default(cuid())
   phone     String
+  channel   String   @default("whatsapp") // "whatsapp" | "telegram"
   sender    String   // "customer" | "bot" | "agent"
   text      String
   status    String   @default("read") // "unread" | "read" | "sent" | "delivered"
@@ -401,6 +402,7 @@ model WhatsAppMessage {
   createdAt DateTime @default(now())
 
   @@index([phone])
+  @@index([channel])
   @@index([branchId])
   @@index([createdAt])
 }
@@ -419,7 +421,7 @@ model WhatsAppTemplate {
 }
 
 
-// Configuracion de WhatsApp e IA (DeepSeek & OpenRouter) por Sede
+// Configuracion de Canales (WhatsApp & Telegram) e IA por Sede
 model WhatsAppConfig {
   id                   String   @id @default(cuid())
   branchId             String   @unique
@@ -428,6 +430,9 @@ model WhatsAppConfig {
   metaPhoneNumberId    String?  // ID de numero en Meta Cloud API
   metaAccessToken      String?  // Token de acceso de Meta Cloud API
   metaVerifyToken      String?  @default("omnipos_verify_token_2026")
+  telegramBotToken     String?  // Token del bot de Telegram (@BotFather)
+  telegramBotUsername  String?  // Username del bot (ej. @mi_tienda_bot)
+  telegramEnabled      Boolean  @default(false)
   aiProvider           String   @default("deepseek") // "deepseek" | "openrouter"
   deepseekApiKey       String?  // Token de API de DeepSeek (sk-...)
   deepseekModel        String   @default("deepseek-chat") // "deepseek-chat" | "deepseek-reasoner"

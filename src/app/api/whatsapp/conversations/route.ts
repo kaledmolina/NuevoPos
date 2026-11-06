@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic"
 
 export interface ConversationItem {
   phone: string
+  channel: "whatsapp" | "telegram"
   client: {
     id: string
     name: string
@@ -155,8 +156,11 @@ export async function GET(req: NextRequest) {
           }
         : null
 
+      const isTelegram = phone.startsWith("tg_") || (lastMsg as any)?.channel === "telegram"
+
       conversations.push({
         phone,
+        channel: isTelegram ? "telegram" : "whatsapp",
         client: data.client
           ? {
               id: data.client.id,
@@ -223,12 +227,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Teléfono y texto son requeridos" }, { status: 400 })
     }
 
-    const cleanPhone = String(phone).replace(/[^0-9+]/g, "")
+    const isTelegram = String(phone).startsWith("tg_")
+    const cleanPhone = isTelegram ? String(phone) : String(phone).replace(/[^0-9+]/g, "")
 
     // Buscar cliente asociado
     const client = await db.client.findFirst({
       where: {
-        OR: [{ phone: cleanPhone }, { phone: cleanPhone.replace("+", "") }],
+        OR: [
+          { phone: cleanPhone },
+          ...(isTelegram ? [] : [{ phone: cleanPhone.replace("+", "") }]),
+        ],
         ...(branchId ? { branchId } : {}),
       },
     })
@@ -242,30 +250,46 @@ export async function POST(req: NextRequest) {
         status: "sent",
         branchId: branchId || null,
         clientId: client?.id || null,
+        channel: isTelegram ? "telegram" : "whatsapp",
       },
     })
 
-    // Despachar por Meta Cloud API (credenciales de la sede o globales)
+    // Despachar por Telegram Bot API o Meta Cloud API (credenciales de la sede o globales)
     const config = branchId
       ? await db.whatsAppConfig.findUnique({ where: { branchId } })
       : null
 
-    const token = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
-    const phoneId = config?.metaPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
-    if (token && phoneId) {
-      await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: cleanPhone,
-          type: "text",
-          text: { body: text.trim() },
-        }),
-      }).catch((e) => console.error("[Meta Dispatch Error]:", e))
+    if (isTelegram) {
+      const tgToken = config?.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN
+      if (tgToken) {
+        const chatId = cleanPhone.replace("tg_", "")
+        await fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: text.trim(),
+          }),
+        }).catch((e) => console.error("[Telegram Dispatch Error]:", e))
+      }
+    } else {
+      const token = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
+      const phoneId = config?.metaPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
+      if (token && phoneId) {
+        await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            to: cleanPhone,
+            type: "text",
+            text: { body: text.trim() },
+          }),
+        }).catch((e) => console.error("[Meta Dispatch Error]:", e))
+      }
     }
 
     return NextResponse.json({
@@ -293,8 +317,9 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "El teléfono es requerido" }, { status: 400 })
     }
 
-    const cleanPhone = String(phone).replace(/[^0-9+]/g, "")
-    const altPhone = cleanPhone.replace("+", "")
+    const isTelegram = String(phone).startsWith("tg_")
+    const cleanPhone = isTelegram ? String(phone) : String(phone).replace(/[^0-9+]/g, "")
+    const altPhone = isTelegram ? cleanPhone : cleanPhone.replace("+", "")
 
     // 1. Eliminar todos los mensajes asociados a este teléfono
     const deletedMsgs = await db.whatsAppMessage.deleteMany({

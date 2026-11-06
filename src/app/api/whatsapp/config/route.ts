@@ -58,6 +58,7 @@ export async function GET(req: NextRequest) {
       hasDeepSeekKey: !!config.deepseekApiKey,
       hasOpenRouterKey: !!config.openrouterApiKey,
       hasMetaToken: !!config.metaAccessToken,
+      hasTelegramToken: !!config.telegramBotToken,
       deepseekApiKeyMasked: config.deepseekApiKey
         ? `${config.deepseekApiKey.slice(0, 5)}••••••••${config.deepseekApiKey.slice(-4)}`
         : "",
@@ -66,6 +67,9 @@ export async function GET(req: NextRequest) {
         : "",
       metaAccessTokenMasked: config.metaAccessToken
         ? `${config.metaAccessToken.slice(0, 6)}••••••••${config.metaAccessToken.slice(-4)}`
+        : "",
+      telegramBotTokenMasked: config.telegramBotToken
+        ? `${config.telegramBotToken.slice(0, 6)}••••••••${config.telegramBotToken.slice(-4)}`
         : "",
     }
 
@@ -95,6 +99,9 @@ export async function POST(req: NextRequest) {
       metaPhoneNumberId,
       metaAccessToken,
       metaVerifyToken,
+      telegramBotToken,
+      telegramBotUsername,
+      telegramEnabled,
       aiProvider,
       deepseekApiKey,
       deepseekModel,
@@ -119,6 +126,8 @@ export async function POST(req: NextRequest) {
       phoneNumber: phoneNumber ?? null,
       metaPhoneNumberId: metaPhoneNumberId ?? null,
       metaVerifyToken: metaVerifyToken || "omnipos_verify_token_2026",
+      telegramBotUsername: telegramBotUsername ?? null,
+      telegramEnabled: Boolean(telegramEnabled),
       aiProvider: aiProvider || "deepseek",
       deepseekModel: deepseekModel || "deepseek-chat",
       openrouterModel: openrouterModel || "deepseek/deepseek-chat",
@@ -151,6 +160,13 @@ export async function POST(req: NextRequest) {
         dataToUpdate.metaAccessToken = metaAccessToken.trim()
       }
     }
+    if (telegramBotToken !== undefined) {
+      if (telegramBotToken === "") {
+        dataToUpdate.telegramBotToken = null
+      } else if (!telegramBotToken.includes("••••")) {
+        dataToUpdate.telegramBotToken = telegramBotToken.trim()
+      }
+    }
 
     const updated = await db.whatsAppConfig.upsert({
       where: { branchId },
@@ -168,8 +184,9 @@ export async function POST(req: NextRequest) {
         hasDeepSeekKey: !!updated.deepseekApiKey,
         hasOpenRouterKey: !!updated.openrouterApiKey,
         hasMetaToken: !!updated.metaAccessToken,
+        hasTelegramToken: !!updated.telegramBotToken,
       },
-      message: "Configuración de WhatsApp e IA guardada exitosamente para la sede.",
+      message: "Configuración omnicanal (WhatsApp, Telegram e IA) guardada exitosamente.",
     })
   } catch (error) {
     console.error("[WhatsApp Config POST Error]:", error)

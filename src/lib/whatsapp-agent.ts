@@ -20,9 +20,12 @@ export async function processWhatsAppMessage(params: {
   customerName?: string
   message: string
   branchId?: string | null
+  channel?: "whatsapp" | "telegram"
 }): Promise<BotProcessResult> {
-  const { phone, message, branchId } = params
-  const cleanPhone = phone.replace(/[^0-9+]/g, "")
+  const { phone, message, branchId, channel } = params
+  const isTelegram = channel === "telegram" || phone.startsWith("tg_")
+  const cleanPhone = isTelegram ? (phone.startsWith("tg_") ? phone : `tg_${phone}`) : phone.replace(/[^0-9+]/g, "")
+  const effectiveChannel = isTelegram ? "telegram" : "whatsapp"
   const text = message.trim()
 
   // 1. Identificar la Sede y su Configuración
@@ -50,7 +53,7 @@ export async function processWhatsAppMessage(params: {
     where: {
       OR: [
         { phone: cleanPhone },
-        { phone: cleanPhone.replace("+", "") },
+        ...(isTelegram ? [] : [{ phone: cleanPhone.replace("+", "") }]),
       ],
       ...branchFilter,
     },
@@ -60,7 +63,7 @@ export async function processWhatsAppMessage(params: {
   if (!client) {
     client = await db.client.create({
       data: {
-        name: params.customerName || `Cliente WhatsApp (${cleanPhone.slice(-4)})`,
+        name: params.customerName || (isTelegram ? `Usuario Telegram (@${cleanPhone.replace("tg_", "")})` : `Cliente WhatsApp (${cleanPhone.slice(-4)})`),
         phone: cleanPhone,
         branchId: resolvedBranchId,
         creditAccount: {
@@ -84,6 +87,7 @@ export async function processWhatsAppMessage(params: {
       status: "unread",
       branchId: resolvedBranchId,
       clientId: client.id,
+      channel: effectiveChannel,
     },
   }).catch(() => {})
 
@@ -102,6 +106,7 @@ export async function processWhatsAppMessage(params: {
         client,
         branch,
         config,
+        channel: effectiveChannel,
       })
       if (result && result.orderNumber) {
         // Encontrar el ID de la orden creada para vincularla al mensaje
@@ -336,6 +341,7 @@ export async function processWhatsAppMessage(params: {
       branchId: resolvedBranchId,
       clientId: client.id,
       orderId: createdOrderId,
+      channel: effectiveChannel,
     },
   }).catch(() => {})
 
@@ -353,8 +359,11 @@ async function processWithLLMAI(params: {
   client: any
   branch: any
   config: any
+  channel?: "whatsapp" | "telegram"
 }): Promise<BotProcessResult> {
-  const { message, cleanPhone, client, branch, config } = params
+  const { message, cleanPhone, client, branch, config, channel = "whatsapp" } = params
+  const isTelegram = channel === "telegram" || cleanPhone.startsWith("tg_")
+  const channelLabel = isTelegram ? "Telegram" : "WhatsApp"
   const branchId = branch?.id
   const branchName = branch?.name || "Sede Principal"
   const branchFilter = branchId ? { branchId } : {}
@@ -490,13 +499,13 @@ async function processWithLLMAI(params: {
   }))
 
   // 3. Prompt de sistema ultra-conciso y optimizado
-  const systemPrompt = `Eres el asistente virtual comercial de "${branchName}" por WhatsApp.
+  const systemPrompt = `Eres el asistente virtual comercial de "${branchName}" por ${channelLabel}.
 Tu misión: Atender con calidez, consultar precios, sugerir productos, dar estado de pedidos en tiempo real y tomar órdenes a domicilio.
 
 REGLAS DE ORO (Ahorro de tokens y precisión):
-1. Responde SIEMPRE en español de forma concisa (MÁXIMO 3 líneas o viñetas limpias de WhatsApp).
+1. Responde SIEMPRE en español de forma concisa (MÁXIMO 3 líneas o viñetas limpias).
 2. CATÁLOGO REAL: SOLO cotiza y vende los productos listados en el "CATÁLOGO DE ESTA SEDE". NUNCA inventes productos ni precios.
-3. Si el cliente pregunta qué productos hay, qué venden o pide el catálogo, lista los productos disponibles indicando su precio exacto y disponibilidad.
+3. Si el cliente saluda, envía "/start" o pregunta qué productos hay o qué venden, dale la bienvenida a "${branchName}" y lista los productos disponibles indicando su precio exacto y disponibilidad.
 4. Si el cliente pide o menciona un producto que NO está en el catálogo, indícale amablemente que no lo manejas en esta sede y recomiéndale los que sí tienes disponibles.
 5. Datos del cliente: Nombre "${client.name}". Fiado / saldo pendiente: $${clientBalance.toLocaleString("es-CO")}. Dirección registrada: ${client.address ? `"${client.address}"` : "Ninguna"}.
 6. PROTOCOLO OBLIGATORIO DE TOMA DE PEDIDOS (UN PASO A LA VEZ):
@@ -619,7 +628,7 @@ ${catalogContext}`
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "")
         const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString()
         const genOrderNum = `PED-${dateStr}-${randomSuffix}`
-        const finalAddress = orderPayload.address || client.address || "Dirección por WhatsApp"
+        const finalAddress = orderPayload.address || client.address || (isTelegram ? "Dirección según Telegram" : "Dirección según WhatsApp")
 
         // Actualizar dirección del cliente si no tenía
         if (orderPayload.address && !client.address) {
@@ -665,7 +674,7 @@ ${catalogContext}`
             customerPhone: cleanPhone,
             deliveryAddress: finalAddress,
             deliveryNotes: paymentNote,
-            notes: `Generado automáticamente por ${providerName} IA (${branchName}).`,
+            notes: `Generado automáticamente por ${isTelegram ? `Telegram (@${config?.telegramBotUsername || "Bot"})` : "WhatsApp"} & ${providerName} IA (${branchName}).`,
             subtotal,
             tax: 0,
             deliveryFee: 0,
