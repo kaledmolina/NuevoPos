@@ -369,9 +369,12 @@ export default function WhatsAppAgentView() {
     }
   }, [currentBranchId, loadBranchConfig, loadConversations])
 
-  // Polling silencioso de conversaciones cada 3.5s
+  // Polling silencioso de conversaciones cada 5s solo si la pestaña está visible
   useEffect(() => {
-    const interval = setInterval(() => loadConversations(false), 3500)
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return
+      loadConversations(false)
+    }, 5000)
     return () => clearInterval(interval)
   }, [loadConversations])
 
@@ -402,13 +405,14 @@ export default function WhatsAppAgentView() {
     }
   }, [])
 
-  // Refresco en tiempo real del chat activo cada 1.5s (sin recargar la página)
+  // Refresco en tiempo real del chat activo cada 2.5s (sin recargar la página, solo con ventana activa)
   useEffect(() => {
     if (!selectedPhone) return
     loadMessages(selectedPhone, false)
     const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return
       loadMessages(selectedPhone, true)
-    }, 1500)
+    }, 2500)
     return () => clearInterval(interval)
   }, [selectedPhone, loadMessages])
 
@@ -1568,13 +1572,13 @@ export default function WhatsAppAgentView() {
                   </div>
 
                   {selectedConv.latestOrder ? (
-                    <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-800 space-y-3">
+                    <div className="p-2.5 rounded-xl bg-zinc-50/80 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-800 space-y-2">
                       {/* Cabecera del pedido */}
-                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <div className="flex items-center justify-between gap-1">
                         <button
                           type="button"
                           onClick={() => setOrderDetailModalOpen(true)}
-                          className="font-mono font-black text-xs text-zinc-950 dark:text-white hover:underline flex items-center gap-1 cursor-pointer"
+                          className="font-mono font-bold text-[11px] text-zinc-950 dark:text-white hover:underline flex items-center gap-1 cursor-pointer bg-white dark:bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-800"
                           title="Clic para ver detalle completo"
                         >
                           #{selectedConv.latestOrder.orderNumber}
@@ -1584,70 +1588,56 @@ export default function WhatsAppAgentView() {
                         {(() => {
                           const st = selectedConv.latestOrder.status
                           if (st === "entregado") {
-                            return <Badge className="text-[9px] font-mono uppercase bg-emerald-600 text-white">✅ Entregado</Badge>
+                            return <Badge className="text-[9px] font-mono uppercase bg-emerald-600 text-white py-0.5 px-1.5">✅ Entregado</Badge>
                           }
                           if (st === "en_camino") {
-                            return <Badge className="text-[9px] font-mono uppercase bg-purple-600 text-white">🛵 En Camino</Badge>
+                            return <Badge className="text-[9px] font-mono uppercase bg-purple-600 text-white py-0.5 px-1.5">🛵 En Camino</Badge>
                           }
                           if (st === "en_preparacion") {
-                            return <Badge className="text-[9px] font-mono uppercase bg-indigo-600 text-white">📦 Preparando</Badge>
+                            return <Badge className="text-[9px] font-mono uppercase bg-indigo-600 text-white py-0.5 px-1.5">📦 Preparando</Badge>
                           }
                           if (st === "confirmado") {
-                            return <Badge className="text-[9px] font-mono uppercase bg-blue-600 text-white">👍 Confirmado</Badge>
+                            return <Badge className="text-[9px] font-mono uppercase bg-blue-600 text-white py-0.5 px-1.5">👍 Confirmado</Badge>
                           }
                           if (st === "cancelado") {
-                            return <Badge className="text-[9px] font-mono uppercase bg-rose-600 text-white">❌ Cancelado</Badge>
+                            return <Badge className="text-[9px] font-mono uppercase bg-rose-600 text-white py-0.5 px-1.5">❌ Cancelado</Badge>
                           }
-                          return <Badge className="text-[9px] font-mono uppercase bg-amber-500 text-white">🕒 Pendiente</Badge>
+                          return <Badge className="text-[9px] font-mono uppercase bg-amber-500 text-white py-0.5 px-1.5">🕒 Pendiente</Badge>
                         })()}
                       </div>
 
-                      {/* Total del Pedido */}
-                      <div className="flex items-center justify-between text-xs pt-0.5">
-                        <span className="text-zinc-500">Total a Cobrar:</span>
-                        <span className="font-black font-mono text-sm text-zinc-950 dark:text-white">
-                          {formatCurrency(selectedConv.latestOrder.total)}
-                        </span>
+                      {/* Fila Total y Estado de Pago */}
+                      <div className="flex items-center justify-between pt-0.5">
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-[10px] text-zinc-500 font-medium">Total:</span>
+                          <span className="font-black font-mono text-sm text-zinc-950 dark:text-white">
+                            {formatCurrency(selectedConv.latestOrder.total)}
+                          </span>
+                        </div>
+                        {selectedConv.latestOrder.paymentStatus === "pagado" ? (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-600 text-white">
+                            <IconCheck className="h-2.5 w-2.5" /> Pagado
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500 text-white">
+                            ⏳ Pendiente
+                          </span>
+                        )}
                       </div>
 
-                      {/* SECCIÓN 1: CONTROL Y CONFIRMACIÓN DE PAGO */}
-                      <div
-                        className={cn(
-                          "p-2.5 rounded-xl border space-y-2 text-xs transition-all",
-                          selectedConv.latestOrder.paymentStatus === "pagado"
-                            ? "bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50"
-                            : selectedConv.latestOrder.paymentMethod === "transferencia"
-                            ? "bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/50"
-                            : "bg-blue-50/60 dark:bg-zinc-900 border-blue-200 dark:border-zinc-800"
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-1 flex-wrap">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                            Estado del Pago
-                          </span>
-                          {selectedConv.latestOrder.paymentStatus === "pagado" ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-600 text-white shadow-2xs">
-                              <IconCheck className="h-3 w-3" /> Pagado / Confirmado
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500 text-white shadow-2xs">
-                              Pendiente de Pago
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Medio de pago toggle rápido */}
-                        <div className="flex items-center justify-between text-[11px] gap-2 pt-0.5">
-                          <span className="text-zinc-500">Medio de Pago:</span>
+                      {/* MICRO-PANEL DE PAGO */}
+                      <div className="p-2 rounded-lg border border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/90 space-y-1.5">
+                        <div className="flex items-center justify-between gap-1">
+                          {/* Medio de pago toggle */}
                           <div className="flex items-center gap-1">
                             <button
                               type="button"
                               onClick={() => handleQuickUpdatePaymentMethod(selectedConv.latestOrder!.id, "efectivo")}
                               className={cn(
-                                "px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer",
+                                "px-1.5 py-0.5 rounded text-[9px] font-semibold transition-all cursor-pointer",
                                 selectedConv.latestOrder.paymentMethod !== "transferencia"
-                                  ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 font-bold"
-                                  : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700"
+                                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 font-bold"
+                                  : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
                               )}
                             >
                               💵 Efectivo
@@ -1656,73 +1646,66 @@ export default function WhatsAppAgentView() {
                               type="button"
                               onClick={() => handleQuickUpdatePaymentMethod(selectedConv.latestOrder!.id, "transferencia")}
                               className={cn(
-                                "px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer",
+                                "px-1.5 py-0.5 rounded text-[9px] font-semibold transition-all cursor-pointer",
                                 selectedConv.latestOrder.paymentMethod === "transferencia"
                                   ? "bg-purple-600 text-white font-bold"
-                                  : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700"
+                                  : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
                               )}
                             >
-                              💳 Transferencia
+                              💳 Transf
                             </button>
                           </div>
-                        </div>
 
-                        {/* Explicación de cobro domiciliario */}
-                        <div className="text-[11px] leading-snug">
-                          {selectedConv.latestOrder.paymentStatus === "pagado" ? (
-                            <p className="text-emerald-700 dark:text-emerald-300 font-medium">
-                              ✓ Pago liquidado. El domiciliario <strong>NO debe cobrar</strong> dinero ($0 COP). Sincronizado a Ventas.
-                            </p>
-                          ) : selectedConv.latestOrder.paymentMethod === "transferencia" ? (
-                            <p className="text-amber-700 dark:text-amber-300 font-medium">
-                              ⚠️ Pago por transferencia. Verifica el comprobante antes de despachar el pedido.
-                            </p>
+                          {/* Acción rápida de pago */}
+                          {selectedConv.latestOrder.paymentStatus !== "pagado" ? (
+                            <button
+                              type="button"
+                              onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pagado")}
+                              className="h-6 px-2 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-md shadow-2xs inline-flex items-center gap-1 cursor-pointer transition-all"
+                            >
+                              <IconCheck className="h-3 w-3" />
+                              Confirmar Pago
+                            </button>
                           ) : (
-                            <p className="text-blue-700 dark:text-blue-300 font-medium">
-                              💵 Cobro contraentrega: El domiciliario <strong>DEBE cobrar {formatCurrency(selectedConv.latestOrder.total)}</strong> al entregar.
-                            </p>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pendiente")}
+                              className="text-[9px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 underline cursor-pointer"
+                            >
+                              Revertir pago
+                            </button>
                           )}
                         </div>
 
-                        {/* Botón de Confirmación de Pago */}
-                        {selectedConv.latestOrder.paymentStatus !== "pagado" ? (
-                          <Button
-                            size="sm"
-                            type="button"
-                            onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pagado")}
-                            className="w-full h-7 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-2xs gap-1.5 cursor-pointer mt-1"
-                          >
-                            <IconCheck className="h-3.5 w-3.5" />
-                            Confirmar Pago Recibido (Marcar Pagado)
-                          </Button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pendiente")}
-                            className="text-[10px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 underline cursor-pointer block pt-0.5 text-center w-full"
-                          >
-                            Revertir a pago pendiente
-                          </button>
-                        )}
+                        {/* Hint de cobro ultra-compacto */}
+                        <div className="text-[10px] leading-tight text-zinc-600 dark:text-zinc-300">
+                          {selectedConv.latestOrder.paymentStatus === "pagado" ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                              ✓ Liquidado en Ventas (Cobrar $0 al cliente)
+                            </span>
+                          ) : selectedConv.latestOrder.paymentMethod === "transferencia" ? (
+                            <span className="text-amber-600 dark:text-amber-400 font-medium">
+                              ⚠️ Verificar comprobante antes de despachar
+                            </span>
+                          ) : (
+                            <span className="text-blue-600 dark:text-blue-400 font-medium">
+                              💵 Cobrar {formatCurrency(selectedConv.latestOrder.total)} contraentrega
+                            </span>
+                          )}
+                        </div>
                       </div>
 
-                      {/* SECCIÓN 2: CAMBIAR ESTADO DE ENVÍO */}
-                      <div className="pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">
-                            Estado de Envío:
-                          </span>
-                          <span className="text-[10px] text-zinc-400">1 clic para cambiar</span>
-                        </div>
+                      {/* CAMBIO RÁPIDO DE ESTADO DE ENVÍO */}
+                      <div className="space-y-1 pt-0.5">
                         <div className="grid grid-cols-3 gap-1">
                           <button
                             type="button"
                             onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "en_preparacion")}
                             className={cn(
-                              "py-1 px-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer",
+                              "py-1 px-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer text-center",
                               selectedConv.latestOrder.status === "en_preparacion"
                                 ? "bg-indigo-600 text-white font-bold shadow-2xs"
-                                : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100"
+                                : "bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800"
                             )}
                           >
                             📦 Preparar
@@ -1731,10 +1714,10 @@ export default function WhatsAppAgentView() {
                             type="button"
                             onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "en_camino")}
                             className={cn(
-                              "py-1 px-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer",
+                              "py-1 px-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer text-center",
                               selectedConv.latestOrder.status === "en_camino"
                                 ? "bg-purple-600 text-white font-bold shadow-2xs"
-                                : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100"
+                                : "bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800"
                             )}
                           >
                             🛵 En Camino
@@ -1743,22 +1726,32 @@ export default function WhatsAppAgentView() {
                             type="button"
                             onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "entregado")}
                             className={cn(
-                              "py-1 px-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer",
+                              "py-1 px-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer text-center",
                               selectedConv.latestOrder.status === "entregado"
                                 ? "bg-emerald-600 text-white font-bold shadow-2xs"
-                                : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100"
+                                : "bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800"
                             )}
                           >
                             ✅ Entregado
                           </button>
                         </div>
-                        <div className="flex items-center justify-between pt-1 text-[10px]">
+
+                        {/* Fila secundaria: pendiente, cancelar y ver detalle */}
+                        <div className="flex items-center justify-between text-[10px] px-0.5 pt-0.5 text-zinc-500">
                           <button
                             type="button"
                             onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "pendiente")}
-                            className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white underline cursor-pointer"
+                            className="hover:text-zinc-900 dark:hover:text-white underline cursor-pointer"
                           >
-                            🕒 Dejar Pendiente
+                            🕒 Pendiente
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOrderDetailModalOpen(true)}
+                            className="font-semibold text-zinc-700 dark:text-zinc-300 hover:underline cursor-pointer flex items-center gap-0.5"
+                          >
+                            <IconFileText className="h-3 w-3" />
+                            {selectedConv.latestOrder.itemsCount} {selectedConv.latestOrder.itemsCount === 1 ? "prod" : "prods"}
                           </button>
                           <button
                             type="button"
@@ -1769,41 +1762,23 @@ export default function WhatsAppAgentView() {
                             }}
                             className="text-rose-500 hover:text-rose-700 underline cursor-pointer"
                           >
-                            ❌ Cancelar Pedido
+                            ❌ Cancelar
                           </button>
                         </div>
                       </div>
 
-                      {/* SECCIÓN 3: REPARTIDOR & PRODUCTOS */}
-                      <div className="pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 space-y-1.5 text-[11px]">
+                      {/* Repartidor y dirección en 1 línea compacta */}
+                      <div className="pt-1 border-t border-zinc-200/60 dark:border-zinc-800/60 text-[10px] text-zinc-500 space-y-0.5">
                         <div className="flex items-center justify-between">
-                          <span className="text-zinc-500 flex items-center gap-1">
-                            <IconTruckDelivery className="h-3.5 w-3.5" /> Domiciliario:
-                          </span>
-                          <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                            {selectedConv.latestOrder.deliveryDriverName || "Sin conductor"}
+                          <span className="flex items-center gap-1">
+                            <IconTruckDelivery className="h-3 w-3" />
+                            {selectedConv.latestOrder.deliveryDriverName || "Sin repartidor"}
                           </span>
                         </div>
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="text-zinc-500 shrink-0 flex items-center gap-1">
-                            <IconMapPin className="h-3.5 w-3.5" /> Entrega:
-                          </span>
-                          <span className="font-medium text-right text-zinc-900 dark:text-zinc-100 line-clamp-2">
-                            {selectedConv.latestOrder.deliveryAddress || "Dirección según chat"}
-                          </span>
+                        <div className="flex items-center gap-1 text-zinc-700 dark:text-zinc-300 truncate">
+                          <IconMapPin className="h-3 w-3 shrink-0 text-zinc-400" />
+                          <span className="truncate">{selectedConv.latestOrder.deliveryAddress || "Dirección según chat"}</span>
                         </div>
-
-                        {/* Botón para ver items */}
-                        <Button
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                          onClick={() => setOrderDetailModalOpen(true)}
-                          className="w-full h-7 text-[11px] rounded-lg mt-1 gap-1 cursor-pointer"
-                        >
-                          <IconFileText className="h-3 w-3" />
-                          Ver Detalle Completo ({selectedConv.latestOrder.itemsCount} productos)
-                        </Button>
                       </div>
                     </div>
                   ) : (

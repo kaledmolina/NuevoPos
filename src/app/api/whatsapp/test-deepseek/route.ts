@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
 
     let resolvedKey = apiKey
 
-    // Si no se pasó explícito en la prueba, buscar la de la sede
+    // Si no se pasó explícito en la prueba, buscar la de la sede o de variables de entorno
     if ((!resolvedKey || resolvedKey.includes("••••")) && branchId) {
       const cfg = await db.whatsAppConfig.findUnique({
         where: { branchId },
@@ -32,10 +32,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (!resolvedKey || resolvedKey.includes("••••")) {
+      resolvedKey = isOpener ? process.env.OPENROUTER_API_KEY : process.env.DEEPSEEK_API_KEY
+    }
+
+    if (!resolvedKey || resolvedKey.includes("••••")) {
       return NextResponse.json(
         {
           ok: false,
-          error: `No se proporcionó una clave de API válida de ${isOpener ? "OpenRouter" : "DeepSeek"}.`,
+          error: `No se proporcionó una clave de API válida de ${isOpener ? "OpenRouter" : "DeepSeek"}. Por favor configúrala en el formulario o en variables de entorno.`,
         },
         { status: 400 }
       )
@@ -57,6 +61,9 @@ export async function POST(req: NextRequest) {
       headers["X-Title"] = "OmniPOS AI Agent"
     }
 
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 8500)
+
     // Llamada ultra liviana de prueba (5 tokens)
     const response = await fetch(url, {
       method: "POST",
@@ -70,7 +77,8 @@ export async function POST(req: NextRequest) {
         max_tokens: 5,
         temperature: 0.1,
       }),
-    })
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer))
 
     const latencyMs = Date.now() - startTime
 

@@ -126,6 +126,53 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    const allPhones = Array.from(convMap.keys())
+    const allClientIds = Array.from(convMap.values())
+      .map((d) => d.client?.id)
+      .filter((id): id is string => Boolean(id))
+
+    // Búsqueda en BATCH de pedidos: 1 sola consulta optimizada en vez de N consultas por contacto
+    const batchOrders = (allPhones.length > 0 || allClientIds.length > 0)
+      ? await db.order.findMany({
+          where: {
+            OR: [
+              ...(allPhones.length > 0 ? [{ customerPhone: { in: allPhones } }] : []),
+              ...(allClientIds.length > 0 ? [{ clientId: { in: allClientIds } }] : []),
+            ],
+            ...branchFilter,
+          },
+          orderBy: { createdAt: "desc" },
+          include: {
+            _count: { select: { items: true } },
+            items: {
+              select: {
+                id: true,
+                productName: true,
+                quantity: true,
+                unitPrice: true,
+                subtotal: true,
+              },
+            },
+          },
+          take: 500,
+        })
+      : []
+
+    // Mapeo en memoria O(1) de pedidos por teléfono y clientId
+    const ordersByPhone = new Map<string, typeof batchOrders>()
+    const ordersByClientId = new Map<string, typeof batchOrders>()
+
+    for (const ord of batchOrders) {
+      if (ord.customerPhone) {
+        if (!ordersByPhone.has(ord.customerPhone)) ordersByPhone.set(ord.customerPhone, [])
+        ordersByPhone.get(ord.customerPhone)!.push(ord)
+      }
+      if (ord.clientId) {
+        if (!ordersByClientId.has(ord.clientId)) ordersByClientId.set(ord.clientId, [])
+        ordersByClientId.get(ord.clientId)!.push(ord)
+      }
+    }
+
     const conversations: ConversationItem[] = []
 
     for (const [phone, data] of convMap.entries()) {
@@ -133,49 +180,35 @@ export async function GET(req: NextRequest) {
       const lastMsg = msgs[0] || null
       const unreadCount = msgs.filter((m) => m.sender === "customer" && m.status === "unread").length
 
-      // Buscar pedidos asociados al teléfono o cliente
-      const orders = await db.order.findMany({
-        where: {
-          OR: [
-            { customerPhone: phone },
-            ...(data.client ? [{ clientId: data.client.id }] : []),
-          ],
-          ...branchFilter,
-        },
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        include: {
-          _count: { select: { items: true } },
-          items: true,
-        },
-      })
+      // Obtener pedidos del cliente en memoria O(1)
+      const phoneOrders = ordersByPhone.get(phone) || []
+      const clientOrders = data.client ? ordersByClientId.get(data.client.id) || [] : []
+      const combinedOrdersMap = new Map<string, typeof batchOrders[0]>()
+      for (const o of phoneOrders) combinedOrdersMap.set(o.id, o)
+      for (const o of clientOrders) combinedOrdersMap.set(o.id, o)
+      const clientOrdersList = Array.from(combinedOrdersMap.values()).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      )
 
-      const totalOrdersCount = await db.order.count({
-        where: {
-          OR: [
-            { customerPhone: phone },
-            ...(data.client ? [{ clientId: data.client.id }] : []),
-          ],
-          ...branchFilter,
-        },
-      })
+      const latestOrderObj = clientOrdersList[0] || null
+      const totalOrdersCount = clientOrdersList.length
 
-      const latestOrder = orders[0]
+      const latestOrder = latestOrderObj
         ? {
-            id: orders[0].id,
-            orderNumber: orders[0].orderNumber,
-            status: orders[0].status,
-            total: orders[0].total,
-            deliveryAddress: orders[0].deliveryAddress,
-            createdAt: orders[0].createdAt.toISOString(),
-            itemsCount: orders[0]._count.items,
-            paymentMethod: orders[0].paymentMethod || "efectivo",
-            paymentStatus: orders[0].paymentStatus || "pendiente",
-            deliveryDriverName: orders[0].deliveryDriverName,
-            deliveryDriverPhone: orders[0].deliveryDriverPhone,
-            deliveryNotes: orders[0].deliveryNotes,
-            notes: orders[0].notes,
-            items: orders[0].items.map((it) => ({
+            id: latestOrderObj.id,
+            orderNumber: latestOrderObj.orderNumber,
+            status: latestOrderObj.status,
+            total: latestOrderObj.total,
+            deliveryAddress: latestOrderObj.deliveryAddress,
+            createdAt: latestOrderObj.createdAt.toISOString(),
+            itemsCount: latestOrderObj._count.items,
+            paymentMethod: latestOrderObj.paymentMethod || "efectivo",
+            paymentStatus: latestOrderObj.paymentStatus || "pendiente",
+            deliveryDriverName: latestOrderObj.deliveryDriverName,
+            deliveryDriverPhone: latestOrderObj.deliveryDriverPhone,
+            deliveryNotes: latestOrderObj.deliveryNotes,
+            notes: latestOrderObj.notes,
+            items: latestOrderObj.items.map((it) => ({
               id: it.id,
               name: it.productName,
               quantity: it.quantity,

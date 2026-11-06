@@ -53,20 +53,24 @@ export async function GET(req: NextRequest) {
     }
 
     // Ocultar parcialmente tokens sensibles para seguridad en frontend
+    const effectiveDeepSeekKey = config.deepseekApiKey || process.env.DEEPSEEK_API_KEY || ""
+    const effectiveOpenRouterKey = config.openrouterApiKey || process.env.OPENROUTER_API_KEY || ""
+    const effectiveMetaToken = config.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN || ""
+
     const maskedConfig = {
       ...config,
-      hasDeepSeekKey: !!config.deepseekApiKey,
-      hasOpenRouterKey: !!config.openrouterApiKey,
-      hasMetaToken: !!config.metaAccessToken,
+      hasDeepSeekKey: !!effectiveDeepSeekKey,
+      hasOpenRouterKey: !!effectiveOpenRouterKey,
+      hasMetaToken: !!effectiveMetaToken,
       hasTelegramToken: !!config.telegramBotToken,
-      deepseekApiKeyMasked: config.deepseekApiKey
-        ? `${config.deepseekApiKey.slice(0, 5)}••••••••${config.deepseekApiKey.slice(-4)}`
+      deepseekApiKeyMasked: effectiveDeepSeekKey
+        ? `${effectiveDeepSeekKey.slice(0, 5)}••••••••${effectiveDeepSeekKey.slice(-4)}`
         : "",
-      openrouterApiKeyMasked: config.openrouterApiKey
-        ? `${config.openrouterApiKey.slice(0, 8)}••••••••${config.openrouterApiKey.slice(-4)}`
+      openrouterApiKeyMasked: effectiveOpenRouterKey
+        ? `${effectiveOpenRouterKey.slice(0, 8)}••••••••${effectiveOpenRouterKey.slice(-4)}`
         : "",
-      metaAccessTokenMasked: config.metaAccessToken
-        ? `${config.metaAccessToken.slice(0, 6)}••••••••${config.metaAccessToken.slice(-4)}`
+      metaAccessTokenMasked: effectiveMetaToken
+        ? `${effectiveMetaToken.slice(0, 6)}••••••••${effectiveMetaToken.slice(-4)}`
         : "",
       telegramBotTokenMasked: config.telegramBotToken
         ? `${config.telegramBotToken.slice(0, 6)}••••••••${config.telegramBotToken.slice(-4)}`

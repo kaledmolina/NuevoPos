@@ -79,33 +79,45 @@ export async function processWhatsAppMessage(params: {
   }
 
   // Guardar mensaje entrante del cliente en el CRM
-  await db.whatsAppMessage.create({
-    data: {
-      phone: cleanPhone,
-      sender: "customer",
-      text: message,
-      status: "unread",
-      branchId: resolvedBranchId,
-      clientId: client.id,
-      channel: effectiveChannel,
-    },
-  }).catch(() => {})
+  try {
+    await db.whatsAppMessage.create({
+      data: {
+        phone: cleanPhone,
+        sender: "customer",
+        text: message,
+        status: "unread",
+        branchId: resolvedBranchId,
+        clientId: client.id,
+        channel: effectiveChannel,
+      },
+    })
+  } catch (crmSaveErr) {
+    console.error("[WhatsApp CRM Save Inbound Error]:", crmSaveErr)
+  }
 
   let result: BotProcessResult | null = null
   let createdOrderId: string | null = null
 
-  // 3. INTENTO 1: Si la IA (OpenRouter o DeepSeek) está habilitada y tiene API Key en esta Sede
-  const isOpenerConfigured = config?.aiProvider === "openrouter" && !!config?.openrouterApiKey
-  const isDeepSeekConfigured = (config?.aiProvider !== "openrouter" || !config?.openrouterApiKey) && !!config?.deepseekApiKey
+  // 3. INTENTO 1: Si la IA (OpenRouter o DeepSeek) está habilitada y tiene API Key (en BD o en variables de entorno)
+  const openrouterKey = config?.openrouterApiKey?.trim() || process.env.OPENROUTER_API_KEY?.trim() || ""
+  const deepseekKey = config?.deepseekApiKey?.trim() || process.env.DEEPSEEK_API_KEY?.trim() || ""
+  const isOpenerConfigured = config?.aiProvider === "openrouter" ? !!openrouterKey : !deepseekKey && !!openrouterKey
+  const isDeepSeekConfigured = config?.aiProvider === "deepseek" ? !!deepseekKey : !openrouterKey && !!deepseekKey
+  const hasAnyAiKey = !!openrouterKey || !!deepseekKey
+  const aiEnabled = config?.aiEnabled ?? true
 
-  if (config?.aiEnabled && (isOpenerConfigured || isDeepSeekConfigured)) {
+  if (aiEnabled && hasAnyAiKey) {
     try {
       result = await processWithLLMAI({
         message,
         cleanPhone,
         client,
         branch,
-        config,
+        config: {
+          ...config,
+          openrouterApiKey: openrouterKey,
+          deepseekApiKey: deepseekKey,
+        },
         channel: effectiveChannel,
       })
       if (result && result.orderNumber) {
@@ -117,8 +129,8 @@ export async function processWhatsAppMessage(params: {
         if (ord) createdOrderId = ord.id
       }
     } catch (aiErr) {
-      console.warn("[LLM AI Fallback]", (aiErr as Error).message)
-      // Si falla el proveedor principal (ej. token agotado o red), continúa al motor local abajo
+      console.warn("[LLM AI Fallback to Local Engine]", (aiErr as Error).message)
+      // Si falla el proveedor principal (ej. token agotado, timeout o red), continúa al motor local abajo
       result = null
     }
   }
@@ -323,27 +335,47 @@ export async function processWhatsAppMessage(params: {
           actionTaken: "stock_checked",
         }
       } else {
+        const topProds = allProds.slice(0, 5)
+        const topList = topProds.length > 0
+          ? `\n\n🛒 *Algunos productos disponibles hoy:*\n` +
+            topProds.map((p) => `• *${p.name}*: $${p.price.toLocaleString("es-CO")}`).join("\n") +
+            `\n\n¿Deseas pedir alguno a domicilio?`
+          : ""
         result = {
-          reply: config?.welcomeMessage || `👋 *¡Hola! Bienvenido a la atención por WhatsApp de ${branch?.name || "OmniPOS"}.*\n\n¿En qué te podemos ayudar hoy?\n1️⃣ *Hacer un Pedido:* Envíanos tu lista y tu dirección de entrega.\n2️⃣ *Consultar Precios:* Escríbenos el nombre del producto que buscas.\n3️⃣ *Consultar Fiados / Deuda:* Pregúntanos _"¿Cuánto debo?"_.\n\n¡Estamos a tu servicio!`,
+          reply:
+            (config?.welcomeMessage?.trim() ||
+              `👋 *¡Hola! Bienvenido a la atención por ${effectiveChannel === "telegram" ? "Telegram" : "WhatsApp"} de ${branch?.name || "OmniPOS"}.*\n\n¿En qué te podemos ayudar hoy?\n1️⃣ *Hacer un Pedido:* Envíanos tu lista y tu dirección de entrega.\n2️⃣ *Consultar Precios:* Escríbenos el nombre del producto que buscas.\n3️⃣ *Consultar Fiados / Deuda:* Pregúntanos _"¿Cuánto debo?"_.`) + topList,
           actionTaken: "menu_shown",
         }
       }
     }
   }
 
+  // Garantizar que la respuesta nunca sea nula o vacía
+  if (!result || !result.reply || !result.reply.trim()) {
+    result = {
+      reply: `👋 *¡Hola! Bienvenido a ${branch?.name || "nuestra tienda"}.*\n\n¿En qué te podemos ayudar hoy?\n• Escríbenos los productos que necesitas y te los despachamos a domicilio.\n• Pregúntanos precios o disponibilidad de cualquier artículo.\n\n¡Estamos a tu servicio!`,
+      actionTaken: "menu_shown",
+    }
+  }
+
   // 5. Guardar respuesta final en la base de datos de WhatsApp CRM
-  await db.whatsAppMessage.create({
-    data: {
-      phone: cleanPhone,
-      sender: "bot",
-      text: result.reply,
-      status: "delivered",
-      branchId: resolvedBranchId,
-      clientId: client.id,
-      orderId: createdOrderId,
-      channel: effectiveChannel,
-    },
-  }).catch(() => {})
+  try {
+    await db.whatsAppMessage.create({
+      data: {
+        phone: cleanPhone,
+        sender: "bot",
+        text: result.reply,
+        status: "delivered",
+        branchId: resolvedBranchId,
+        clientId: client.id,
+        orderId: createdOrderId,
+        channel: effectiveChannel,
+      },
+    })
+  } catch (saveErr) {
+    console.error("[WhatsApp CRM Save Bot Reply Error]:", saveErr)
+  }
 
   return result
 }
@@ -368,17 +400,18 @@ async function processWithLLMAI(params: {
   const branchName = branch?.name || "Sede Principal"
   const branchFilter = branchId ? { branchId } : {}
 
-  // Determinar proveedor activo (OpenRouter o DeepSeek)
-  const isOpener =
-    config.aiProvider === "openrouter" && !!config.openrouterApiKey
-  const providerName = isOpener ? "OpenRouter" : "DeepSeek"
-  const apiKey = isOpener
-    ? config.openrouterApiKey?.trim()
-    : config.deepseekApiKey?.trim()
-  const model = isOpener
+  // Determinar proveedor activo (OpenRouter o DeepSeek) y credenciales
+  const openerKey = config.openrouterApiKey?.trim() || process.env.OPENROUTER_API_KEY?.trim() || ""
+  const dsKey = config.deepseekApiKey?.trim() || process.env.DEEPSEEK_API_KEY?.trim() || ""
+
+  // Preferencia según configuración, pero con fallback inteligente si falta una clave
+  let isOpener = config.aiProvider === "openrouter" ? !!openerKey : !dsKey && !!openerKey
+  let providerName = isOpener ? "OpenRouter" : "DeepSeek"
+  let apiKey = isOpener ? openerKey : dsKey
+  let model = isOpener
     ? (config.openrouterModel || "deepseek/deepseek-chat").trim()
     : (config.deepseekModel || "deepseek-chat").trim()
-  const endpoint = isOpener
+  let endpoint = isOpener
     ? "https://openrouter.ai/api/v1/chat/completions"
     : "https://api.deepseek.com/chat/completions"
 
@@ -538,42 +571,108 @@ ${orderTrackingContext}
 CATÁLOGO DE ESTA SEDE (${branchName}):
 ${catalogContext}`
 
-  // 4. Invocación a la API oficial (OpenRouter o DeepSeek)
+  // 4. Invocación a la API oficial (OpenRouter o DeepSeek) con timeout estricto de 8.5s y failover automático
   const maxTokens = config.maxTokensPerReply || 250
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${apiKey}`,
+  async function sendAiRequest(
+    currEndpoint: string,
+    currKey: string,
+    currModel: string,
+    currIsOpener: boolean,
+    currProvider: string
+  ) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 8500) // 8.5 segundos máximo
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${currKey}`,
+    }
+    if (currIsOpener) {
+      headers["HTTP-Referer"] = "https://omnipos.pro"
+      headers["X-Title"] = "OmniPOS WhatsApp AI Agent"
+    }
+
+    try {
+      const res = await fetch(currEndpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: currModel,
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...conversationHistory,
+            { role: "user", content: message },
+          ],
+          max_tokens: maxTokens,
+          temperature: 0.3,
+        }),
+        signal: controller.signal,
+      })
+      clearTimeout(timer)
+      if (!res.ok) {
+        const errBody = await res.text()
+        throw new Error(`${currProvider} API (${res.status}): ${errBody.slice(0, 180)}`)
+      }
+      return await res.json()
+    } catch (e: any) {
+      clearTimeout(timer)
+      const isAbort = e?.name === "AbortError"
+      throw new Error(isAbort ? `${currProvider} timeout (+8.5s)` : (e as Error).message)
+    }
   }
 
-  if (isOpener) {
-    headers["HTTP-Referer"] = "https://omnipos.pro"
-    headers["X-Title"] = "OmniPOS WhatsApp AI Agent"
+  let aiData: any = null
+  let actualProvider = providerName
+  let actualModel = model
+
+  try {
+    aiData = await sendAiRequest(endpoint, apiKey, model, isOpener, providerName)
+  } catch (primaryErr) {
+    console.warn(`[AI Primary ${providerName} Failed]`, (primaryErr as Error).message)
+
+    // Intentar failover al proveedor alternativo si está disponible
+    const canFailoverToOpenRouter = !isOpener && !!openerKey
+    const canFailoverToDeepSeek = isOpener && !!dsKey
+
+    if (canFailoverToOpenRouter) {
+      console.log("[AI Failover] Intentando con OpenRouter...")
+      try {
+        actualProvider = "OpenRouter"
+        actualModel = (config.openrouterModel || "deepseek/deepseek-chat").trim()
+        aiData = await sendAiRequest(
+          "https://openrouter.ai/api/v1/chat/completions",
+          openerKey,
+          actualModel,
+          true,
+          "OpenRouter"
+        )
+      } catch (secErr) {
+        console.warn("[AI Failover OpenRouter Failed]", (secErr as Error).message)
+        throw primaryErr
+      }
+    } else if (canFailoverToDeepSeek) {
+      console.log("[AI Failover] Intentando con DeepSeek Directo...")
+      try {
+        actualProvider = "DeepSeek"
+        actualModel = (config.deepseekModel || "deepseek-chat").trim()
+        aiData = await sendAiRequest(
+          "https://api.deepseek.com/chat/completions",
+          dsKey,
+          actualModel,
+          false,
+          "DeepSeek"
+        )
+      } catch (secErr) {
+        console.warn("[AI Failover DeepSeek Failed]", (secErr as Error).message)
+        throw primaryErr
+      }
+    } else {
+      throw primaryErr
+    }
   }
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...conversationHistory,
-        { role: "user", content: message },
-      ],
-      max_tokens: maxTokens,
-      temperature: 0.3,
-    }),
-  })
-
-  if (!res.ok) {
-    const errorText = await res.text()
-    throw new Error(`${providerName} API error (${res.status}): ${errorText}`)
-  }
-
-  const aiData = await res.json()
-  let rawReply = aiData.choices?.[0]?.message?.content || ""
-  const tokensUsed = aiData.usage?.total_tokens || 0
+  let rawReply = aiData?.choices?.[0]?.message?.content || ""
+  const tokensUsed = aiData?.usage?.total_tokens || 0
 
   let orderNumber: string | undefined
   let orderTotal: number | undefined
@@ -726,6 +825,6 @@ ${catalogContext}`
     orderNumber,
     total: orderTotal,
     tokensUsed,
-    modelUsed: `${providerName}: ${model}`,
+    modelUsed: `${actualProvider}: ${actualModel}`,
   }
 }

@@ -17,26 +17,39 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Parámetro 'phone' es requerido" }, { status: 400 })
     }
 
-    const cleanPhone = phone.replace(/[^0-9+]/g, "")
+    const isTelegram = phone.startsWith("tg_")
+    const cleanPhone = isTelegram ? phone : phone.replace(/[^0-9+]/g, "")
+    const phoneFilter = [
+      { phone: cleanPhone },
+      ...(isTelegram ? [] : [{ phone: cleanPhone.replace("+", "") }]),
+    ]
 
-    // Marcar mensajes no leídos como leídos
-    await db.whatsAppMessage.updateMany({
+    // Marcar mensajes no leídos como leídos solo si existen para evitar escrituras y bloqueos en SQLite
+    const unreadCount = await db.whatsAppMessage.count({
       where: {
-        phone: cleanPhone,
+        OR: phoneFilter,
         sender: "customer",
         status: "unread",
         ...branchFilter,
       },
-      data: { status: "read" },
     })
+
+    if (unreadCount > 0) {
+      await db.whatsAppMessage.updateMany({
+        where: {
+          OR: phoneFilter,
+          sender: "customer",
+          status: "unread",
+          ...branchFilter,
+        },
+        data: { status: "read" },
+      })
+    }
 
     // Cargar historial de mensajes ordenado cronológicamente
     const messages = await db.whatsAppMessage.findMany({
       where: {
-        OR: [
-          { phone: cleanPhone },
-          { phone: cleanPhone.replace("+", "") },
-        ],
+        OR: phoneFilter,
         ...branchFilter,
       },
       orderBy: { createdAt: "asc" },

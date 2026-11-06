@@ -86,27 +86,45 @@ export async function POST(req: NextRequest) {
     })
 
     // 3. Despachar respuesta de vuelta por Meta Cloud API si la sede tiene credenciales
+    if (!config && branchId) {
+      config = await db.whatsAppConfig.findUnique({ where: { branchId } })
+    }
     const token = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
     const phoneId = config?.metaPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
 
-    if (token && phoneId) {
-      await fetch(
-        `https://graph.facebook.com/v18.0/${phoneId}/messages`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            messaging_product: "whatsapp",
-            to: from,
-            type: "text",
-            text: { body: result.reply },
-          }),
+    if (token && phoneId && result?.reply) {
+      try {
+        console.log(`[WhatsApp Webhook] Despachando respuesta a ${from} via Meta Cloud API...`)
+        const metaRes = await fetch(
+          `https://graph.facebook.com/v18.0/${phoneId}/messages`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token.trim()}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              messaging_product: "whatsapp",
+              to: from,
+              type: "text",
+              text: { body: result.reply },
+            }),
+          }
+        )
+        if (!metaRes.ok) {
+          const errText = await metaRes.text()
+          console.error(`[WhatsApp Meta Send Error] Status ${metaRes.status}:`, errText)
+        } else {
+          console.log(`[WhatsApp Webhook] Respuesta entregada con éxito a Meta Cloud API para ${from}`)
         }
-      ).catch((err) => {
-        console.error("[WhatsApp Send Error]:", err)
+      } catch (metaErr) {
+        console.error("[WhatsApp Send Network Error]:", metaErr)
+      }
+    } else {
+      console.warn("[WhatsApp Webhook] Mensaje procesado en CRM pero no despachado a Meta Cloud API:", {
+        hasToken: !!token,
+        hasPhoneId: !!phoneId,
+        hasReply: !!result?.reply,
       })
     }
 
