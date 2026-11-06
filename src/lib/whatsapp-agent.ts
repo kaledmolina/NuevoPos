@@ -498,11 +498,20 @@ REGLAS DE ORO (Ahorro de tokens y precisión):
 2. CATÁLOGO REAL: SOLO cotiza y vende los productos listados en el "CATÁLOGO DE ESTA SEDE". NUNCA inventes productos ni precios.
 3. Si el cliente pregunta qué productos hay, qué venden o pide el catálogo, lista los productos disponibles indicando su precio exacto y disponibilidad.
 4. Si el cliente pide o menciona un producto que NO está en el catálogo, indícale amablemente que no lo manejas en esta sede y recomiéndale los que sí tienes disponibles.
-5. Datos del cliente: Nombre "${client.name}". Fiado / saldo pendiente: $${clientBalance.toLocaleString("es-CO")}.
-6. MÉTODO DE PAGO Y TOMA DE PEDIDOS:
-- Si el cliente quiere pedir pero NO indicó cómo pagará, pregúntale: "¿Cómo deseas pagar? ¿En efectivo o transferencia (Nequi / Daviplata)? Si es en efectivo, ¿con cuánto cancelas para llevarte el cambio?".
-- Si el cliente ya indicó productos válidos, dirección y método de pago (o si ya confirmó su pedido), confirma el resumen y añade al final de tu respuesta EXACTAMENTE este bloque técnico:
-[ORDEN_AUTO: {"items": [{"name": "nombre del producto del catalogo", "qty": 1}], "address": "dirección completa", "paymentMethod": "efectivo" | "transferencia", "cashPaid": 50000}]
+5. Datos del cliente: Nombre "${client.name}". Fiado / saldo pendiente: $${clientBalance.toLocaleString("es-CO")}. Dirección registrada: ${client.address ? `"${client.address}"` : "Ninguna"}.
+6. PROTOCOLO OBLIGATORIO DE TOMA DE PEDIDOS (UN PASO A LA VEZ):
+Para poder crear un pedido se requieren 3 datos: Productos válidos, Forma de pago y Dirección de entrega CONFIRMADA.
+- SI EL CLIENTE TIENE DIRECCIÓN REGISTRADA (${client.address ? `"${client.address}"` : "ninguna"}):
+  * ANTES de generar el pedido, debes preguntarle: "¿Te lo enviamos a tu dirección registrada ${client.address || "..."} o a otra dirección?".
+- SI EL CLIENTE NO TIENE DIRECCIÓN:
+  * Pregúntale a qué dirección desea el envío.
+- SI NO HA DICHO CÓMO PAGAR:
+  * Pregúntale si cancela en efectivo o por transferencia (Nequi/Daviplata).
+- ⚠️ PROHIBICIÓN ESTRICTA DE ORDEN PREMATURA:
+  * Si en tu mensaje estás PREGUNTANDO o CONFIRMANDO la dirección (ej: "¿Confirmas la dirección...", "¿Te lo enviamos a...", etc.): NUNCA agregues el bloque [ORDEN_AUTO].
+  * Si estás preguntando la forma de pago: NUNCA agregues el bloque [ORDEN_AUTO].
+  * ÚNICAMENTE debes agregar el bloque [ORDEN_AUTO] cuando el cliente ya haya respondido confirmando explícitamente la dirección (diciendo "sí", "a esa", "correcto" o dando una dirección nueva) Y ya haya elegido forma de pago.
+[ORDEN_AUTO: {"items": [{"name": "nombre del producto del catalogo", "qty": 1}], "address": "dirección confirmada por el cliente", "paymentMethod": "efectivo" | "transferencia", "cashPaid": 50000}]
 7. CONSULTAS Y ESTADO DE PEDIDOS (TRAZABILIDAD EN TIEMPO REAL):
 Si el cliente pregunta cómo va su pedido, dónde está, si ya salió o por el estado de su orden:
 - Consulta OBLIGATORIAMENTE la sección "ÚLTIMO PEDIDO DEL CLIENTE" abajo.
@@ -567,7 +576,12 @@ ${catalogContext}`
   // Limpiar SIEMPRE el tag técnico de la respuesta que ve el cliente en WhatsApp
   rawReply = rawReply.replace(/\[ORDEN_AUTO:\s*\{[\s\S]*\}\s*\]/g, "").trim()
 
-  if (orderTagMatch && config.autoCreateOrders) {
+  // Evitar creación prematura si el bot todavía le está preguntando al cliente si confirma su dirección o método de pago
+  const isAskingConfirmation =
+    rawReply.includes("?") &&
+    /\b(confirmas|confirma|a qu[eé] direcci[oó]n|cu[aá]l es tu direcci[oó]n|a d[oó]nde te lo enviamos|deseas pagar|con cu[aá]nto cancelas|a esa direcci[oó]n|a tu direcci[oó]n)\b/i.test(rawReply)
+
+  if (orderTagMatch && config.autoCreateOrders && !isAskingConfirmation) {
     try {
       const orderPayload = JSON.parse(orderTagMatch[1])
       const itemsToCreate: { product: any; qty: number }[] = []
