@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
       ...(isTelegram ? [] : [{ phone: cleanPhone.replace("+", "") }]),
     ]
 
-    // Marcar mensajes no leídos como leídos solo si existen para evitar escrituras y bloqueos en SQLite
+    // Marcar mensajes no leídos como leídos solo si existen para optimizar consultas MySQL
     const unreadCount = await db.whatsAppMessage.count({
       where: {
         OR: phoneFilter,

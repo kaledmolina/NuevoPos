@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireAdmin, getSession, logAudit } from "@/lib/auth"
-import { getDatabasePath, getBackupDirectory, isMysql } from "@/lib/db"
+import { getBackupDirectory, isMysql } from "@/lib/db"
 import fs from "fs"
 import path from "path"
 
@@ -10,7 +10,7 @@ export const runtime = "nodejs"
 
 // POST /api/backup/restore — restaura un backup específico:
 // - Para Admin regular: restaura ÚNICAMENTE los datos de sus tiendas/sedes a partir del JSON del backup, sin tocar a ningún otro negocio ni al Superadmin.
-// - Para Superadmin: permite restaurar la base de datos SQLite (.db) completa.
+// - Para Superadmin: permite restaurar la base de datos MySQL a partir de un respaldo estructurado (.json).
 export async function POST(req: NextRequest) {
   const denied = requireAdmin(req)
   if (denied) return denied
@@ -417,9 +417,9 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // CASO 2: Superadministrador (Restauración de backup global MySQL / SQLite)
-    if (!/^(backup|upload|pre-restore)-[\w.-]+\.(json|db)$/.test(backupName)) {
-      return NextResponse.json({ error: "Nombre de backup inválido para restauración global" }, { status: 400 })
+    // CASO 2: Superadministrador (Restauración de backup global MySQL en formato .json)
+    if (!/^(backup|upload|pre-restore)-[\w.-]+\.json$/.test(backupName)) {
+      return NextResponse.json({ error: "Nombre de backup inválido. En MySQL los respaldos deben ser en formato .json" }, { status: 400 })
     }
 
     const backupDir = getBackupDirectory()
@@ -829,32 +829,11 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         ok: true,
-        message: `Backup global ${backupName} restaurado correctamente. Se recomienda recargar la página.`,
+        message: `Backup global ${backupName} restaurado correctamente en MySQL. Se recomienda recargar la página.`,
       })
     }
 
-    // Caso legacy .db (solo si el archivo sqlite existe)
-    const dbPath = getDatabasePath()
-    if (fs.existsSync(dbPath)) {
-      fs.copyFileSync(backupPath, dbPath)
-    }
-
-    try {
-      await logAudit({
-        action: "backup_restore",
-        entityType: "system",
-        userName: session.name,
-        role: session.role,
-        detail: `Backup global restaurado: ${backupName}`,
-      })
-    } catch {
-      /* noop */
-    }
-
-    return NextResponse.json({
-      ok: true,
-      message: `Backup global ${backupName} restaurado correctamente. Se recomienda recargar la página.`,
-    })
+    return NextResponse.json({ error: "Formato de archivo no soportado. Usa respaldos .json" }, { status: 400 })
   } catch (e) {
     console.error("Error al restaurar backup:", e)
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })

@@ -87,13 +87,10 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // SUPERADMIN: Subir .json o .db
-    const isJson = file.name.endsWith(".json")
-    const isDb = file.name.endsWith(".db")
-
-    if (!isJson && !isDb) {
+    // SUPERADMIN: Subir .json
+    if (!file.name.endsWith(".json")) {
       return NextResponse.json(
-        { error: "El archivo de respaldo debe tener formato .json o .db" },
+        { error: "OmniPOS opera sobre MySQL. Los respaldos del sistema deben ser en formato estructurado .json" },
         { status: 400 }
       )
     }
@@ -107,58 +104,17 @@ export async function POST(req: NextRequest) {
     const backupDir = getBackupDirectory()
     const ts = new Date().toISOString().replace(/[:.]/g, "-")
 
-    if (isJson) {
-      const text = await file.text()
-      try {
-        JSON.parse(text)
-      } catch {
-        return NextResponse.json({ error: "El archivo subido no es un JSON válido" }, { status: 400 })
-      }
-
-      const sanitizedBase = path.basename(file.name, ".json").replace(/[^a-zA-Z0-9_-]/g, "_")
-      const backupFileName = `upload-${sanitizedBase}-${ts}.json`
-      const targetPath = path.join(backupDir, backupFileName)
-      fs.writeFileSync(targetPath, text, "utf-8")
-
-      try {
-        await logAudit({
-          action: "backup_upload",
-          entityType: "system",
-          userName: session?.name ?? "superadmin",
-          role: session?.role ?? "superadmin",
-          detail: `Backup global JSON subido exitosamente: ${backupFileName} (${(file.size / 1024).toFixed(1)} KB)`,
-          meta: { originalName: file.name, size: file.size },
-        })
-      } catch {
-        /* noop */
-      }
-
-      return NextResponse.json({
-        ok: true,
-        message: `Backup global "${backupFileName}" subido y verificado correctamente`,
-        name: backupFileName,
-        size: file.size,
-      })
+    const text = await file.text()
+    try {
+      JSON.parse(text)
+    } catch {
+      return NextResponse.json({ error: "El archivo subido no es un JSON válido" }, { status: 400 })
     }
 
-    // Archivo .db legacy
-    const arrayBuffer = await file.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-
-    // Validar cabecera SQLite si es archivo .db
-    const headerString = buffer.subarray(0, 16).toString("utf-8")
-    if (!headerString.startsWith("SQLite format 3")) {
-      return NextResponse.json(
-        { error: "El archivo subido no es una base de datos SQLite válida" },
-        { status: 400 }
-      )
-    }
-
-    const sanitizedBase = path.basename(file.name, ".db").replace(/[^a-zA-Z0-9_-]/g, "_")
-    const backupFileName = `upload-${sanitizedBase}-${ts}.db`
+    const sanitizedBase = path.basename(file.name, ".json").replace(/[^a-zA-Z0-9_-]/g, "_")
+    const backupFileName = `upload-${sanitizedBase}-${ts}.json`
     const targetPath = path.join(backupDir, backupFileName)
-
-    fs.writeFileSync(targetPath, buffer)
+    fs.writeFileSync(targetPath, text, "utf-8")
 
     try {
       await logAudit({
@@ -166,7 +122,7 @@ export async function POST(req: NextRequest) {
         entityType: "system",
         userName: session?.name ?? "superadmin",
         role: session?.role ?? "superadmin",
-        detail: `Backup subido exitosamente: ${backupFileName} (${(file.size / 1024).toFixed(1)} KB)`,
+        detail: `Backup global JSON subido exitosamente: ${backupFileName} (${(file.size / 1024).toFixed(1)} KB)`,
         meta: { originalName: file.name, size: file.size },
       })
     } catch {
@@ -175,7 +131,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      message: `Backup "${backupFileName}" subido y verificado correctamente`,
+      message: `Backup global "${backupFileName}" subido y verificado correctamente`,
       name: backupFileName,
       size: file.size,
     })

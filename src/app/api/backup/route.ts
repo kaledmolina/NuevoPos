@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/backup — genera una copia de seguridad:
 // - Para Admin: exporta ÚNICAMENTE los datos de sus tiendas/sedes (JSON estructurado)
-// - Para Superadmin: genera el respaldo global SQLite (.db)
+// - Para Superadmin: genera el respaldo global MySQL en formato estructurado (.json)
 export async function POST(req: NextRequest) {
   const denied = requireAdmin(req)
   if (denied) return denied
@@ -265,7 +265,7 @@ export async function POST(req: NextRequest) {
     const backupPayload = {
       version: "2.0",
       type: "global_saas_backup",
-      engine: isMysql() ? "mysql" : "sqlite",
+      engine: "mysql",
       exportedAt: new Date().toISOString(),
       tenants,
       branches,

@@ -224,7 +224,7 @@ export async function POST(req: NextRequest) {
 
     // Transacción atómica: validación de stock + pertenencia de sede + creación + descuento + caja
     const sale = await db.$transaction(async (tx) => {
-      // Validar stock y sede de los productos DENTRO de la transacción (lock en SQLite)
+      // Validar stock y sede de los productos DENTRO de la transacción atómica MySQL
       const productIds = items.map((i) => i.productId)
       const products = await tx.product.findMany({ where: { id: { in: productIds } } })
       if (products.length !== productIds.length) {
