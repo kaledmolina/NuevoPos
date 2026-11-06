@@ -464,6 +464,24 @@ export default function OrdersView() {
     }
   }
 
+  // Actualizar estado de pago (ej: verificar transferencia)
+  const handleUpdatePaymentStatus = async (orderId: string, paymentStatus: "pagado" | "pendiente") => {
+    try {
+      await apiFetch(`/api/v1/orders/${orderId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ paymentStatus }),
+      })
+      toast.success(paymentStatus === "pagado" ? "¡Pago verificado y marcado como pagado!" : "Pago marcado como pendiente")
+      fetchOrders()
+      if (detailOrder && detailOrder.id === orderId) {
+        setDetailOrder({ ...detailOrder, paymentStatus })
+      }
+    } catch (e) {
+      console.error(e)
+      toast.error((e as Error).message || "Error al actualizar estado de pago")
+    }
+  }
+
   // WhatsApp directo al cliente o conductor
   const openWhatsApp = (phone: string, text: string) => {
     const cleanPhone = phone.replace(/\D/g, "")
@@ -970,13 +988,29 @@ export default function OrdersView() {
                             <span className="text-xs font-mono font-bold text-foreground block">
                               {formatCurrency(order.total)}
                             </span>
-                            {order.paymentMethod === "transferencia" || order.paymentStatus === "pagado" ? (
+                            {order.paymentStatus === "pagado" ? (
                               <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded mt-0.5">
-                                💳 $0 a entregar
+                                ✅ Pagado ($0 a cobrar)
                               </span>
+                            ) : order.paymentMethod === "transferencia" ? (
+                              <div className="flex flex-col items-end gap-1 mt-0.5">
+                                <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded">
+                                  ⏳ Transf. Por verificar
+                                </span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleUpdatePaymentStatus(order.id, "pagado")
+                                  }}
+                                  className="text-[9px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-1.5 py-0.5 rounded shadow-2xs cursor-pointer active:scale-95 transition-all"
+                                  title="Confirmar que se verificó la transferencia en la app bancaria"
+                                >
+                                  Verificar Pago
+                                </button>
+                              </div>
                             ) : (
-                              <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded mt-0.5">
-                                💵 Cobrar efectivo
+                              <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.5 rounded mt-0.5">
+                                💵 Cobrar contraentrega
                               </span>
                             )}
                           </div>
@@ -1170,13 +1204,26 @@ export default function OrdersView() {
                         <div className="font-bold text-foreground">
                           {formatCurrency(order.total)}
                         </div>
-                        {order.paymentMethod === "transferencia" || order.paymentStatus === "pagado" ? (
+                        {order.paymentStatus === "pagado" ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded-md mt-0.5">
-                            💳 Pagado ($0 a entregar)
+                            ✅ Pagado ($0 a entregar)
                           </span>
+                        ) : order.paymentMethod === "transferencia" ? (
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded-md">
+                              ⏳ Por verificar
+                            </span>
+                            <button
+                              onClick={() => handleUpdatePaymentStatus(order.id, "pagado")}
+                              className="text-[9px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-1.5 py-0.5 rounded shadow-2xs cursor-pointer active:scale-95 transition-all"
+                              title="Marcar como transferencia confirmada"
+                            >
+                              Verificar
+                            </button>
+                          </div>
                         ) : (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded-md mt-0.5">
-                            💵 Cobrar en efectivo
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.5 rounded-md mt-0.5">
+                            💵 Cobrar contraentrega
                           </span>
                         )}
                       </TableCell>
@@ -1754,29 +1801,49 @@ export default function OrdersView() {
               {/* Liquidación y Control para el Domiciliario */}
               <div
                 className={cn(
-                  "p-3 rounded-xl border text-xs space-y-1.5",
-                  detailOrder.paymentMethod === "transferencia" || detailOrder.paymentStatus === "pagado"
+                  "p-3.5 rounded-xl border text-xs space-y-2",
+                  detailOrder.paymentStatus === "pagado"
                     ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 text-emerald-900 dark:text-emerald-200"
-                    : "bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/40 text-amber-900 dark:text-amber-200"
+                    : detailOrder.paymentMethod === "transferencia"
+                    ? "bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/40 text-amber-900 dark:text-amber-200"
+                    : "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800/40 text-blue-900 dark:text-blue-200"
                 )}
               >
                 <div className="flex items-center justify-between">
                   <span className="font-bold flex items-center gap-1.5 uppercase text-[10px] tracking-wider">
-                    {detailOrder.paymentMethod === "transferencia" || detailOrder.paymentStatus === "pagado"
-                      ? "💳 Pago Electrónico / Anticipado"
+                    {detailOrder.paymentStatus === "pagado"
+                      ? "✅ Pago Confirmado / Liquidado"
+                      : detailOrder.paymentMethod === "transferencia"
+                      ? "⏳ Transferencia Pendiente por Verificar"
                       : "💵 Pago Contraentrega en Efectivo"}
                   </span>
                   <span className="font-mono font-bold text-xs">
-                    {detailOrder.paymentMethod === "transferencia" || detailOrder.paymentStatus === "pagado"
+                    {detailOrder.paymentStatus === "pagado"
                       ? "Cobrar: $0"
+                      : detailOrder.paymentMethod === "transferencia"
+                      ? `Monto: ${formatCurrency(detailOrder.total)}`
                       : `Cobrar: ${formatCurrency(detailOrder.total)}`}
                   </span>
                 </div>
                 <p className="text-[11px] leading-relaxed">
-                  {detailOrder.paymentMethod === "transferencia" || detailOrder.paymentStatus === "pagado"
-                    ? "✅ Este pedido ya fue pagado por transferencia previa. El domiciliario NO debe cobrar dinero al cliente ni debe entregar dinero en caja ($0 COP)."
-                    : `⚠️ Cobro en efectivo. El domiciliario DEBE cobrar ${formatCurrency(detailOrder.total)} al cliente y entregarlo en la caja del negocio al regresar.`}
+                  {detailOrder.paymentStatus === "pagado"
+                    ? "✅ Este pedido ya fue verificado y pagado. El domiciliario NO debe cobrar dinero al cliente ni debe entregar dinero en caja ($0 COP)."
+                    : detailOrder.paymentMethod === "transferencia"
+                    ? "⚠️ El cliente indicó pago por transferencia bancaria (Nequi/Daviplata). Verifica el comprobante en tu app bancaria o chat antes de despachar."
+                    : `⚠️ Cobro en efectivo contraentrega. El domiciliario DEBE cobrar ${formatCurrency(detailOrder.total)} al cliente y entregarlo en caja al regresar.`}
                 </p>
+                {detailOrder.paymentStatus !== "pagado" && (
+                  <div className="pt-1 flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => handleUpdatePaymentStatus(detailOrder.id, "pagado")}
+                      className="h-7 text-xs rounded-lg font-bold bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                    >
+                      <IconCheck className="h-3.5 w-3.5" />
+                      Marcar Pago como Verificado
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           )}

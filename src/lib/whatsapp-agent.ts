@@ -535,7 +535,8 @@ ${catalogContext}`
           methodRaw.includes("banc")
 
         const paymentMethod = isTransfer ? "transferencia" : "efectivo"
-        const paymentStatus = isTransfer ? "pagado" : "pendiente"
+        // Ambos inician como 'pendiente' hasta que el admin verifique el comprobante o el domiciliario cobre
+        const paymentStatus = "pendiente"
 
         const cashPaid = Number(orderPayload.cashPaid) || 0
         let paymentNote = ""
@@ -547,7 +548,7 @@ ${catalogContext}`
             paymentNote = `💵 Pago en Efectivo: Cobrar $${subtotal.toLocaleString("es-CO")} contraentrega. El domiciliario DEBE entregar $${subtotal.toLocaleString("es-CO")} a la empresa.`
           }
         } else {
-          paymentNote = `💳 Pago por Transferencia (Nequi/Daviplata): Ya pagado previamente. El domiciliario NO debe recibir ni entregar dinero.`
+          paymentNote = `💳 Pago por Transferencia (Nequi/Daviplata): Pendiente por verificar comprobante. Una vez verificado por caja, el domiciliario NO debe cobrar dinero al cliente ($0).`
         }
 
         const createdOrder = await db.order.create({
@@ -596,8 +597,8 @@ ${catalogContext}`
 
         // Agregar pie de confirmación con el # de orden y recordatorio de pago
         const paymentSummary = isTransfer
-          ? "💳 *Método de Pago:* Transferencia (No debes entregar dinero al repartidor)"
-          : `💵 *Método de Pago:* Efectivo ($${subtotal.toLocaleString("es-CO")} a cobrar al recibir)`
+          ? "💳 *Método de Pago:* Transferencia previa (Por favor envía el comprobante por este chat para verificar y despachar tu pedido)"
+          : `💵 *Método de Pago:* Efectivo ($${subtotal.toLocaleString("es-CO")} a cobrar contraentrega)`
 
         rawReply += `\n\n📦 *Pedido Generado:* #${createdOrder.orderNumber}\n${paymentSummary}\n📍 *Entrega:* ${finalAddress}`
       }
