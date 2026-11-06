@@ -14,7 +14,7 @@ import {
   Shield, ShoppingCart, ArrowRight, ArrowLeft, Check, KeyRound, Lock, Info,
   Loader2, User, BookOpen, Store, Pill, Hammer, Shirt, ShoppingBag,
   Crown, Sparkles, Building2, Clock, Eye, EyeOff, Zap, CheckCircle2,
-  AlertCircle, Phone, Mail, ChevronRight, HelpCircle
+  AlertCircle, Phone, Mail, ChevronRight, HelpCircle, Truck
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -136,6 +136,9 @@ export default function LoginScreen() {
     } else if (r === "admin") {
       setName("admin")
       setPin("1234")
+    } else if (r === "domiciliario") {
+      setName("repartidor@demo.com")
+      setPin("1234")
     } else {
       setName("vendedor")
       setPin("0000")
@@ -148,6 +151,9 @@ export default function LoginScreen() {
     if (r === "superadmin") {
       setName("kaledmoly@gmail.com")
       setPin("9999")
+    } else if (r === "domiciliario") {
+      setName("repartidor@demo.com")
+      setPin("1234")
     } else {
       setName(r === "admin" ? "admin" : "vendedor")
       setPin(r === "admin" ? "1234" : "0000")
@@ -213,12 +219,12 @@ export default function LoginScreen() {
   const pinMatch = regPin && regPinConfirm ? regPin === regPinConfirm : null
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-[#FBFDFB] dark:bg-slate-950 text-foreground relative selection:bg-emerald-500/20 selection:text-emerald-700">
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-white dark:bg-black text-foreground relative selection:bg-zinc-900 selection:text-white dark:selection:bg-white dark:selection:text-zinc-950">
       
       {/* Background ambient glows en verde esmeralda estilo ClaPos */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute -top-32 -left-32 w-[600px] h-[600px] rounded-full bg-emerald-400/10 dark:bg-emerald-500/5 blur-[120px]" />
-        <div className="absolute top-1/3 right-0 w-[500px] h-[500px] rounded-full bg-teal-300/10 dark:bg-teal-500/5 blur-[130px]" />
+        <div className="absolute -top-32 -left-32 w-[600px] h-[600px] rounded-full bg-zinc-300/20 dark:bg-zinc-800/20 blur-[120px]" />
+        <div className="absolute top-1/3 right-0 w-[500px] h-[500px] rounded-full bg-zinc-200/20 dark:bg-zinc-800/20 blur-[130px]" />
       </div>
 
       {/* Barra superior con botón volver a Landing y Toggle de tema */}
@@ -227,7 +233,7 @@ export default function LoginScreen() {
           whileHover={{ x: -3 }}
           whileTap={{ scale: 0.96 }}
           onClick={() => setShowLanding(true)}
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-emerald-600 transition-colors bg-white/70 dark:bg-slate-900/70 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-200/80 dark:border-slate-800 shadow-xs"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-600 dark:text-zinc-400 hover:text-foreground transition-colors bg-white/70 dark:bg-zinc-900/70 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-zinc-200/80 dark:border-zinc-800 shadow-xs"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           <span>Volver al Inicio</span>
@@ -244,18 +250,18 @@ export default function LoginScreen() {
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ type: "spring", stiffness: 350, damping: 25 }}
-            className="inline-flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-2xl bg-gradient-to-tr from-emerald-600 to-emerald-400 text-white shadow-xl shadow-emerald-600/25 ring-2 ring-emerald-500/20 mb-3"
+            className="inline-flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 shadow-xl shadow-black/10 ring-2 ring-zinc-300/30 dark:ring-zinc-700/30 mb-3"
           >
             <Zap className="h-7 w-7 fill-white" />
           </motion.div>
 
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-zinc-900 dark:text-white">
             {storeName}
           </h1>
 
           <p
             onClick={handleLockClick}
-            className="text-xs text-muted-foreground mt-1 flex items-center justify-center gap-1 font-medium cursor-pointer select-none hover:text-emerald-600 transition-colors"
+            className="text-xs text-muted-foreground mt-1 flex items-center justify-center gap-1 font-medium cursor-pointer select-none hover:text-foreground transition-colors"
             title="Plataforma SaaS Multirubro · Acceso Seguro"
           >
             <Lock className="h-3 w-3" /> Plataforma SaaS Multirubro · Acceso Seguro
@@ -263,21 +269,21 @@ export default function LoginScreen() {
         </div>
 
         {/* Pestañas de modo: [ Iniciar Sesión ] vs [ Registrar Negocio ] */}
-        <div className="grid grid-cols-2 p-1.5 mb-5 rounded-2xl bg-slate-100 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-xs font-bold relative">
+        <div className="grid grid-cols-2 p-1.5 mb-5 rounded-2xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 text-xs font-bold relative">
           <button
             type="button"
             onClick={() => setAuthMode("login")}
             className={cn(
               "relative py-2.5 rounded-xl transition-all select-none text-center",
               authMode === "login"
-                ? "text-emerald-700 dark:text-emerald-300 font-extrabold"
+                ? "text-foreground font-black"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
             {authMode === "login" && (
               <motion.div
                 layoutId="authTabSlider"
-                className="absolute inset-0 bg-white dark:bg-slate-800 rounded-xl shadow-sm -z-10"
+                className="absolute inset-0 bg-white dark:bg-zinc-800 rounded-xl shadow-sm -z-10"
                 transition={{ type: "spring", stiffness: 380, damping: 30 }}
               />
             )}
@@ -290,19 +296,19 @@ export default function LoginScreen() {
             className={cn(
               "relative py-2.5 rounded-xl transition-all select-none text-center flex items-center justify-center gap-1.5",
               authMode === "register"
-                ? "text-emerald-700 dark:text-emerald-300 font-extrabold"
+                ? "text-foreground font-black"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
             {authMode === "register" && (
               <motion.div
                 layoutId="authTabSlider"
-                className="absolute inset-0 bg-white dark:bg-slate-800 rounded-xl shadow-sm -z-10"
+                className="absolute inset-0 bg-white dark:bg-zinc-800 rounded-xl shadow-sm -z-10"
                 transition={{ type: "spring", stiffness: 380, damping: 30 }}
               />
             )}
             <span>Registrar Negocio</span>
-            <span className="rounded-full bg-emerald-500 text-white text-[9px] font-black uppercase px-1.5 py-0.2">
+            <span className="rounded-full bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-[9px] font-black uppercase px-1.5 py-0.2">
               Gratis
             </span>
           </button>
@@ -322,23 +328,23 @@ export default function LoginScreen() {
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.25 }}
             >
-              <Card className="shadow-xl shadow-emerald-950/5 border-slate-200/90 dark:border-slate-800 rounded-3xl overflow-hidden bg-white/95 dark:bg-slate-900/95 backdrop-blur-md">
+              <Card className="shadow-xl shadow-black/5 border-zinc-200 dark:border-zinc-800 rounded-3xl overflow-hidden bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md">
                 <CardContent className="p-6 sm:p-7 space-y-5">
                   
                   {/* Selector de Rol */}
                   <div className="space-y-2.5">
                     <div className="flex items-center justify-between">
-                      <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      <Label className="text-xs font-bold uppercase tracking-wider text-zinc-500">
                         1. Selecciona tu perfil de acceso
                       </Label>
                       {showSuperAdmin && (
-                        <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                        <span className="text-[10px] font-bold text-foreground bg-muted px-2 py-0.5 rounded-full border border-border">
                           Superadmin Activo
                         </span>
                       )}
                     </div>
 
-                    <div className={cn("grid gap-2.5", showSuperAdmin ? "grid-cols-3" : "grid-cols-2")}>
+                    <div className={cn("grid gap-2", showSuperAdmin ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3")}>
                       <RoleButton
                         active={role === "admin"}
                         onClick={() => selectRole("admin")}
@@ -352,6 +358,13 @@ export default function LoginScreen() {
                         icon={ShoppingCart}
                         title="Vendedor"
                         desc="Punto de venta y caja"
+                      />
+                      <RoleButton
+                        active={role === "domiciliario"}
+                        onClick={() => selectRole("domiciliario")}
+                        icon={Truck}
+                        title="Repartidor"
+                        desc="Entregas a domicilio"
                       />
                       {showSuperAdmin && (
                         <RoleButton
@@ -368,7 +381,7 @@ export default function LoginScreen() {
                   {/* Formulario de Credenciales */}
                   <form onSubmit={(e) => { e.preventDefault(); submitLogin(); }} className="space-y-4 pt-1">
                     <div className="space-y-1.5">
-                      <Label htmlFor="login-username" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      <Label htmlFor="login-username" className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
                         Usuario o Correo Electrónico
                       </Label>
                       <div className="relative">
@@ -379,21 +392,21 @@ export default function LoginScreen() {
                           onChange={(e) => setName(e.target.value)}
                           placeholder={showSuperAdmin && role === "superadmin" ? "kaledmoly@gmail.com" : "admin o vendedor"}
                           autoComplete="username"
-                          className="h-11 pl-10 text-sm rounded-xl border-slate-200 dark:border-slate-800 focus:border-emerald-500"
+                          className="h-11 pl-10 text-sm rounded-xl border-zinc-200 dark:border-zinc-800 focus:border-zinc-950 dark:focus:border-white"
                         />
                       </div>
                     </div>
 
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
-                        <Label htmlFor="login-pin" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        <Label htmlFor="login-pin" className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
                           PIN Numérico
                         </Label>
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
                             onClick={() => setShowNumpad(!showNumpad)}
-                            className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
+                            className="text-[11px] font-semibold text-foreground underline hover:underline flex items-center gap-1 cursor-pointer"
                           >
                             <Sparkles className="h-3 w-3" />
                             {showNumpad ? "Ocultar teclado táctil" : "Teclado táctil"}
@@ -411,7 +424,7 @@ export default function LoginScreen() {
                           onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 8))}
                           placeholder="••••"
                           autoComplete="current-password"
-                          className="h-11 pl-10 pr-10 text-sm tracking-[0.3em] font-mono rounded-xl border-slate-200 dark:border-slate-800 focus:border-emerald-500"
+                          className="h-11 pl-10 pr-10 text-sm tracking-[0.3em] font-mono rounded-xl border-zinc-200 dark:border-zinc-800 focus:border-zinc-950 dark:focus:border-white"
                         />
                         <button
                           type="button"
@@ -434,7 +447,7 @@ export default function LoginScreen() {
                             transition={{ duration: 0.2 }}
                             className="pt-2 overflow-hidden"
                           >
-                            <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 space-y-2.5">
+                            <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800 space-y-2.5">
                               {/* Visual PIN dots indicator */}
                               <div className="flex items-center justify-center gap-2.5 py-1">
                                 {[0, 1, 2, 3].map((idx) => {
@@ -445,8 +458,8 @@ export default function LoginScreen() {
                                       className={cn(
                                         "h-3 w-3 rounded-full transition-all duration-150",
                                         filled
-                                          ? "bg-emerald-600 dark:bg-emerald-400 scale-110 shadow-xs shadow-emerald-500/50"
-                                          : "bg-slate-300 dark:bg-slate-700"
+                                          ? "bg-zinc-950 dark:bg-white scale-110 shadow-xs"
+                                          : "bg-zinc-300 dark:bg-zinc-700"
                                       )}
                                     />
                                   )
@@ -459,7 +472,7 @@ export default function LoginScreen() {
                                     key={num}
                                     type="button"
                                     onClick={() => handleNumpadPress(num)}
-                                    className="h-11 sm:h-12 rounded-xl text-base font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 text-foreground shadow-2xs active:scale-[0.96] transition-transform duration-100 ease-out"
+                                    className="h-11 sm:h-12 rounded-xl text-base font-bold bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-foreground shadow-2xs active:scale-[0.96] transition-transform duration-100 ease-out"
                                   >
                                     {num}
                                   </button>
@@ -475,7 +488,7 @@ export default function LoginScreen() {
                                 <button
                                   type="button"
                                   onClick={() => handleNumpadPress("0")}
-                                  className="h-11 sm:h-12 rounded-xl text-base font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 text-foreground shadow-2xs active:scale-[0.96] transition-transform duration-100 ease-out"
+                                  className="h-11 sm:h-12 rounded-xl text-base font-bold bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-foreground shadow-2xs active:scale-[0.96] transition-transform duration-100 ease-out"
                                 >
                                   0
                                 </button>
@@ -496,7 +509,7 @@ export default function LoginScreen() {
 
                     <Button
                       type="submit"
-                      className="w-full h-12 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-md shadow-emerald-600/25 transition-all active:scale-[0.96]"
+                      className="w-full h-12 text-sm font-bold bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 rounded-xl shadow-md transition-all active:scale-[0.96]"
                       disabled={loading}
                     >
                       {loading ? (
@@ -508,37 +521,37 @@ export default function LoginScreen() {
                   </form>
 
                   {/* Acceso Rápido Demo 1-Clic */}
-                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-                      <Sparkles className="h-3 w-3 text-emerald-600" /> Cuentas de demostración rápida
+                  <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                    <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                      <Sparkles className="h-3 w-3 text-foreground" /> Cuentas de demostración rápida
                     </p>
                     <div className={cn("grid gap-2 text-xs", showSuperAdmin ? "grid-cols-3" : "grid-cols-2")}>
                       <button
                         type="button"
                         onClick={() => quickFill("admin")}
-                        className="text-left p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 hover:border-emerald-400 transition-all active:scale-[0.96]"
+                        className="text-left p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/60 hover:border-foreground transition-all active:scale-[0.96]"
                       >
-                        <p className="font-bold text-slate-800 dark:text-slate-200">Admin</p>
-                        <p className="text-[11px] text-muted-foreground">admin / <span className="font-mono font-bold text-emerald-600">1234</span></p>
+                        <p className="font-bold text-zinc-800 dark:text-zinc-200">Admin</p>
+                        <p className="text-[11px] text-muted-foreground">admin / <span className="font-mono font-bold text-foreground">1234</span></p>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => quickFill("vendedor")}
-                        className="text-left p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 hover:border-teal-400 transition-all active:scale-[0.96]"
+                        className="text-left p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/60 hover:border-foreground transition-all active:scale-[0.96]"
                       >
-                        <p className="font-bold text-slate-800 dark:text-slate-200">Vendedor</p>
-                        <p className="text-[11px] text-muted-foreground">vendedor / <span className="font-mono font-bold text-teal-600">0000</span></p>
+                        <p className="font-bold text-zinc-800 dark:text-zinc-200">Vendedor</p>
+                        <p className="text-[11px] text-muted-foreground">vendedor / <span className="font-mono font-bold text-foreground">0000</span></p>
                       </button>
 
                       {showSuperAdmin && (
                         <button
                           type="button"
                           onClick={() => quickFill("superadmin")}
-                          className="text-left p-2.5 rounded-xl border border-amber-300 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-950/30 hover:border-amber-400 transition-all active:scale-[0.96]"
+                          className="text-left p-2.5 rounded-xl border border-border bg-muted/30 hover:border-foreground transition-all active:scale-[0.96]"
                         >
-                          <p className="font-bold text-amber-900 dark:text-amber-200">Superadmin</p>
-                          <p className="text-[11px] text-muted-foreground">kaled / <span className="font-mono font-bold text-amber-600">9999</span></p>
+                          <p className="font-bold text-foreground">Superadmin</p>
+                          <p className="text-[11px] text-muted-foreground">kaled / <span className="font-mono font-bold text-foreground">9999</span></p>
                         </button>
                       )}
                     </div>
@@ -549,8 +562,8 @@ export default function LoginScreen() {
 
               {/* Permisos del rol seleccionado */}
               {role && (
-                <div className="mt-3 rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 p-3.5 text-xs">
-                  <span className="font-bold text-emerald-700 dark:text-emerald-400 block mb-1">
+                <div className="mt-3 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/70 p-3.5 text-xs">
+                  <span className="font-bold text-foreground block mb-1">
                     Permisos de {ROLE_CONFIG[role].label}:
                   </span>
                   <div className="flex flex-wrap gap-2 text-muted-foreground text-[11px]">
@@ -558,7 +571,7 @@ export default function LoginScreen() {
                       ? ["Inventario & Stock", "Compras Proveedores", "Clientes & Fiados", "Finanzas & Gastos", "Reportes de Utilidad", "Backups"]
                       : ["Terminal POS Rápido", "Apertura de Caja", "Arqueo de Turnos", "Tickets Térmicos", "Consulta de Stock"]
                     ).map((p) => (
-                      <span key={p} className="flex items-center gap-1 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded-md font-medium">
+                      <span key={p} className="flex items-center gap-1 bg-muted/40 text-foreground px-2 py-0.5 rounded-md font-medium">
                         <Check className="h-3 w-3" /> {p}
                       </span>
                     ))}
@@ -577,26 +590,26 @@ export default function LoginScreen() {
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.25 }}
             >
-              <Card className="shadow-xl shadow-emerald-950/5 border-slate-200/90 dark:border-slate-800 rounded-3xl overflow-hidden bg-white/95 dark:bg-slate-900/95 backdrop-blur-md">
+              <Card className="shadow-xl shadow-black/5 border-zinc-200 dark:border-zinc-800 rounded-3xl overflow-hidden bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md">
                 <CardContent className="p-6 sm:p-7 space-y-5">
                   
                   {registerSuccess ? (
                     <div className="py-6 text-center space-y-4">
-                      <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 shadow-md">
+                      <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-foreground shadow-md">
                         <CheckCircle2 className="h-9 w-9" />
                       </div>
                       <div className="space-y-1">
-                        <h3 className="text-xl font-extrabold text-slate-900 dark:text-white">
+                        <h3 className="text-xl font-extrabold text-zinc-900 dark:text-white">
                           ¡Registro Enviado con Éxito!
                         </h3>
-                        <p className="text-xs text-slate-600 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
+                        <p className="text-xs text-zinc-600 dark:text-zinc-400 max-w-sm mx-auto leading-relaxed">
                           Tu negocio <strong>{regBusinessName}</strong> ha sido registrado como Administrador Principal y está en proceso de validación.
                         </p>
                       </div>
 
-                      <div className="p-3.5 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-500/20 text-xs text-left space-y-1.5">
-                        <p className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
-                          <Check className="h-3.5 w-3.5 text-emerald-600" /> Tus datos de acceso:
+                      <div className="p-3.5 rounded-2xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-xs text-left space-y-1.5">
+                        <p className="font-bold text-foreground flex items-center gap-1.5">
+                          <Check className="h-3.5 w-3.5 text-foreground" /> Tus datos de acceso:
                         </p>
                         <p className="text-muted-foreground">
                           Correo: <strong className="text-foreground">{regEmail}</strong>
@@ -608,7 +621,7 @@ export default function LoginScreen() {
 
                       <Button
                         onClick={handleGoToLoginWithRegistered}
-                        className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-11"
+                        className="w-full rounded-xl bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 font-bold h-11"
                       >
                         Ir a Iniciar Sesión con mi Cuenta <ArrowRight className="h-4 w-4 ml-1.5" />
                       </Button>
@@ -617,9 +630,9 @@ export default function LoginScreen() {
                     <form onSubmit={handleRegisterSubmit} className="space-y-4">
                       
                       {/* Cabecera del formulario de registro */}
-                      <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
-                        <h3 className="text-lg font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
-                          <Building2 className="h-5 w-5 text-emerald-600" /> Crea tu Cuenta de Empresa
+                      <div className="border-b border-zinc-100 dark:border-zinc-800 pb-3">
+                        <h3 className="text-lg font-extrabold text-zinc-900 dark:text-white flex items-center gap-2">
+                          <Building2 className="h-5 w-5 text-foreground" /> Crea tu Cuenta de Empresa
                         </h3>
                         <p className="text-xs text-muted-foreground mt-0.5">
                           Podrás gestionar inventario, ventas, sucursales y colaboradores.
@@ -656,11 +669,11 @@ export default function LoginScreen() {
                                   className={cn(
                                     "flex items-center gap-1.5 p-2 rounded-xl border text-left transition-all",
                                     isSelected
-                                      ? "border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 font-bold"
-                                      : "border-slate-200 dark:border-slate-800 hover:border-emerald-300 text-muted-foreground"
+                                      ? "border-zinc-950 dark:border-white bg-zinc-100 dark:bg-zinc-800 text-foreground font-bold"
+                                      : "border-zinc-200 dark:border-zinc-800 hover:border-foreground text-muted-foreground"
                                   )}
                                 >
-                                  <Icon className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                                  <Icon className="h-3.5 w-3.5 shrink-0 text-foreground" />
                                   <span className="truncate text-[11px]">{r.name.split("&")[0]}</span>
                                 </button>
                               )
@@ -746,7 +759,7 @@ export default function LoginScreen() {
                             <div className="flex items-center justify-between">
                               <Label className="text-xs font-semibold">Confirmar PIN *</Label>
                               {pinMatch !== null && (
-                                <span className={cn("text-[10px] font-bold", pinMatch ? "text-emerald-600" : "text-rose-500")}>
+                                <span className={cn("text-[10px] font-bold", pinMatch ? "text-foreground" : "text-muted-foreground")}>
                                   {pinMatch ? "✓ Coinciden" : "✗ No coinciden"}
                                 </span>
                               )}
@@ -769,7 +782,7 @@ export default function LoginScreen() {
                       <Button
                         type="submit"
                         disabled={registerLoading || (pinMatch === false)}
-                        className="w-full h-12 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-md shadow-emerald-600/25 transition-all mt-2"
+                        className="w-full h-12 text-sm font-bold bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 rounded-xl shadow-md transition-all mt-2"
                       >
                         {registerLoading ? (
                           <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Registrando tu empresa…</>
@@ -812,22 +825,23 @@ function RoleButton({
       className={cn(
         "text-left rounded-2xl border-2 p-3 transition-transform duration-100 ease-out active:scale-[0.96] flex flex-col justify-between select-none cursor-pointer",
         active
-          ? "border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/25 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500/20"
-          : "border-slate-200 dark:border-slate-800 hover:border-emerald-300 bg-card"
+          ? "border-zinc-950 dark:border-white bg-zinc-100 dark:bg-zinc-800 shadow-md ring-1 ring-border"
+          : "border-zinc-200 dark:border-zinc-800 hover:border-foreground bg-card"
       )}
     >
       <div
         className={cn(
           "flex h-9 w-9 items-center justify-center rounded-xl mb-2 transition-colors",
-          active ? "bg-emerald-600 text-white" : "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600"
+          active ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950" : "bg-zinc-100 dark:bg-zinc-800 text-foreground"
         )}
       >
         <Icon className="h-4 w-4" />
       </div>
       <div>
-        <p className="font-bold text-xs leading-tight text-slate-800 dark:text-white">{title}</p>
+        <p className="font-bold text-xs leading-tight text-zinc-800 dark:text-white">{title}</p>
         <p className="text-[10px] text-muted-foreground mt-0.5">{desc}</p>
       </div>
     </button>
   )
 }
+

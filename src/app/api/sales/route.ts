@@ -304,12 +304,47 @@ export async function POST(req: NextRequest) {
         include: { items: { include: { product: true } }, client: true },
       })
 
-      // Descontar stock atómicamente
+      // Descontar stock atómicamente de lotes y producto (FEFO: First Expired First Out)
       for (const it of items) {
         await tx.product.update({
           where: { id: it.productId },
           data: { stock: { decrement: it.quantity } },
         })
+
+        // Descontar de los lotes individuales activos ordenados por vencimiento más próximo
+        let remainingToDeduct = Number(it.quantity)
+        const batches = await tx.productBatch.findMany({
+          where: { productId: it.productId, stock: { gt: 0 } },
+          orderBy: [
+            { expirationDate: "asc" },
+            { createdAt: "asc" },
+          ],
+        })
+
+        for (const b of batches) {
+          if (remainingToDeduct <= 0) break
+          const deductFromBatch = Math.min(b.stock, remainingToDeduct)
+          await tx.productBatch.update({
+            where: { id: b.id },
+            data: { stock: { decrement: deductFromBatch } },
+          })
+          remainingToDeduct -= deductFromBatch
+        }
+
+        // Actualizar la fecha de vencimiento y lote más próximo según stock remanente
+        const nextBatch = await tx.productBatch.findFirst({
+          where: { productId: it.productId, stock: { gt: 0 }, expirationDate: { not: null } },
+          orderBy: { expirationDate: "asc" },
+        })
+        if (nextBatch?.expirationDate) {
+          await tx.product.update({
+            where: { id: it.productId },
+            data: { 
+              expirationDate: nextBatch.expirationDate,
+              batch: nextBatch.batch || null,
+            },
+          })
+        }
       }
 
       // Registrar en caja (guardamos el saleId en reference para anulación confiable)

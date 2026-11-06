@@ -828,6 +828,7 @@ export default function PosTerminal() {
         <div className="relative mb-2.5 sm:mb-4" data-tour="pos-search-input">
           <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
+            data-tour="pos-search-input"
             ref={searchInputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}

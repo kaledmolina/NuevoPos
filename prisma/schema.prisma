@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -72,6 +72,7 @@ model Product {
   saleItems      SaleItem[]
   purchaseItems  PurchaseItem[]
   batches        ProductBatch[]
+  orderItems     OrderItem[]
 
   @@index([branchId])
   @@index([active])
@@ -104,6 +105,8 @@ model Client {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   sales     Sale[]
+  orders    Order[]
+  whatsappMessages WhatsAppMessage[]
   creditAccount CreditAccount?
 
   @@index([branchId])
@@ -287,6 +290,9 @@ model Branch {
   tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  orders    Order[]
+  whatsappMessages WhatsAppMessage[]
+  whatsappConfig   WhatsAppConfig?
 
   @@index([tenantId])
 }
@@ -309,8 +315,128 @@ model Tenant {
   updatedAt   DateTime  @updatedAt
   users       User[]
   branches    Branch[]
+  orders      Order[]
 
   @@index([status])
   @@index([rubro])
 }
 
+
+
+// Pedidos externos y de clientes / marketplace / domicilios
+model Order {
+  id                  String      @id @default(cuid())
+  orderNumber         String      @unique
+  tenantId            String?
+  tenant              Tenant?     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId            String?
+  branch              Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  clientId            String?
+  client              Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  customerName        String
+  customerPhone       String
+  customerEmail       String?
+  deliveryAddress     String?
+  deliveryNotes       String?
+  subtotal            Float       @default(0)
+  tax                 Float       @default(0)
+  deliveryFee         Float       @default(0)
+  discount            Float       @default(0)
+  total               Float       @default(0)
+  paymentMethod       String      @default("contraentrega")
+  paymentStatus       String      @default("pendiente")
+  status              String      @default("pendiente")
+  notes               String?
+  createdByRole       String      @default("cliente")
+  createdById         String?
+  deliveryDriverId    String?
+  deliveryDriverName  String?
+  deliveryDriverPhone String?
+  assignedAt          DateTime?
+  dispatchedAt        DateTime?
+  deliveredAt         DateTime?
+  cancelledAt         DateTime?
+  cancelReason        String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  items               OrderItem[]
+  whatsappMessages    WhatsAppMessage[]
+
+  @@index([tenantId])
+  @@index([branchId])
+  @@index([status])
+  @@index([deliveryDriverId])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  productName String
+  quantity    Int
+  unitPrice   Float
+  subtotal    Float
+  notes       String?
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+// Historial de Mensajería WhatsApp & CRM Omnicanal
+model WhatsAppMessage {
+  id        String   @id @default(cuid())
+  phone     String
+  sender    String   // "customer" | "bot" | "agent"
+  text      String
+  status    String   @default("read") // "unread" | "read" | "sent" | "delivered"
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  orderId   String?
+  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+  @@index([branchId])
+  @@index([createdAt])
+}
+
+// Plantillas de Difusión y Promociones WhatsApp
+model WhatsAppTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  category  String   // "promocion", "cobro", "recordatorio", "novedad"
+  content   String
+  branchId  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+}
+
+
+// Configuracion de WhatsApp e IA DeepSeek por Sede
+model WhatsAppConfig {
+  id                   String   @id @default(cuid())
+  branchId             String   @unique
+  branch               Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  phoneNumber          String?  // Ej. +573001234567
+  metaPhoneNumberId    String?  // ID de numero en Meta Cloud API
+  metaAccessToken      String?  // Token de acceso de Meta Cloud API
+  metaVerifyToken      String?  @default("omnipos_verify_token_2026")
+  deepseekApiKey       String?  // Token de API de DeepSeek (sk-...)
+  deepseekModel        String   @default("deepseek-chat") // "deepseek-chat" | "deepseek-reasoner"
+  aiEnabled            Boolean  @default(true)
+  aiSystemPrompt       String?
+  welcomeMessage       String?
+  autoCreateOrders     Boolean  @default(true)
+  maxTokensPerReply    Int      @default(300)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([branchId])
+}

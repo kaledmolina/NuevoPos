@@ -166,9 +166,9 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    if (role !== "admin" && role !== "vendedor") {
+    if (role !== "admin" && role !== "vendedor" && role !== "domiciliario") {
       return NextResponse.json(
-        { error: "El rol asignado debe ser 'admin' o 'vendedor'." },
+        { error: "El rol asignado debe ser 'admin', 'vendedor' o 'domiciliario'." },
         { status: 400 }
       )
     }
@@ -406,8 +406,8 @@ export async function PUT(req: NextRequest) {
     // Rol
     if (body.role !== undefined) {
       const role = String(body.role).toLowerCase()
-      if (role !== "admin" && role !== "vendedor") {
-        return NextResponse.json({ error: "Rol inválido (debe ser admin o vendedor)." }, { status: 400 })
+      if (role !== "admin" && role !== "vendedor" && role !== "domiciliario") {
+        return NextResponse.json({ error: "Rol inválido (debe ser admin, vendedor o domiciliario)." }, { status: 400 })
       }
       if (targetUser.isPrimary && role !== "admin") {
         return NextResponse.json({ error: "El Administrador Principal no puede ser degradado a vendedor." }, { status: 400 })

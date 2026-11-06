@@ -143,16 +143,20 @@ export async function POST(req: NextRequest) {
           total,
           status: "recibida",
           items: {
-            create: items.map((it) => ({
-              productId: it.productId,
-              quantity: Number(it.quantity),
-              unitCost: Number(it.unitCost),
-              subtotal: Number(it.quantity) * Number(it.unitCost),
-              expirationDate: it.expirationDate
-                ? new Date(it.expirationDate)
-                : null,
-              batch: it.batch?.trim() || null,
-            })),
+            create: items.map((it) => {
+              const qty = Math.max(1, Math.round(Number(it.quantity)))
+              const uCost = Number(it.unitCost)
+              return {
+                productId: it.productId,
+                quantity: qty,
+                unitCost: uCost,
+                subtotal: qty * uCost,
+                expirationDate: it.expirationDate
+                  ? new Date(it.expirationDate)
+                  : null,
+                batch: it.batch?.trim() || null,
+              }
+            }),
           },
         },
         include: {
@@ -161,31 +165,49 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      // Actualizar cada producto: incrementar stock, actualizar costo,
-      // crear un lote individual y asignar vencimiento/lote legacy si no tiene.
+      // Actualizar cada producto: entradas automáticas de stock, recálculo de costo promedio ponderado,
+      // registro de lote individual y actualización de fecha de vencimiento más próxima.
       for (const it of items) {
         const product = products.find((p) => p.id === it.productId)!
+        const incomingQty = Math.max(1, Math.round(Number(it.quantity)))
+        const incomingCost = Number(it.unitCost)
+        const currentStock = Math.max(0, product.stock || 0)
+        const currentTotalCost = currentStock * (product.cost || 0)
+        const newTotalStock = currentStock + incomingQty
+
+        // Recálculo automático de costo promedio ponderado (PMP)
+        const weightedAvgCost = newTotalStock > 0 
+          ? (currentTotalCost + incomingQty * incomingCost) / newTotalStock 
+          : incomingCost
+
         const data: Record<string, unknown> = {
-          stock: { increment: Number(it.quantity) },
-          cost: Number(it.unitCost),
+          stock: { increment: incomingQty },
+          cost: Math.round(weightedAvgCost * 100) / 100,
         }
-        if (it.expirationDate && !product.expirationDate) {
-          data.expirationDate = new Date(it.expirationDate)
+
+        // Control de fecha de vencimiento: actualizar a la más próxima
+        if (it.expirationDate) {
+          const incomingExp = new Date(it.expirationDate)
+          if (!product.expirationDate || incomingExp < new Date(product.expirationDate)) {
+            data.expirationDate = incomingExp
+          }
         }
-        if (it.batch && it.batch.trim() && !product.batch) {
+        if (it.batch && it.batch.trim()) {
           data.batch = it.batch.trim()
         }
+
         await tx.product.update({
           where: { id: it.productId },
           data,
         })
-        // Crear un lote individual para esta línea de compra
+
+        // Crear un lote individual para trazabilidad exacta
         await tx.productBatch.create({
           data: {
             productId: it.productId,
             batch: it.batch?.trim() || null,
-            stock: Number(it.quantity),
-            cost: Number(it.unitCost),
+            stock: incomingQty,
+            cost: incomingCost,
             expirationDate: it.expirationDate ? new Date(it.expirationDate) : null,
           },
         })

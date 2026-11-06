@@ -30,12 +30,14 @@ import {
   IconWallet,
   IconMenu2,
   IconTruck,
+  IconTruckDelivery,
   IconUsers,
   IconBuildingStore,
   IconArrowsExchange,
   IconCreditCard,
   IconChartBar,
   IconSettings,
+  IconCode,
   IconHammer,
   IconShirt,
   IconPill,
@@ -46,6 +48,7 @@ import {
   IconX,
   IconHelp,
   IconDatabase,
+  IconBrandWhatsapp,
   IconTrash,
   IconAlertTriangle,
   IconLoader2,
@@ -68,6 +71,7 @@ import ClientsView from "@/components/pos/clients"
 import SuppliersView from "@/components/pos/suppliers"
 import PurchasesView from "@/components/pos/purchases"
 import SalesView from "@/components/pos/sales"
+import OrdersView from "@/components/pos/orders"
 import CashView from "@/components/pos/cash"
 import FinanceView from "@/components/pos/finance"
 import CreditView from "@/components/pos/credit"
@@ -76,6 +80,8 @@ import SettingsView from "@/components/pos/settings"
 import ReportsView from "@/components/pos/reports"
 import StaffManager from "@/components/pos/staff-manager"
 import SuperadminPanel from "@/components/pos/superadmin-panel"
+import ApiDocsView from "@/components/pos/api-docs"
+import WhatsAppAgentView from "@/components/pos/whatsapp-agent"
 import { NotificationsBell } from "@/components/pos/notifications-bell"
 import { ThemeToggle } from "@/components/theme-toggle"
 
@@ -100,9 +106,11 @@ const NAV: NavGroup[] = [
   {
     label: "Comercial",
     items: [
+      { key: "orders", label: "Pedidos & Domicilios", icon: IconTruckDelivery },
+      { key: "whatsapp", label: "WhatsApp IA", icon: IconBrandWhatsapp },
+      { key: "sales", label: "Ventas", icon: IconReceipt2 },
       { key: "clients", label: "Clientes", icon: IconUsers },
       { key: "suppliers", label: "Proveedores", icon: IconBuildingStore },
-      { key: "sales", label: "Ventas", icon: IconReceipt2 },
     ],
   },
   {
@@ -119,6 +127,7 @@ const NAV: NavGroup[] = [
       { key: "reports", label: "Reportes", icon: IconChartBar },
       { key: "personal", label: "Personal & Sedes", icon: IconUsers },
       { key: "settings", label: "Configuración", icon: IconSettings },
+      { key: "api_docs", label: "Documentación API", icon: IconCode },
     ],
   },
 ]
@@ -422,6 +431,7 @@ export default function Home() {
     superadmin: { title: "Panel Superadministrador SaaS", subtitle: "Control global de plataforma, aprobación de negocios y ranking de ventas" },
     dashboard: { title: "Panel principal", subtitle: `Resumen general de tu ${getRubroLabel(storeRubro).toLowerCase()}` },
     pos: { title: "Punto de venta", subtitle: "Registra ventas y cobra de forma rápida" },
+    orders: { title: "Gestión de Pedidos & Domicilios", subtitle: "Asignación de conductores, seguimiento de despachos y estado de entregas en tiempo real" },
     products: { title: "Inventario de productos", subtitle: "Gestiona catálogo, precios, stock y categorías" },
     purchases: { title: "Compras y proveedores", subtitle: "Registro de entradas de mercancía" },
     clients: { title: "Directorio de clientes", subtitle: "Administración de clientes y crédito" },
@@ -433,6 +443,8 @@ export default function Home() {
     reports: { title: "Reportes y estadísticas", subtitle: "Análisis de ventas, utilidad y rendimiento" },
     personal: { title: "Personal y Sedes", subtitle: "Gestión de colaboradores, credenciales PIN y sucursales físicas" },
     settings: { title: "Configuración del sistema", subtitle: "Datos de la tienda, seguridad, backups y reseteo" },
+    whatsapp: { title: "Agente IA WhatsApp", subtitle: "Atención comercial 24/7, consultas de catálogo y pedidos a domicilio automáticos" },
+    api_docs: { title: "Portal de Desarrolladores & API REST", subtitle: "Documentación completa de endpoints, autenticación Bearer y guías para clientes y repartidores" },
   }
 
   const NavContent = ({ collapsed = false }: { collapsed?: boolean }) => (
@@ -453,7 +465,7 @@ export default function Home() {
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold text-sidebar-foreground truncate tracking-tight" title={storeName}>{storeName}</p>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className={cn("inline-block w-2 h-2 rounded-full shrink-0", cashOpen ? "bg-emerald-500" : "bg-muted-foreground/40")} />
+              <span className={cn("inline-block w-2 h-2 rounded-full shrink-0", cashOpen ? "bg-zinc-950 dark:bg-white" : "bg-muted-foreground/40")} />
               <p className="text-[11px] font-medium text-muted-foreground truncate">
                 {getRubroLabel(storeRubro)} · {cashOpen ? "Caja abierta" : "Caja cerrada"}
               </p>
@@ -501,7 +513,7 @@ export default function Home() {
                         active ? "text-primary-foreground stroke-[2.3]" : "text-muted-foreground stroke-[1.8]"
                       )} />
                       {item.key === "pos" && cartCount > 0 && (
-                        <span className="absolute top-1 right-1 z-20 flex h-4 min-w-4 items-center justify-center rounded-full text-[9px] font-black bg-rose-500 text-white shadow-xs px-1">
+                        <span className="absolute top-1 right-1 z-20 flex h-4 min-w-4 items-center justify-center rounded-full text-[9px] font-black bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 shadow-xs px-1">
                           {cartCount}
                         </span>
                       )}
@@ -692,6 +704,7 @@ export default function Home() {
         {/* Top Header */}
         <header className="flex items-center gap-2.5 sm:gap-3 border-b bg-background/90 backdrop-blur-md px-3 sm:px-4 py-2.5 sm:py-3 sticky top-0 z-30 shrink-0">
           <button
+            data-tour="mobile-menu-btn"
             className="lg:hidden p-2 rounded-lg hover:bg-muted text-foreground transition-colors shrink-0"
             onClick={() => setSidebarOpen(true)}
             aria-label="Abrir menú completo"
@@ -922,6 +935,7 @@ export default function Home() {
               {view === "purchases" && <PurchasesView />}
               {view === "clients" && <ClientsView />}
               {view === "suppliers" && <SuppliersView />}
+              {view === "orders" && <OrdersView />}
               {view === "sales" && <SalesView />}
               {view === "cash" && <CashView />}
               {view === "finance" && <FinanceView />}
@@ -929,6 +943,8 @@ export default function Home() {
               {view === "reports" && <ReportsView />}
               {view === "personal" && <StaffManager />}
               {view === "settings" && <SettingsView />}
+              {view === "whatsapp" && <WhatsAppAgentView />}
+              {view === "api_docs" && <ApiDocsView />}
             </motion.div>
           </AnimatePresence>
         </main>
@@ -940,27 +956,47 @@ export default function Home() {
 
         {/* Barra de Navegación Inferior Móvil (Mobile Bottom Bar) */}
         {view !== "pos" && (
-          <nav aria-label="Navegación móvil rápida" className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t border-border shadow-lg safe-pad">
+          <nav
+            data-tour="mobile-bottom-nav"
+            aria-label="Navegación móvil rápida"
+            className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t border-border shadow-lg safe-pad"
+          >
             <div className="grid grid-cols-5 items-center justify-around px-1 py-1.5">
-              {/* Botón POS */}
-              <button
-                onClick={() => handleSetView("pos")}
-                className="flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors relative active:scale-95"
-              >
-                <div className="relative">
-                  <IconShoppingCart className="h-5 w-5 stroke-[1.8]" />
-                  {cartCount > 0 && (
-                    <span className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-primary-foreground text-[9px] font-bold px-1">
-                      {cartCount}
-                    </span>
+              {/* Botón 1: Pedidos para domiciliarios, o POS para ventas */}
+              {role === "domiciliario" ? (
+                <button
+                  data-tour="mobile-nav-orders"
+                  onClick={() => handleSetView("orders")}
+                  className={cn(
+                    "flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium transition-colors active:scale-95",
+                    view === "orders" ? "text-primary font-bold" : "text-muted-foreground hover:text-foreground"
                   )}
-                </div>
-                <span className="mt-0.5">Cobrar</span>
-              </button>
+                >
+                  <IconTruckDelivery className="h-5 w-5 stroke-[1.8]" />
+                  <span className="mt-0.5">Pedidos</span>
+                </button>
+              ) : (
+                <button
+                  data-tour="mobile-nav-pos"
+                  onClick={() => handleSetView("pos")}
+                  className="flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors relative active:scale-95"
+                >
+                  <div className="relative">
+                    <IconShoppingCart className="h-5 w-5 stroke-[1.8]" />
+                    {cartCount > 0 && (
+                      <span className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-primary-foreground text-[9px] font-bold px-1">
+                        {cartCount}
+                      </span>
+                    )}
+                  </div>
+                  <span className="mt-0.5">Cobrar</span>
+                </button>
+              )}
 
-              {/* Botón Panel / Ventas */}
+              {/* Botón 2: Panel / Ventas */}
               {role === "admin" ? (
                 <button
+                  data-tour="mobile-nav-dashboard"
                   onClick={() => handleSetView("dashboard")}
                   className={cn(
                     "flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium transition-colors active:scale-95",
@@ -972,6 +1008,7 @@ export default function Home() {
                 </button>
               ) : (
                 <button
+                  data-tour="mobile-nav-sales"
                   onClick={() => handleSetView("sales")}
                   className={cn(
                     "flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium transition-colors active:scale-95",
@@ -983,20 +1020,36 @@ export default function Home() {
                 </button>
               )}
 
-              {/* Botón Productos */}
-              <button
-                onClick={() => handleSetView("products")}
-                className={cn(
-                  "flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium transition-colors active:scale-95",
-                  view === "products" ? "text-primary font-bold" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <IconBoxSeam className="h-5 w-5 stroke-[1.8]" />
-                <span className="mt-0.5">Stock</span>
-              </button>
+              {/* Botón 3: Productos o Pedidos */}
+              {role === "admin" ? (
+                <button
+                  data-tour="mobile-nav-orders"
+                  onClick={() => handleSetView("orders")}
+                  className={cn(
+                    "flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium transition-colors active:scale-95",
+                    view === "orders" ? "text-primary font-bold" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <IconTruckDelivery className="h-5 w-5 stroke-[1.8]" />
+                  <span className="mt-0.5">Delivery</span>
+                </button>
+              ) : (
+                <button
+                  data-tour="mobile-nav-products"
+                  onClick={() => handleSetView("products")}
+                  className={cn(
+                    "flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium transition-colors active:scale-95",
+                    view === "products" ? "text-primary font-bold" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <IconBoxSeam className="h-5 w-5 stroke-[1.8]" />
+                  <span className="mt-0.5">Stock</span>
+                </button>
+              )}
 
-              {/* Botón Caja */}
+              {/* Botón 4: Caja */}
               <button
+                data-tour="mobile-nav-cash"
                 onClick={() => handleSetView("cash")}
                 className={cn(
                   "flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium transition-colors relative active:scale-95",
@@ -1006,14 +1059,15 @@ export default function Home() {
                 <div className="relative">
                   <IconWallet className="h-5 w-5 stroke-[1.8]" />
                   {cashOpen && (
-                    <span className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-blue-500 ring-2 ring-card" />
+                    <span className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-zinc-950 dark:bg-white ring-2 ring-card" />
                   )}
                 </div>
                 <span className="mt-0.5">Caja</span>
               </button>
 
-              {/* Botón Menú Completo */}
+              {/* Botón 5: Menú Completo */}
               <button
+                data-tour="mobile-nav-menu"
                 onClick={() => setSidebarOpen(true)}
                 className="flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors active:scale-95"
               >
@@ -1072,7 +1126,7 @@ export default function Home() {
       <AlertDialog open={logoutCashConfirmOpen} onOpenChange={setLogoutCashConfirmOpen}>
         <AlertDialogContent className="max-w-md rounded-2xl border-border bg-card text-card-foreground shadow-2xl">
           <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-base text-amber-600 dark:text-amber-400">
+            <AlertDialogTitle className="flex items-center gap-2 text-base text-foreground font-bold">
               <IconAlertTriangle className="h-5 w-5 shrink-0" />
               ¿Cerrar sesión con caja abierta?
             </AlertDialogTitle>
@@ -1081,7 +1135,7 @@ export default function Home() {
                 <p>
                   Actualmente tienes una sesión de caja abierta en este turno.
                 </p>
-                <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-3 text-xs text-amber-900 dark:text-amber-200">
+                <div className="rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 text-xs text-foreground">
                   ⚠️ Si sales sin realizar el arqueo, el turno quedará pendiente de cuadre y los valores en gaveta física no estarán conciliados con el sistema.
                 </div>
               </div>

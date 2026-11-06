@@ -8,9 +8,10 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
   Sparkles, Wallet, ShoppingCart, Clock, CheckCircle2, ArrowLeftRight,
-  Calculator, Receipt, Settings, Package, Truck, CreditCard, BarChart3,
+  Receipt, Settings, Package, Truck, CreditCard, BarChart3,
   HardDrive, X, ArrowRight, ArrowLeft, Lightbulb, Play, Compass,
-  Minimize2, Maximize2, Crosshair, HelpCircle, GripHorizontal,
+  Minimize2, Maximize2, Crosshair, HelpCircle, ChevronUp, ChevronDown,
+  Smartphone, MapPin, Check,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -33,62 +34,62 @@ const VENDEDOR_WORKFLOW: TourStep[] = [
     title: "¡Bienvenido a tu Turno de Trabajo!",
     category: "OPERACIÓN DE MOSTRADOR",
     icon: Sparkles,
-    desc: "Como vendedor o cajero, este tour interactivo te enseñará el flujo diario paso a paso con las secciones reales del sistema.",
+    desc: "Como vendedor o cajero, este tour interactivo te enseñará el flujo diario paso a paso en pantalla.",
     detail: "Aprenderás a abrir caja con tu base inicial, buscar y escanear productos, pausar carritos para atender filas rápidas y cuadrar tu arqueo de cierre.",
     actionLabel: "La pantalla se sincronizará automáticamente con cada sección explicada.",
-    tip: "Puedes minimizar esta tarjeta o moverte con 'Siguiente' / 'Atrás' en cualquier momento.",
+    tip: "En tu teléfono puedes usar la barra inferior para moverte rápidamente.",
     view: "pos",
-    targetSelector: '[data-tour="sidebar-nav"]',
+    targetSelector: '[data-tour="sidebar-nav"], [data-tour="mobile-bottom-nav"], [data-tour="mobile-menu-btn"]',
   },
   {
     title: "1. Abrir Caja (¡Obligatorio antes de vender!)",
     category: "PASO 1: APERTURA DE TURNO",
     icon: Wallet,
     desc: "Antes de atender a tu primer cliente, siempre debes registrar el dinero base físico en tu gaveta.",
-    detail: "Haz clic en el botón 'Abrir caja' que ves resaltado en pantalla, escribe el monto inicial (ej. $100.000) y tu nombre. Esta base queda guardada para calcular el cuadre exacto al finalizar tu turno.",
+    detail: "Haz clic en el botón 'Abrir caja', escribe el monto inicial (ej. $100.000) y tu nombre. Esta base queda guardada para calcular el cuadre exacto al finalizar tu turno.",
     actionLabel: "👉 Haz clic en 'Abrir caja' para iniciar tu turno.",
     tip: "⚠️ Si intentas vender sin abrir caja, el sistema te solicitará abrir turno primero para proteger los números.",
     view: "cash",
-    targetSelector: '[data-tour="cash-open-btn"], [data-tour="cash-open-card"]',
+    targetSelector: '[data-tour="cash-open-btn"], [data-tour="cash-open-card"], [data-tour="mobile-nav-cash"]',
   },
   {
     title: "2. Punto de Venta (POS) & Escáner",
     category: "PASO 2: REGISTRO DE PRODUCTOS",
     icon: ShoppingCart,
     desc: "El terminal de cobro ultra-rápido donde buscarás o escanearás los artículos que el cliente desea llevar.",
-    detail: "Escribe en la barra de búsqueda resaltada o simplemente pasa el lector de código de barras USB/inalámbrico. El producto se agregará de inmediato al carrito. Puedes modificar cantidades (+ / −) y verificar el stock.",
+    detail: "Escribe en la barra de búsqueda o pasa el lector de código de barras. El producto se agregará de inmediato al carrito. Puedes modificar cantidades (+ / −) y verificar el stock.",
     actionLabel: "👉 Usa la barra de búsqueda o el lector de código de barras.",
-    tip: "El lector de códigos de barras funciona de manera automática sin necesidad de hacer clics previos.",
+    tip: "En celular, toca sobre cualquier producto para sumarlo directamente al carrito.",
     view: "pos",
-    targetSelector: '[data-tour="pos-search-input"]',
+    targetSelector: '[data-tour="pos-search-input"], [data-tour="mobile-nav-pos"]',
   },
   {
     title: "3. Cola de Carritos en Espera (Pausar Venta)",
     category: "PASO 3: ATENCIÓN EN PARALELO",
     icon: Clock,
     desc: "¿Un cliente necesita más tiempo o fue a buscar otro producto? ¡No detengas la fila!",
-    detail: "Haz clic en el botón 'En espera' en la parte superior del carrito. Asigna una referencia rápida (ej. 'Don Carlos') y el pedido se guardará en la cola. Tu terminal quedará libre de inmediato para cobrar al siguiente cliente.",
+    detail: "Haz clic en el botón 'En espera' en la parte superior del carrito. Asigna una referencia rápida (ej. 'Don Carlos') y el pedido se guardará en la cola. Tu terminal quedará libre de inmediato.",
     actionLabel: "👉 Pulsa 'En espera' en el carrito para pausar una venta.",
     tip: "Pulsa 'Gestionar cola' o 'Cola (N)' para recuperar el carrito en cualquier instante.",
     view: "pos",
-    targetSelector: '[data-tour="pos-hold-btn"]',
+    targetSelector: '[data-tour="pos-hold-btn"], [data-tour="pos-cart-panel"]',
   },
   {
     title: "4. Cobro, Medios de Pago y Recibos",
     category: "PASO 4: FINALIZAR VENTA",
     icon: CheckCircle2,
     desc: "Finaliza la compra de forma ágil y emite el comprobante para el cliente.",
-    detail: "Selecciona el método de pago: Efectivo (calcula el cambio automáticamente), Tarjeta, Transferencia o Crédito/Fiado. Al presionar el botón 'Cobrar', se generará el ticket térmico listo para imprimir o descargar.",
+    detail: "Selecciona el método de pago: Efectivo (calcula el cambio automáticamente), Tarjeta, Transferencia o Crédito/Fiado. Al presionar 'Cobrar', se generará el ticket térmico listo para imprimir o descargar.",
     actionLabel: "👉 Pulsa 'Cobrar' para registrar la venta e imprimir ticket.",
     tip: "Para clientes con cupo de crédito, selecciónalos en el desplegable de Cliente.",
     view: "pos",
-    targetSelector: '[data-tour="pos-checkout-btn"]',
+    targetSelector: '[data-tour="pos-checkout-btn"], [data-tour="pos-cart-panel"]',
   },
   {
     title: "5. Movimientos Menores de Caja",
     category: "PASO 5: CONTROL DE GASTOS Y RETIROS",
     icon: ArrowLeftRight,
-    desc: "¿Tuviste que pagar un flete imprevisto o comprar insumos de aseo de emergencia?",
+    desc: "¿Tuviste que pagar un flete imprevisto o insumos de aseo de emergencia?",
     detail: "En la sección de Caja, usa 'Registrar Egreso' para registrar cualquier salida de efectivo de la gaveta. De igual forma, si ingresa dinero adicional, usa 'Registrar Ingreso'.",
     actionLabel: "👉 Usa 'Registrar Ingreso' o 'Registrar Egreso' según el movimiento.",
     tip: "Registrar cada gasto evita faltantes de dinero al momento de cerrar el turno.",
@@ -98,13 +99,13 @@ const VENDEDOR_WORKFLOW: TourStep[] = [
   {
     title: "6. Conteo Físico y Cierre de Turno (Arqueo)",
     category: "PASO 6: CUADRE Y ARQUEO",
-    icon: Calculator,
-    desc: "Al terminar tu jornada laboral, realiza el arqueo de caja para entregar cuentas claras.",
-    detail: "Pulsa 'Cerrar caja / Realizar Arqueo'. Cuenta físicamente todo el efectivo en tu gaveta e ingrésalo en el campo 'Efectivo contado'. El sistema comparará el dinero real contra el esperado (Apertura + Ventas Efectivo + Ingresos − Egresos) y te confirmará si el turno cuadró perfecto.",
-    actionLabel: "👉 Pulsa 'Cerrar caja / Realizar Arqueo' para cuadrar tu turno.",
-    tip: "Nunca salgas sin cerrar tu caja para que el siguiente compañero pueda abrir la suya.",
+    icon: Wallet,
+    desc: "Al terminar tu jornada, cuenta el dinero físico de la gaveta y realiza el cierre.",
+    detail: "En 'Caja', presiona 'Cerrar turno / Arqueo'. Ingresa el conteo físico real. El sistema calculará la diferencia: Cuadrado, Sobrante o Faltante, y generará el informe de auditoría.",
+    actionLabel: "👉 Presiona 'Cerrar turno' para registrar el cuadre final.",
+    tip: "El arqueo queda registrado con fecha, hora y usuario responsable para auditoría.",
     view: "cash",
-    targetSelector: '[data-tour="cash-close-btn"], [data-tour="cash-movement-actions"]',
+    targetSelector: '[data-tour="cash-close-btn"], [data-tour="cash-summary-card"]',
   },
   {
     title: "7. Consultas y Salida Segura",
@@ -124,19 +125,19 @@ const ADMIN_WORKFLOW: TourStep[] = [
     title: "¡Bienvenido al Centro de Control!",
     category: "PANEL PRINCIPAL",
     icon: Sparkles,
-    desc: "Como Administrador tienes el control integral de tu negocio: catálogo, compras a proveedores, control de inventario, créditos a clientes, supervisión de cajas, finanzas, analítica y seguridad.",
+    desc: "Como Administrador tienes el control integral de tu negocio: catálogo, compras, inventario, créditos, cajas, finanzas, analítica y entregas a domicilio.",
     detail: "A continuación recorreremos paso a paso cada sección con los elementos reales en pantalla para que configures y administres tu establecimiento de forma profesional.",
     actionLabel: "La pantalla se desplazará automáticamente hacia cada botón o formulario relevante.",
-    tip: "Puedes minimizar esta guía flotante si deseas probar libremente las funciones.",
+    tip: "En celular, puedes minimizar la guía en cualquier momento para explorar libremente.",
     view: "dashboard",
-    targetSelector: '[data-tour="sidebar-nav"]',
+    targetSelector: '[data-tour="sidebar-nav"], [data-tour="mobile-bottom-nav"], [data-tour="mobile-menu-btn"]',
   },
   {
     title: "1. Personaliza tu Comercio y Rubro",
     category: "PASO 1: CONFIGURACIÓN INICIAL",
     icon: Settings,
     desc: "Comienza adaptando el software a las características específicas de tu negocio.",
-    detail: "En 'Configuración' define el nombre de tu tienda, NIT, teléfono, dirección, mensaje de pie de recibo y selecciona tu rubro: Tienda de Barrio/Minimarket, Droguería/Farmacia (con control de fechas de vencimiento), Ferretería, Tienda de Ropa o Comercio General.",
+    detail: "En 'Configuración' define el nombre de tu tienda, NIT, teléfono, dirección, mensaje de pie de recibo y selecciona tu rubro: Tienda de Barrio, Droguería (con lotes y vencimientos), Ferretería o Retail.",
     actionLabel: "👉 Completa los datos de tu empresa en el formulario.",
     tip: "También puedes alternar entre Modo Claro, Oscuro o Automático según tu iluminación.",
     view: "settings",
@@ -147,16 +148,27 @@ const ADMIN_WORKFLOW: TourStep[] = [
     category: "PASO 2: GESTIÓN DE PRODUCTOS",
     icon: Package,
     desc: "Administra todo tu catálogo de productos con control de existencias en tiempo real.",
-    detail: "Crea productos con código de barras, precios de venta, costos de compra, stock mínimo de alerta y unidades de medida. En farmacias, gestiona lotes y fechas de vencimiento con bloqueo automático para productos caducados.",
+    detail: "Crea productos con código de barras, precios de venta, costos de compra, stock mínimo de alerta y unidades de medida. En farmacias, gestiona lotes y fechas de vencimiento con bloqueo automático para caducados.",
     actionLabel: "👉 Haz clic en 'Nuevo producto' para añadir artículos a tu inventario.",
-    tip: "El inventario se descuenta en vivo con cada venta realizada en el mostrador.",
+    tip: "El inventario se descuenta en vivo con cada venta realizada en el mostrador o por domicilio.",
     view: "products",
     targetSelector: '[data-tour="products-new-btn"], [data-tour="products-search-bar"]',
   },
   {
-    title: "3. Compras a Proveedores",
-    category: "PASO 3: ENTRADAS DE MERCANCÍA",
+    title: "3. Pedidos a Domicilio y Despacho",
+    category: "PASO 3: ENTREGAS & REPARTIDORES",
     icon: Truck,
+    desc: "Gestiona pedidos online o telefónicos y asígnalos a tus repartidores en tiempo real.",
+    detail: "En 'Pedidos & Domicilios' puedes tomar pedidos manuales, asignar un conductor exclusivo o externo, imprimir comandas y contactar al cliente o domiciliario por WhatsApp con un solo clic.",
+    actionLabel: "👉 Pulsa 'Asignar' en los pedidos para coordinar el despacho.",
+    tip: "Puedes registrar personal con rol exclusivo 'Domiciliario' desde el propio modal de asignación.",
+    view: "orders",
+    targetSelector: '[data-tour="orders-kpi-grid"], [data-tour="orders-new-btn"]',
+  },
+  {
+    title: "4. Compras a Proveedores",
+    category: "PASO 4: ENTRADAS DE MERCANCÍA",
+    icon: Package,
     desc: "Registra las compras a tus distribuidores para mantener tu stock siempre actualizado.",
     detail: "En 'Compras' registra las facturas de tus proveedores. Al guardar la compra, el inventario de los productos se incrementa automáticamente y el costo unitario se actualiza para garantizar cálculos de utilidad exactos.",
     actionLabel: "👉 Haz clic en 'Nueva compra' para recepcionar mercancía.",
@@ -165,19 +177,19 @@ const ADMIN_WORKFLOW: TourStep[] = [
     targetSelector: '[data-tour="purchases-new-btn"]',
   },
   {
-    title: "4. Clientes y Cuentas por Cobrar (Créditos)",
-    category: "PASO 4: FIADOS Y CARTERA",
+    title: "5. Clientes y Cuentas por Cobrar (Créditos)",
+    category: "PASO 5: FIADOS Y CARTERA",
     icon: CreditCard,
     desc: "Fideliza a tus clientes de confianza otorgándoles crédito con control estricto de cartera.",
-    detail: "Asigna cupos máximos de crédito a tus clientes. Cuando compren a crédito en el POS, su deuda se acumula automáticamente. En este módulo podrás ver los saldos pendientes y registrar abonos de dinero con comprobante.",
+    detail: "Asigna cupos máximos de crédito a tus clientes. Cuando compren a crédito en el POS, su deuda se acumula automáticamente. En este módulo podrás ver los saldos pendientes y registrar abonos con comprobante.",
     actionLabel: "👉 Pulsa 'Otorgar crédito' o 'Abonar' en las cuentas activas.",
     tip: "El sistema bloquea compras a crédito si el cliente supera su cupo autorizado.",
     view: "credit",
     targetSelector: '[data-tour="credit-grant-btn"], [data-tour="credit-summary-cards"]',
   },
   {
-    title: "5. Auditoría de Caja y Arqueo de Turnos",
-    category: "PASO 5: CONTROL DE EFECTIVO",
+    title: "6. Auditoría de Caja y Arqueo de Turnos",
+    category: "PASO 6: CONTROL DE EFECTIVO",
     icon: Wallet,
     desc: "Supervisa en tiempo real las operaciones de caja de tus colaboradores y evita fugas de dinero.",
     detail: "Consulta qué cajero tiene turno abierto, el saldo en efectivo acumulado y revisa el historial completo de arqueos para verificar que el dinero físico contado coincida con el esperado por el sistema.",
@@ -187,8 +199,8 @@ const ADMIN_WORKFLOW: TourStep[] = [
     targetSelector: '[data-tour="cash-history-card"], [data-tour="cash-movement-actions"]',
   },
   {
-    title: "6. Control Financiero (Ingresos y Egresos)",
-    category: "PASO 6: FLUJO DE CAJA Y GASTOS",
+    title: "7. Control Financiero (Ingresos y Egresos)",
+    category: "PASO 7: FLUJO DE CAJA Y GASTOS",
     icon: ArrowLeftRight,
     desc: "Lleva el control de todos los movimientos de dinero que no son ventas de mostrador.",
     detail: "Registra gastos operativos (arriendo, servicios públicos, nómina, fletes) e ingresos extraordinarios. El módulo calcula en tiempo real tu balance financiero neto mensual para mantener tu negocio rentable.",
@@ -198,8 +210,8 @@ const ADMIN_WORKFLOW: TourStep[] = [
     targetSelector: '[data-tour="finance-actions"], [data-tour="finance-summary-cards"]',
   },
   {
-    title: "7. Reportes, Utilidad Real y Analítica",
-    category: "PASO 7: INTELIGENCIA DE NEGOCIO",
+    title: "8. Reportes, Utilidad Real y Analítica",
+    category: "PASO 8: INTELIGENCIA DE NEGOCIO",
     icon: BarChart3,
     desc: "Toma decisiones basadas en datos y números reales.",
     detail: "Visualiza tus ventas del mes, ticket promedio, margen porcentual, ganancia neta real (Ventas − Costo − Gastos), los productos más vendidos y el rendimiento por método de pago con gráficos modernos.",
@@ -209,8 +221,8 @@ const ADMIN_WORKFLOW: TourStep[] = [
     targetSelector: '[data-tour="reports-period-selector"], [data-tour="reports-kpi-grid"]',
   },
   {
-    title: "8. Copias de Seguridad (Backups)",
-    category: "PASO 8: SEGURIDAD Y RESPALDO",
+    title: "9. Copias de Seguridad (Backups)",
+    category: "PASO 9: SEGURIDAD Y RESPALDO",
     icon: HardDrive,
     desc: "Protege la información de tu negocio contra cualquier imprevisto.",
     detail: "En 'Configuración → Backups' puedes descargar una copia completa de tu base de datos en un solo clic. Guárdala en tu computador o memoria USB y restáurala cuando lo necesites.",
@@ -218,6 +230,42 @@ const ADMIN_WORKFLOW: TourStep[] = [
     tip: "¡Excelente! Has completado el tour de administración. Tu negocio está listo para operar.",
     view: "settings",
     targetSelector: '[data-tour="settings-backup-section"]',
+  },
+]
+
+const DOMICILIARIO_WORKFLOW: TourStep[] = [
+  {
+    title: "¡Bienvenido a tu Panel de Reparto!",
+    category: "APP DE DOMICILIARIOS",
+    icon: Truck,
+    desc: "Como repartidor, aquí podrás consultar tus entregas asignadas y completar despachos.",
+    detail: "Esta interfaz optimizada te permite ver pedidos disponibles, acceder al teléfono del cliente, abrir su ubicación y confirmar cobros en la puerta.",
+    actionLabel: "👉 Explora tus pedidos activos en la lista.",
+    tip: "Puedes tocar sobre el teléfono del cliente para escribirle directo por WhatsApp.",
+    view: "orders",
+    targetSelector: '[data-tour="orders-kpi-grid"], [data-tour="mobile-bottom-nav"]',
+  },
+  {
+    title: "1. Tomar Pedidos y Poner en Camino",
+    category: "PASO 1: ASIGNACIÓN Y SALIDA",
+    icon: MapPin,
+    desc: "Cuando la tienda te asigne un pedido, aparecerá en estado 'En Camino' con todos los detalles.",
+    detail: "Verás la dirección exacta, notas especiales (ej. 'timbre blanco') y el total a cobrar si el pedido es contraentrega.",
+    actionLabel: "👉 Revisa la tarjeta de entrega asignada.",
+    tip: "Usa el botón de WhatsApp para avisar al cliente que vas en camino.",
+    view: "orders",
+    targetSelector: '[data-tour="orders-kpi-grid"]',
+  },
+  {
+    title: "2. Marcar Entregado y Cobrado",
+    category: "PASO 2: CIERRE DE ENTREGA",
+    icon: CheckCircle2,
+    desc: "Una vez entregues los productos y recibas el pago en la puerta, finaliza la orden.",
+    detail: "Toca el botón verde 'Marcar Entregado y Cobrado'. El pedido quedará cerrado con la hora exacta de entrega y se registrará en el sistema de la tienda.",
+    actionLabel: "👉 Pulsa 'Marcar Entregado' al completar la entrega.",
+    tip: "¡Listo! El ciclo de despacho queda registrado para la administración.",
+    view: "orders",
+    targetSelector: '[data-tour="orders-kpi-grid"]',
   },
 ]
 
@@ -230,11 +278,29 @@ export default function TourGuide() {
 
   const [currentStep, setCurrentStep] = useState(0)
   const [minimized, setMinimized] = useState(false)
+  const [mobileCollapsed, setMobileCollapsed] = useState(false)
   const [dockSide, setDockSide] = useState<"right" | "left">("right")
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null)
   const [targetRadius, setTargetRadius] = useState<string>("12px")
+  const [isMobile, setIsMobile] = useState(false)
 
-  const steps = role === "vendedor" ? VENDEDOR_WORKFLOW : ADMIN_WORKFLOW
+  // Detectar responsive móvil
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    handleResize()
+    window.addEventListener("resize", handleResize)
+    return () => window.removeEventListener("resize", handleResize)
+  }, [])
+
+  const steps =
+    role === "domiciliario"
+      ? DOMICILIARIO_WORKFLOW
+      : role === "vendedor"
+      ? VENDEDOR_WORKFLOW
+      : ADMIN_WORKFLOW
+
   const step = steps[currentStep] || steps[0]
 
   // Abrir tour automáticamente si es la primera vez
@@ -257,7 +323,7 @@ export default function TourGuide() {
     }
   }, [tourOpen, currentStep, step?.view, setView])
 
-  // Medir y enfocar el elemento objetivo (Spotlight)
+  // Medir y enfocar el elemento objetivo (Spotlight) adaptativo a móvil y desktop
   const updateTargetRect = useCallback(() => {
     if (!tourOpen || !step?.targetSelector) {
       setTargetRect(null)
@@ -269,8 +335,12 @@ export default function TourGuide() {
     for (const sel of selectors) {
       const found = document.querySelector<HTMLElement>(sel)
       if (found) {
-        el = found
-        break
+        // Verificar si el elemento está visible (offsetParent no null o getBoundingClientRect > 0)
+        const r = found.getBoundingClientRect()
+        if (r.width > 0 && r.height > 0) {
+          el = found
+          break
+        }
       }
     }
 
@@ -288,7 +358,9 @@ export default function TourGuide() {
         } catch {
           setTargetRadius("12px")
         }
-        el.scrollIntoView({ behavior: "smooth", block: "nearest" })
+
+        // En móvil, hacer scroll suave asegurando que no se tape con barras fijas
+        el.scrollIntoView({ behavior: "smooth", block: "center" })
         return
       }
     }
@@ -330,10 +402,11 @@ export default function TourGuide() {
     closeTour()
     setCurrentStep(0)
     setMinimized(false)
+    setMobileCollapsed(false)
     setTargetRect(null)
   }, [role, closeTour])
 
-  // Atajos de teclado: Flecha derecha (siguiente), Flecha izquierda (atrás), Escape (minimizar)
+  // Atajos de teclado para PC
   useEffect(() => {
     if (!tourOpen) return
     const onKey = (e: KeyboardEvent) => {
@@ -359,76 +432,91 @@ export default function TourGuide() {
   const isLast = currentStep === steps.length - 1
   const progressPercent = ((currentStep + 1) / steps.length) * 100
 
+  // En móvil: determinar si el elemento enfocado está en la parte inferior de la pantalla
+  // Si está abajo, anclamos la guía en la parte superior para NO tapar el botón objetivo
+  const targetIsInBottomHalf = isMobile && targetRect && targetRect.top > (typeof window !== "undefined" ? window.innerHeight * 0.45 : 300)
+
   return (
     <>
-      {/* Resaltador Spotlight sobre el elemento objetivo en la interfaz */}
+      {/* Resaltador Spotlight interactivo sobre el elemento real */}
       {targetRect && (
         <div
           style={{
             position: "fixed",
-            top: Math.max(0, targetRect.top - 5),
-            left: Math.max(0, targetRect.left - 5),
-            width: targetRect.width + 10,
-            height: targetRect.height + 10,
+            top: Math.max(0, targetRect.top - 4),
+            left: Math.max(0, targetRect.left - 4),
+            width: targetRect.width + 8,
+            height: targetRect.height + 8,
             borderRadius: targetRadius,
             pointerEvents: "none",
             zIndex: 45,
           }}
-          className="border-2 border-primary ring-4 ring-primary/35 shadow-[0_0_25px_rgba(37,99,235,0.5)] transition-all duration-300 animate-pulse"
+          className="border-2 border-primary ring-4 ring-primary/35 shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-all duration-300 animate-pulse"
         >
-          {/* Indicador flotante 'Haz clic aquí' */}
-          <div className="absolute -top-7 left-1.5 bg-primary text-white text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-lg flex items-center gap-1 whitespace-nowrap animate-bounce">
+          {/* Indicador flotante 'Aquí' */}
+          <div className="absolute -top-6 left-1 bg-primary text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap animate-bounce">
             <span>👉</span>
             <span>¡Aquí!</span>
           </div>
         </div>
       )}
 
-      {/* Versión Minimizada: Pastilla flotante en la esquina inferior */}
+      {/* VERSIÓN MINIMIZADA (Pastilla flotante limpia) */}
       {minimized ? (
         <motion.div
-          initial={{ opacity: 0, scale: 0.9, y: 20 }}
+          initial={{ opacity: 0, scale: 0.9, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           className={cn(
-            "fixed bottom-5 z-50 flex items-center gap-2 bg-card/95 backdrop-blur-md border border-primary/50 text-card-foreground p-2 px-3.5 rounded-full shadow-2xl",
-            dockSide === "right" ? "right-5" : "left-5 lg:left-72"
+            "fixed z-50 flex items-center gap-2 bg-card/95 backdrop-blur-md border border-primary/50 text-card-foreground p-1.5 px-3 rounded-full shadow-2xl",
+            isMobile
+              ? "bottom-20 right-3 max-w-[calc(100vw-1.5rem)]"
+              : dockSide === "right"
+              ? "bottom-5 right-5"
+              : "bottom-5 left-5 lg:left-72"
           )}
         >
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-white text-xs font-bold shadow-xs">
+          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-white text-[11px] font-bold shadow-xs shrink-0">
             {currentStep + 1}
           </div>
-          <div className="text-xs">
-            <span className="font-bold text-foreground">Tour Activo</span>
+          <div className="text-[11px] min-w-0">
+            <span className="font-bold text-foreground">Guía</span>
             <span className="text-muted-foreground ml-1">({currentStep + 1}/{steps.length})</span>
           </div>
           <Button
             size="sm"
             variant="default"
             onClick={() => setMinimized(false)}
-            className="h-7 px-2.5 text-xs font-semibold rounded-full ml-1 shadow-xs"
+            className="h-6 px-2 text-[11px] font-semibold rounded-full ml-1 shadow-xs active:scale-[0.96]"
           >
-            <Maximize2 className="h-3.5 w-3.5 mr-1" /> Reanudar
+            <Maximize2 className="h-3 w-3 mr-1" /> Reanudar
           </Button>
           <button
             onClick={handleFinish}
             className="p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted ml-0.5"
             title="Cerrar tour"
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-3 w-3" />
           </button>
         </motion.div>
       ) : (
-        /* Tarjeta Flotante Inteligente Arrastrable / No Bloqueante */
+        /* TARJETA FLOTANTE INTELIGENTE RESPONSIVE */
         <motion.div
-          drag
+          drag={!isMobile} // Desactivar drag en móviles táctiles para no interferir con scroll
           dragMomentum={false}
-          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+          initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 20 }}
+          exit={{ opacity: 0, scale: 0.95, y: 15 }}
           transition={{ type: "spring", stiffness: 450, damping: 32 }}
           className={cn(
-            "fixed bottom-4 z-50 w-[calc(100vw-2rem)] sm:w-[440px] md:w-[470px] rounded-2xl border border-border bg-card/98 backdrop-blur-md text-card-foreground shadow-2xl overflow-hidden",
-            dockSide === "right" ? "right-4 sm:right-6" : "left-4 sm:left-6 lg:left-72"
+            "fixed z-50 rounded-2xl border border-border bg-card/98 backdrop-blur-md text-card-foreground shadow-2xl overflow-hidden transition-all duration-200",
+            isMobile
+              ? targetIsInBottomHalf
+                ? "top-14 left-2 right-2 max-w-[calc(100vw-1rem)] mx-auto"
+                : "bottom-20 left-2 right-2 max-w-[calc(100vw-1rem)] mx-auto"
+              : cn(
+                  "bottom-4 w-[450px] md:w-[480px]",
+                  dockSide === "right" ? "right-4 sm:right-6" : "left-4 sm:left-6 lg:left-72"
+                )
           )}
         >
           {/* Barra de progreso superior */}
@@ -441,44 +529,59 @@ export default function TourGuide() {
             />
           </div>
 
-          {/* Header del Tour con agarradera para arrastrar */}
-          <div className="p-3.5 sm:p-4 pb-2.5 border-b border-border/70 flex items-center justify-between gap-2 cursor-move select-none">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20 shadow-xs">
-                <Icon className="h-4.5 w-4.5 stroke-[2.2]" />
+          {/* Encabezado del Tour */}
+          <div className="p-3 sm:p-4 pb-2 border-b border-border/70 flex items-center justify-between gap-2 select-none">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20 shadow-xs">
+                <Icon className="h-4 w-4 sm:h-4.5 sm:w-4.5 stroke-[2.2]" />
               </div>
               <div className="min-w-0">
-                <span className="text-[10px] font-bold tracking-wider uppercase text-primary block truncate">
+                <span className="text-[9px] sm:text-[10px] font-bold tracking-wider uppercase text-primary block truncate">
                   {step.category}
                 </span>
-                <h3 className="text-sm sm:text-base font-bold text-foreground leading-tight truncate">
+                <h3 className="text-xs sm:text-sm font-bold text-foreground leading-tight truncate">
                   {step.title}
                 </h3>
               </div>
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
-              <Badge variant="secondary" className="text-[11px] font-semibold px-2 py-0.5">
-                {currentStep + 1} de {steps.length}
+              <Badge variant="secondary" className="text-[10px] sm:text-[11px] font-semibold px-2 py-0.5">
+                {currentStep + 1}/{steps.length}
               </Badge>
-              {/* Botón para cambiar de lado (izquierda / derecha) si tapa contenido */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setDockSide((prev) => (prev === "right" ? "left" : "right"))
-                }}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
-                title={dockSide === "right" ? "Mover guía a la izquierda" : "Mover guía a la derecha"}
-              >
-                <ArrowLeftRight className="h-3.5 w-3.5" />
-              </button>
+
+              {/* Botón colapsar / expandir en móvil */}
+              {isMobile && (
+                <button
+                  onClick={() => setMobileCollapsed(!mobileCollapsed)}
+                  className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  title={mobileCollapsed ? "Expandir detalles" : "Modo compacto"}
+                >
+                  {mobileCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                </button>
+              )}
+
+              {/* Botón cambiar lado en desktop */}
+              {!isMobile && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setDockSide((prev) => (prev === "right" ? "left" : "right"))
+                  }}
+                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
+                  title={dockSide === "right" ? "Mover a la izquierda" : "Mover a la derecha"}
+                >
+                  <ArrowLeftRight className="h-3.5 w-3.5" />
+                </button>
+              )}
+
               <button
                 onClick={(e) => {
                   e.stopPropagation()
                   setMinimized(true)
                 }}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
-                title="Minimizar tour para probar la pantalla libremente"
+                className="p-1 sm:p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
+                title="Minimizar tour"
               >
                 <Minimize2 className="h-3.5 w-3.5" />
               </button>
@@ -487,7 +590,7 @@ export default function TourGuide() {
                   e.stopPropagation()
                   handleFinish()
                 }}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
+                className="p-1 sm:p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
                 title="Cerrar tour"
               >
                 <X className="h-3.5 w-3.5" />
@@ -495,98 +598,91 @@ export default function TourGuide() {
             </div>
           </div>
 
-          {/* Cuerpo del paso */}
-          <div className="p-3.5 sm:p-4 space-y-3">
-            <p className="text-xs sm:text-sm font-medium text-foreground leading-relaxed">
-              {step.desc}
-            </p>
+          {/* Cuerpo del paso (Colapsable en móvil para máxima visibilidad) */}
+          <AnimatePresence initial={false}>
+            {(!isMobile || !mobileCollapsed) && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.18 }}
+                className="overflow-hidden"
+              >
+                <div className="p-3 sm:p-4 space-y-2.5 max-h-[42vh] sm:max-h-none overflow-y-auto">
+                  <p className="text-xs sm:text-sm font-medium text-foreground leading-relaxed">
+                    {step.desc}
+                  </p>
 
-            <div className="rounded-xl border border-border/80 bg-muted/40 p-3 text-xs text-foreground/90 dark:text-zinc-200 leading-relaxed font-normal">
-              {step.detail}
-            </div>
+                  <div className="p-2.5 rounded-xl bg-muted/50 border border-border/80 text-[11px] sm:text-xs text-muted-foreground leading-relaxed">
+                    {step.detail}
+                  </div>
 
-            {/* Acción destacada sin texto cortado ni ellipsis */}
-            {step.actionLabel && (
-              <div className="flex items-start justify-between gap-2.5 rounded-xl bg-primary/10 border border-primary/25 p-2.5 px-3 text-xs text-foreground font-semibold">
-                <div className="flex items-start gap-2 min-w-0 flex-1">
-                  <span className="text-sm shrink-0 mt-0.5">🎯</span>
-                  <span className="leading-snug break-words">{step.actionLabel}</span>
+                  {step.actionLabel && (
+                    <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-primary text-[11px] font-semibold flex items-center gap-1.5">
+                      <span>{step.actionLabel}</span>
+                    </div>
+                  )}
+
+                  {step.tip && (
+                    <div className="text-[10px] sm:text-[11px] text-muted-foreground flex items-start gap-1.5 pt-0.5">
+                      <Lightbulb className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+                      <span>{step.tip}</span>
+                    </div>
+                  )}
                 </div>
-                {step.targetSelector && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={updateTargetRect}
-                    className="h-6 px-2 text-[10px] font-bold text-primary hover:bg-primary/20 shrink-0 self-center"
-                    title="Centrar y resaltar el botón en pantalla"
-                  >
-                    <Crosshair className="h-3 w-3 mr-1" /> Enfocar
-                  </Button>
-                )}
-              </div>
+              </motion.div>
             )}
+          </AnimatePresence>
 
-            {step.tip && (
-              <div className="flex items-start gap-2 rounded-xl bg-amber-500/10 border border-amber-500/25 p-2.5 px-3 text-xs text-amber-900 dark:text-amber-200">
-                <Lightbulb className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-                <p className="leading-snug font-medium">{step.tip}</p>
-              </div>
-            )}
-          </div>
-
-          {/* Footer de navegación con Stepper Dots interactivos */}
-          <div className="p-3 sm:p-4 pt-2.5 border-t border-border/70 bg-muted/20 flex items-center justify-between gap-2">
-            <button
-              onClick={handleFinish}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors font-medium px-1.5"
+          {/* Footer de Navegación del Tour */}
+          <div className="p-2.5 sm:p-3.5 border-t border-border/70 bg-muted/20 flex items-center justify-between gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handlePrev}
+              disabled={currentStep === 0}
+              className="h-8 px-2.5 text-xs rounded-xl active:scale-[0.96]"
             >
-              Omitir
-            </button>
+              <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Anterior
+            </Button>
 
-            {/* Puntos indicadores interactivos */}
+            {/* Puntos de progreso en desktop */}
             <div className="hidden sm:flex items-center gap-1">
               {steps.map((_, idx) => (
                 <button
                   key={idx}
                   onClick={() => setCurrentStep(idx)}
                   className={cn(
-                    "h-1.5 rounded-full transition-all",
-                    idx === currentStep
-                      ? "w-4 bg-primary"
-                      : "w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/60"
+                    "h-1.5 rounded-full transition-all duration-200",
+                    idx === currentStep ? "w-5 bg-primary" : "w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/60"
                   )}
                   title={`Ir al paso ${idx + 1}`}
                 />
               ))}
             </div>
 
-            <div className="flex items-center gap-2">
-              {currentStep > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handlePrev}
-                  className="h-8 sm:h-9 px-2.5 sm:px-3 text-xs font-semibold gap-1 rounded-xl"
-                  title="Paso anterior (o presiona flecha izquierda)"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" /> Atrás
-                </Button>
+            <Button
+              size="sm"
+              variant="default"
+              onClick={handleNext}
+              className={cn(
+                "h-8 px-3 text-xs rounded-xl font-bold shadow-xs active:scale-[0.96]",
+                isLast ? "bg-emerald-600 hover:bg-emerald-700 text-white" : ""
               )}
-
-              <Button
-                size="sm"
-                onClick={handleNext}
-                className="h-8 sm:h-9 px-3.5 sm:px-4 text-xs font-bold gap-1.5 rounded-xl shadow-xs shadow-primary/25"
-                title="Siguiente paso (o presiona flecha derecha)"
-              >
-                <span>{isLast ? "¡Finalizar!" : "Siguiente"}</span>
-                {!isLast && <ArrowRight className="h-3.5 w-3.5" />}
-              </Button>
-            </div>
+            >
+              {isLast ? (
+                <>
+                  <Check className="h-3.5 w-3.5 mr-1" /> ¡Listo, finalizar!
+                </>
+              ) : (
+                <>
+                  Siguiente <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                </>
+              )}
+            </Button>
           </div>
         </motion.div>
       )}
     </>
   )
 }
-

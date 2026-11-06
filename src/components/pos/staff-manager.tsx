@@ -48,17 +48,21 @@ import {
   IconLock,
   IconRefresh,
   IconCrown,
+  IconMotorbike,
   IconSearch,
   IconChevronDown,
   IconChevronRight,
   IconChevronUp,
+  IconRobot,
+  IconCpu,
 } from "@tabler/icons-react"
+import { McpTokenGenerator } from "@/components/pos/mcp-token-generator"
 
 export interface StaffUser {
   id: string
   name: string
   email: string | null
-  role: "superadmin" | "admin" | "vendedor"
+  role: "superadmin" | "admin" | "vendedor" | "domiciliario"
   isPrimary: boolean
   allowedBranchIds?: string[]
   assignedBranches?: { id: string; name: string; code: string | null }[]
@@ -92,7 +96,7 @@ export default function StaffManager() {
   const [newUserOpen, setNewUserOpen] = useState(false)
   const [newUserName, setNewUserName] = useState("")
   const [newUserEmail, setNewUserEmail] = useState("")
-  const [newUserRole, setNewUserRole] = useState<"admin" | "vendedor">("vendedor")
+  const [newUserRole, setNewUserRole] = useState<"admin" | "vendedor" | "domiciliario">("vendedor")
   const [newUserPin, setNewUserPin] = useState("")
   const [newUserPinConfirm, setNewUserPinConfirm] = useState("")
   const [newUserBranches, setNewUserBranches] = useState<string[]>([])
@@ -104,7 +108,7 @@ export default function StaffManager() {
   const [selectedUser, setSelectedUser] = useState<StaffUser | null>(null)
   const [editName, setEditName] = useState("")
   const [editEmail, setEditEmail] = useState("")
-  const [editRole, setEditRole] = useState<"admin" | "vendedor">("vendedor")
+  const [editRole, setEditRole] = useState<"admin" | "vendedor" | "domiciliario">("vendedor")
   const [editActive, setEditActive] = useState(true)
   const [editUserBranches, setEditUserBranches] = useState<string[]>([])
   const [savingEditUser, setSavingEditUser] = useState(false)
@@ -149,6 +153,10 @@ export default function StaffManager() {
 
   // ID del usuario cuyo toggle está en proceso de carga
   const [toggleLoadingId, setToggleLoadingId] = useState<string | null>(null)
+
+  // Modal Generador de Token MCP para Agentes IA
+  const [mcpModalOpen, setMcpModalOpen] = useState(false)
+  const [mcpTargetUser, setMcpTargetUser] = useState<StaffUser | null>(null)
 
   // Cargar lista de negocios si es Superadmin
   useEffect(() => {
@@ -286,7 +294,7 @@ export default function StaffManager() {
     setSelectedUser(user)
     setEditName(user.name)
     setEditEmail(user.email || "")
-    setEditRole(user.role === "admin" ? "admin" : "vendedor")
+    setEditRole(user.role === "admin" ? "admin" : user.role === "domiciliario" ? "domiciliario" : "vendedor")
     setEditActive(user.active)
     const userTenantBranches = branches.filter((b) => (b.tenantId ?? b.tenant?.id ?? null) === (user.tenantId ?? null))
     const relevantBranches = userTenantBranches.length > 0 ? userTenantBranches : branches
@@ -745,7 +753,7 @@ export default function StaffManager() {
 
         <Card className="rounded-xl border shadow-xs">
           <CardContent className="p-3.5 sm:p-4 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-violet-500/10 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
+            <div className="h-10 w-10 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 flex items-center justify-center shrink-0">
               <IconShieldCheck className="h-5 w-5" />
             </div>
             <div className="min-w-0">
@@ -757,7 +765,7 @@ export default function StaffManager() {
 
         <Card className="rounded-xl border shadow-xs">
           <CardContent className="p-3.5 sm:p-4 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+            <div className="h-10 w-10 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 flex items-center justify-center shrink-0">
               <IconUserCheck className="h-5 w-5" />
             </div>
             <div className="min-w-0">
@@ -769,7 +777,7 @@ export default function StaffManager() {
 
         <Card className="rounded-xl border shadow-xs">
           <CardContent className="p-3.5 sm:p-4 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+            <div className="h-10 w-10 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 flex items-center justify-center shrink-0">
               <IconBuildingStore className="h-5 w-5" />
             </div>
             <div className="min-w-0">
@@ -792,13 +800,13 @@ export default function StaffManager() {
         <Card className="rounded-2xl border bg-muted/40 p-3 sm:p-4 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              <div className="h-9 w-9 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0">
+              <div className="h-9 w-9 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 flex items-center justify-center shrink-0">
                 <IconCrown className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-xs font-bold text-foreground flex items-center gap-1.5">
                   Filtro Multi-Tenant SaaS
-                  <Badge className="bg-amber-500 text-white text-[9px] py-0 px-1">Superadmin</Badge>
+                  <Badge className="bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-[9px] py-0 px-1">Superadmin</Badge>
                 </p>
                 <p className="text-[11px] text-muted-foreground">
                   Filtra colaboradores y sucursales por negocio específico o examina el ecosistema completo.
@@ -863,7 +871,7 @@ export default function StaffManager() {
                           {primaryAdmin.tenantName}
                         </Badge>
                       )}
-                      <Badge variant="outline" className="text-[10px] text-emerald-700 dark:text-emerald-400 border-emerald-300">
+                      <Badge variant="outline" className="text-[10px] text-foreground border-border">
                         Inmutable
                       </Badge>
                     </div>
@@ -895,9 +903,9 @@ export default function StaffManager() {
               </div>
             </Card>
           ) : role === "superadmin" && selectedTenantFilter === "all" ? (
-            <Card className="rounded-2xl border-amber-500/20 bg-amber-500/5 shadow-xs overflow-hidden">
+            <Card className="rounded-2xl border-border bg-muted/10 shadow-xs overflow-hidden">
               <div className="p-4 sm:p-5 flex items-center gap-3.5">
-                <div className="h-10 w-10 rounded-2xl bg-amber-500 text-white flex items-center justify-center font-bold text-sm shadow-sm shrink-0">
+                <div className="h-10 w-10 rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center font-bold text-sm shadow-sm shrink-0">
                   <IconCrown className="h-5 w-5" />
                 </div>
                 <div className="min-w-0">
@@ -1035,7 +1043,7 @@ export default function StaffManager() {
                             {isAdminInactive && (
                               <Badge
                                 variant="destructive"
-                                className="text-[10px] h-5 bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-300 dark:border-rose-800 font-semibold gap-1"
+                                className="text-[10px] h-5 bg-muted text-muted-foreground border-border font-semibold gap-1"
                               >
                                 Admin Inactivo · Personal Inactivo
                               </Badge>
@@ -1151,7 +1159,7 @@ export default function StaffManager() {
                                               className={cn(
                                                 "text-xs font-bold",
                                                 u.role === "superadmin"
-                                                  ? "bg-amber-500 text-white"
+                                                  ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950"
                                                   : "bg-primary text-primary-foreground"
                                               )}
                                             >
@@ -1161,7 +1169,7 @@ export default function StaffManager() {
                                           <div className="min-w-0">
                                             <p className="text-xs font-bold text-foreground truncate flex items-center gap-1.5">
                                               {u.name}
-                                              <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold border border-amber-300 dark:border-amber-800">
+                                              <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-primary/15 text-foreground font-bold border border-border">
                                                 Titular
                                               </span>
                                             </p>
@@ -1203,7 +1211,7 @@ export default function StaffManager() {
                                     {/* Rol */}
                                     <TableCell className="py-3.5 px-4">
                                       {u.role === "superadmin" ? (
-                                        <Badge className="text-[10px] font-semibold bg-amber-500 text-white gap-1 shadow-xs">
+                                        <Badge className="text-[10px] font-semibold bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 gap-1 shadow-xs">
                                           <IconCrown className="h-3 w-3" /> Superadmin
                                         </Badge>
                                       ) : u.role === "admin" ? (
@@ -1289,10 +1297,10 @@ export default function StaffManager() {
                                         <div className="flex items-center justify-center">
                                           <Badge
                                             variant="outline"
-                                            className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-300 dark:border-amber-800 gap-1 py-1 px-2.5 shadow-2xs select-none"
+                                            className="text-[10px] font-bold text-foreground bg-muted/40 border-border gap-1 py-1 px-2.5 shadow-2xs select-none"
                                             title="El Superadministrador nunca puede ser deshabilitado"
                                           >
-                                            <IconShieldCheck className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                            <IconShieldCheck className="h-3.5 w-3.5 text-foreground shrink-0" />
                                             Siempre Activo
                                           </Badge>
                                         </div>
@@ -1322,7 +1330,7 @@ export default function StaffManager() {
                                             className={cn(
                                               "text-[11px] font-medium transition-colors",
                                               u.active
-                                                ? "text-emerald-600 dark:text-emerald-400"
+                                                ? "text-foreground"
                                                 : "text-muted-foreground"
                                             )}
                                           >
@@ -1343,6 +1351,18 @@ export default function StaffManager() {
                                           title="Cambiar PIN"
                                         >
                                           <IconKey className="h-3.5 w-3.5 mr-1" /> PIN
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => {
+                                            setMcpTargetUser(u)
+                                            setMcpModalOpen(true)
+                                          }}
+                                          className="h-8 px-2.5 text-xs rounded-lg gap-1 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                          title="Generar Token Criptográfico MCP para este Colaborador"
+                                        >
+                                          <IconRobot className="h-3.5 w-3.5" /> Token MCP
                                         </Button>
                                         <Button
                                           variant="outline"
@@ -1387,7 +1407,7 @@ export default function StaffManager() {
                                         className={cn(
                                           "text-xs font-bold",
                                           u.role === "superadmin"
-                                            ? "bg-amber-500 text-white"
+                                            ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950"
                                             : u.role === "admin"
                                             ? "bg-primary text-primary-foreground"
                                             : "bg-muted text-foreground"
@@ -1399,7 +1419,7 @@ export default function StaffManager() {
                                     <div className="min-w-0">
                                       <div className="flex items-center gap-1.5">
                                         {u.isPrimary ? (
-                                          <IconCrown className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                          <IconCrown className="h-3.5 w-3.5 text-foreground shrink-0" />
                                         ) : (
                                           <span className="text-primary font-bold text-xs select-none">↳</span>
                                         )}
@@ -1425,7 +1445,7 @@ export default function StaffManager() {
                                             : "Colaborador"}
                                         </Badge>
                                         {u.isPrimary && (
-                                          <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
+                                          <span className="text-[9px] text-foreground font-medium">
                                             Titular
                                           </span>
                                         )}
@@ -1435,9 +1455,9 @@ export default function StaffManager() {
                                   {u.role === "superadmin" || u.email === "kaledmoly@gmail.com" ? (
                                     <Badge
                                       variant="outline"
-                                      className="text-[9px] px-1.5 py-0 h-4 shrink-0 font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-300 dark:border-amber-800 gap-1 select-none"
+                                      className="text-[9px] px-1.5 py-0 h-4 shrink-0 font-bold text-foreground bg-muted/40 border-border gap-1 select-none"
                                     >
-                                      <IconShieldCheck className="h-2.5 w-2.5 text-amber-500 shrink-0" />
+                                      <IconShieldCheck className="h-2.5 w-2.5 text-foreground shrink-0" />
                                       Siempre Activo
                                     </Badge>
                                   ) : (
@@ -1446,7 +1466,7 @@ export default function StaffManager() {
                                       className={cn(
                                         "text-[9px] px-1.5 py-0 h-4 shrink-0 font-medium",
                                         u.active
-                                          ? "text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40"
+                                          ? "text-foreground border-border bg-muted/30"
                                           : "text-muted-foreground"
                                       )}
                                     >
@@ -1492,8 +1512,8 @@ export default function StaffManager() {
                                 <div className="flex items-center justify-between pt-1 border-t border-border/50 text-xs">
                                   <div className="flex items-center gap-1.5">
                                     {u.role === "superadmin" || u.email === "kaledmoly@gmail.com" ? (
-                                      <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1 select-none">
-                                        <IconShieldCheck className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                      <span className="text-[11px] font-semibold text-foreground flex items-center gap-1 select-none">
+                                        <IconShieldCheck className="h-3.5 w-3.5 text-foreground shrink-0" />
                                         Siempre Activo
                                       </span>
                                     ) : toggleLoadingId === u.id ? (
@@ -1516,6 +1536,18 @@ export default function StaffManager() {
                                   </div>
 
                                   <div className="flex items-center gap-1.5">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        setMcpTargetUser(u)
+                                        setMcpModalOpen(true)
+                                      }}
+                                      className="h-7 px-2 text-[11px] rounded-lg border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100"
+                                      title="Generar Token MCP"
+                                    >
+                                      <IconRobot className="h-3 w-3 mr-1" /> MCP
+                                    </Button>
                                     <Button
                                       variant="outline"
                                       size="sm"
@@ -1589,7 +1621,7 @@ export default function StaffManager() {
                       <div
                         className={cn(
                           "h-full transition-all duration-300 rounded-full",
-                          branches.length >= MAX_BRANCHES ? "bg-amber-500" : "bg-primary"
+                          branches.length >= MAX_BRANCHES ? "bg-zinc-800 dark:bg-zinc-200" : "bg-primary"
                         )}
                         style={{ width: `${branchUsagePercent}%` }}
                       />
@@ -1601,7 +1633,7 @@ export default function StaffManager() {
                   </div>
 
                   {branches.length >= MAX_BRANCHES && (
-                    <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 text-xs">
+                    <div className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/40 text-foreground border border-border text-xs">
                       <IconAlertTriangle className="h-4 w-4 shrink-0" />
                       <span>Has alcanzado el límite máximo permitido de {MAX_BRANCHES} sedes para este negocio. Para agregar otra sede, debes editar o eliminar una sede secundaria.</span>
                     </div>
@@ -1756,12 +1788,13 @@ export default function StaffManager() {
 
             <div className="space-y-1">
               <Label className="text-xs font-semibold">Rol Asignado *</Label>
-              <Select value={newUserRole} onValueChange={(v) => setNewUserRole(v as "admin" | "vendedor")}>
+              <Select value={newUserRole} onValueChange={(v) => setNewUserRole(v as "admin" | "vendedor" | "domiciliario")}>
                 <SelectTrigger className="h-9 text-xs rounded-xl">
                   <SelectValue placeholder="Seleccionar rol" />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
                   <SelectItem value="vendedor">Vendedor (Punto de Venta, Caja y Ventas)</SelectItem>
+                  <SelectItem value="domiciliario">Domiciliario / Repartidor (Entregas y Envíos)</SelectItem>
                   <SelectItem value="admin">Administrador (Acceso total)</SelectItem>
                 </SelectContent>
               </Select>
@@ -1932,7 +1965,7 @@ export default function StaffManager() {
               <Label className="text-xs font-semibold">Rol Asignado</Label>
               <Select
                 value={editRole}
-                onValueChange={(v) => setEditRole(v as "admin" | "vendedor")}
+                onValueChange={(v) => setEditRole(v as "admin" | "vendedor" | "domiciliario")}
                 disabled={selectedUser?.isPrimary || selectedUser?.role === "superadmin" || selectedUser?.email === "kaledmoly@gmail.com"}
               >
                 <SelectTrigger className="h-9 text-xs rounded-xl">
@@ -1940,6 +1973,7 @@ export default function StaffManager() {
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
                   <SelectItem value="vendedor">Vendedor (Punto de Venta, Caja y Ventas)</SelectItem>
+                  <SelectItem value="domiciliario">Domiciliario / Repartidor (Entregas y Envíos)</SelectItem>
                   <SelectItem value="admin">Administrador (Acceso total)</SelectItem>
                 </SelectContent>
               </Select>
@@ -2034,11 +2068,11 @@ export default function StaffManager() {
             })()}
 
             {selectedUser?.role === "superadmin" || selectedUser?.email === "kaledmoly@gmail.com" ? (
-              <div className="p-3.5 rounded-xl border border-amber-300/70 dark:border-amber-900/60 bg-amber-50/70 dark:bg-amber-950/30 flex items-start gap-2.5 text-xs">
-                <IconShieldCheck className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="p-3.5 rounded-xl border border-border bg-muted/30 flex items-start gap-2.5 text-xs">
+                <IconShieldCheck className="h-4 w-4 text-foreground shrink-0 mt-0.5" />
                 <div className="space-y-0.5">
-                  <p className="font-semibold text-amber-900 dark:text-amber-300">Cuenta de Superadministrador Protegida</p>
-                  <p className="text-[11px] text-amber-700 dark:text-amber-400/90 leading-relaxed">
+                  <p className="font-semibold text-foreground">Cuenta de Superadministrador Protegida</p>
+                  <p className="text-[11px] text-foreground/90 leading-relaxed">
                     El Superadministrador principal del sistema cuenta con acceso maestro permanente y <strong>no se puede deshabilitar nunca</strong>.
                   </p>
                 </div>
@@ -2051,7 +2085,7 @@ export default function StaffManager() {
                     {editActive ? "El usuario puede iniciar sesión y operar" : "Acceso bloqueado"}
                   </span>
                   {selectedUser?.isPrimary && (
-                    <span className="text-[10px] text-amber-600 dark:text-amber-400 block font-medium">
+                    <span className="text-[10px] text-foreground block font-medium">
                       ⚠️ Al inactivar al Administrador Principal se inactivarán automáticamente todos sus colaboradores.
                     </span>
                   )}
@@ -2327,13 +2361,13 @@ export default function StaffManager() {
       >
         <DialogContent className="sm:max-w-sm rounded-2xl p-0 overflow-hidden gap-0">
           {/* Header de alerta */}
-          <div className="relative bg-gradient-to-br from-amber-500/15 via-orange-500/10 to-red-500/5 border-b border-amber-200/60 dark:border-amber-900/40 px-6 pt-6 pb-5">
+          <div className="relative bg-gradient-to-br from-zinc-500/10 to-transparent border-b border-border px-6 pt-6 pb-5">
             {/* Ícono de alerta animado */}
             <div className="flex items-center gap-3.5 mb-3">
               <div className="relative">
-                <div className="absolute inset-0 rounded-full bg-amber-400/20 animate-ping" style={{ animationDuration: "2s" }} />
-                <div className="relative h-11 w-11 rounded-full bg-amber-100 dark:bg-amber-950/60 border-2 border-amber-300 dark:border-amber-700 flex items-center justify-center shadow-md">
-                  <IconAlertTriangle className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+                <div className="absolute inset-0 rounded-full bg-zinc-400/20 animate-ping" style={{ animationDuration: "2s" }} />
+                <div className="relative h-11 w-11 rounded-full bg-zinc-100 dark:bg-zinc-800 border-2 border-zinc-300 dark:border-zinc-700 flex items-center justify-center shadow-md">
+                  <IconAlertTriangle className="h-6 w-6 text-foreground" />
                 </div>
               </div>
               <div className="space-y-0.5">
@@ -2422,6 +2456,28 @@ export default function StaffManager() {
               )}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Generador de Token MCP para Agentes IA */}
+      <Dialog open={mcpModalOpen} onOpenChange={setMcpModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <IconRobot className="h-5 w-5 text-foreground" />
+              Token Criptográfico MCP para {mcpTargetUser?.name || "Colaborador"}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Genera una clave inalterable para permitir que este usuario o un bot actúe con su rol y sus sedes autorizadas.
+            </DialogDescription>
+          </DialogHeader>
+          {mcpTargetUser && (
+            <McpTokenGenerator
+              initialUserName={mcpTargetUser.name}
+              initialRole={mcpTargetUser.role as any}
+              initialBranchId={mcpTargetUser.allowedBranchIds?.[0]}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>

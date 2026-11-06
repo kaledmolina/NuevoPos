@@ -63,9 +63,12 @@ import {
   IconUser,
   IconShieldCheck,
   IconClock,
+  IconRobot,
+  IconCpu,
 } from "@tabler/icons-react"
 import { cn } from "@/lib/utils"
 import { TOUR_STORAGE_KEY_PREFIX } from "@/components/pos/tour"
+import { McpTokenGenerator } from "@/components/pos/mcp-token-generator"
 
 interface Backup {
   name: string
@@ -458,7 +461,7 @@ export default function SettingsView() {
       <Tabs defaultValue="general" className="w-full space-y-4">
         {/* Barra de navegación de pestañas responsive adaptada para móvil y escritorio */}
         <div className="w-full overflow-x-auto no-scrollbar pb-1">
-          <TabsList className="grid grid-cols-5 h-auto p-1 bg-muted/60 border border-border/80 rounded-xl gap-1 w-full min-w-[340px]">
+          <TabsList className="grid grid-cols-3 sm:grid-cols-6 h-auto p-1 bg-muted/60 border border-border/80 rounded-xl gap-1 w-full min-w-[340px]">
             <TabsTrigger
               value="general"
               className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
@@ -473,6 +476,14 @@ export default function SettingsView() {
             >
               <IconShieldLock className="h-4 w-4 shrink-0" />
               <span className="truncate">Seguridad</span>
+            </TabsTrigger>
+
+            <TabsTrigger
+              value="mcp"
+              className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
+            >
+              <IconRobot className="h-4 w-4 shrink-0" />
+              <span className="truncate font-semibold">Tokens MCP</span>
             </TabsTrigger>
 
             <TabsTrigger
@@ -502,6 +513,11 @@ export default function SettingsView() {
             </TabsTrigger>
           </TabsList>
         </div>
+
+        {/* ==================== PESTAÑA: AGENTES IA & TOKENS MCP ==================== */}
+        <TabsContent value="mcp" className="space-y-4">
+          <McpTokenGenerator />
+        </TabsContent>
 
         {/* ==================== PESTAÑA 1: NEGOCIO & RUBRO ==================== */}
         <TabsContent value="general" className="space-y-4">
@@ -787,10 +803,10 @@ export default function SettingsView() {
           </div>
 
           {isDemoAccount && (
-            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-start gap-3 shadow-xs">
-              <IconShieldLock className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <div className="p-4 rounded-2xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 flex items-start gap-3 shadow-xs">
+              <IconShieldLock className="h-5 w-5 text-foreground shrink-0 mt-0.5" />
               <div className="space-y-1 text-xs">
-                <p className="font-bold text-amber-900 dark:text-amber-200">
+                <p className="font-bold text-foreground">
                   Cuentas de Demostración Protegidas
                 </p>
                 <p className="text-muted-foreground leading-relaxed">
@@ -1149,7 +1165,7 @@ export default function SettingsView() {
                             <p className="text-sm font-semibold truncate">{b.name}</p>
                             {i === 0 && <Badge className="text-[10px] py-0">Más reciente</Badge>}
                             {b.canDelete ? (
-                              <Badge variant="outline" className="text-[10px] text-amber-700 dark:text-amber-400 border-amber-300 bg-amber-50 dark:bg-amber-950/20">
+                              <Badge variant="outline" className="text-[10px] text-foreground border-border bg-muted/30">
                                 Depurable (+5 días)
                               </Badge>
                             ) : (
@@ -1442,7 +1458,7 @@ export default function SettingsView() {
       <AlertDialog open={!!restoreTarget} onOpenChange={(o) => !o && setRestoreTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-amber-600">
+            <AlertDialogTitle className="flex items-center gap-2 text-foreground font-bold">
               <IconAlertTriangle className="h-5 w-5" /> ¿Restaurar copia de seguridad?
             </AlertDialogTitle>
             <AlertDialogDescription>
@@ -1456,7 +1472,7 @@ export default function SettingsView() {
             <AlertDialogAction
               onClick={() => restoreTarget && restoreBackup(restoreTarget)}
               disabled={restoringBackup}
-              className="bg-amber-600 text-white hover:bg-amber-700"
+              className="bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-zinc-200"
             >
               {restoringBackup ? <><IconRefresh className="h-4 w-4 mr-1.5 animate-spin" /> Restaurando…</> : "Sí, restaurar"}
             </AlertDialogAction>
@@ -1480,7 +1496,7 @@ export default function SettingsView() {
                 Tus cuentas de usuario (admin y vendedor) y ajustes de la tienda se conservarán intactos.
               </strong>
               <br />
-              <span className="text-emerald-600 dark:text-emerald-400 block pt-1">
+              <span className="text-foreground font-medium block pt-1">
                 🛡️ Se creará una copia de respaldo automática previa en la pestaña Backups antes de ejecutar la limpieza.
               </span>
             </AlertDialogDescription>

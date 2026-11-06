@@ -49,6 +49,10 @@ export async function GET(req: NextRequest) {
     where,
     include: {
       category: true,
+      batches: {
+        where: { stock: { gt: 0 } },
+        orderBy: [{ expirationDate: "asc" }, { createdAt: "asc" }],
+      },
       saleItems: {
         where: {
           sale: {

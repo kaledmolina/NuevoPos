@@ -1,18 +1,15 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 
-const geistSans = Geist({
+const geistSans = {
   variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+};
 
-const geistMono = Geist_Mono({
+const geistMono = {
   variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+};
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -55,7 +52,7 @@ export default function RootLayout({
       >
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
+          defaultTheme="dark"
           enableSystem
           disableTransitionOnChange
         >

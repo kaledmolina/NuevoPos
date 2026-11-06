@@ -28,6 +28,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 import {
   IconSearch,
   IconPlus,
@@ -71,6 +72,7 @@ interface Product {
   unit: string
   expirationDate: string | null
   batch: string | null
+  batches?: { id: string; batch: string | null; stock: number; cost: number; expirationDate: string | null }[]
   location: string | null
   active: boolean
   soldUnits?: number
@@ -634,7 +636,14 @@ export default function ProductsView() {
                                 <p className="text-xs">{formatDate(p.expirationDate)}</p>
                                 <Badge
                                   variant="outline"
-                                  className={`text-[10px] ${exp.variant === "expired" ? "border-red-500 text-red-600" : exp.variant === "soon" ? "border-orange-500 text-orange-600" : ""}`}
+                                  className={cn(
+                                    "text-[10px] font-bold",
+                                    exp.variant === "expired"
+                                      ? "border-zinc-950 dark:border-white bg-zinc-900 text-white dark:bg-white dark:text-zinc-950"
+                                      : exp.variant === "soon"
+                                      ? "border-zinc-500 dark:border-zinc-500 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                                      : "border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400"
+                                  )}
                                 >
                                   {exp.label}
                                 </Badge>
@@ -743,7 +752,14 @@ export default function ProductsView() {
                       <span className="text-xs text-muted-foreground">{formatDate(p.expirationDate)}</span>
                       <Badge
                         variant="outline"
-                        className={`text-[10px] ${exp.variant === "expired" ? "border-red-500 text-red-600" : exp.variant === "soon" ? "border-orange-500 text-orange-600" : ""}`}
+                        className={cn(
+                          "text-[10px] font-bold",
+                          exp.variant === "expired"
+                            ? "border-zinc-950 dark:border-white bg-zinc-900 text-white dark:bg-white dark:text-zinc-950"
+                            : exp.variant === "soon"
+                            ? "border-zinc-500 dark:border-zinc-500 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                            : "border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400"
+                        )}
                       >
                         {exp.label}
                       </Badge>
@@ -1333,7 +1349,30 @@ export default function ProductsView() {
                     </div>
                   </div>
 
-                  {(detailProduct.expirationDate || detailProduct.batch) && (
+                  {detailProduct.batches && detailProduct.batches.length > 0 ? (
+                    <div className="pt-2 border-t space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
+                        <span>Lotes Activos ({detailProduct.batches.length})</span>
+                        <span>Stock / Vencimiento</span>
+                      </div>
+                      <div className="space-y-1 max-h-32 overflow-y-auto scroll-thin">
+                        {detailProduct.batches.map((b) => (
+                          <div key={b.id} className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-[11px]">
+                            <div>
+                              <span className="font-bold text-foreground">{b.batch || "Lote único"}</span>
+                              {canSeeCosts && <span className="text-muted-foreground ml-2">(@ {formatCurrency(b.cost)})</span>}
+                            </div>
+                            <div className="text-right">
+                              <span className="font-semibold text-foreground">{b.stock} {detailProduct.unit}s</span>
+                              {b.expirationDate && (
+                                <span className="text-[10px] text-muted-foreground block">{formatDate(b.expirationDate)}</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (detailProduct.expirationDate || detailProduct.batch) ? (
                     <div className="pt-2 border-t flex items-center justify-between text-[11px]">
                       {detailProduct.batch && (
                         <span>Lote: <strong className="text-foreground">{detailProduct.batch}</strong></span>
@@ -1342,7 +1381,7 @@ export default function ProductsView() {
                         <span>Vence: <strong className="text-foreground">{formatDate(detailProduct.expirationDate)}</strong></span>
                       )}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
 

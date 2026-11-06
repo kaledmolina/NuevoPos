@@ -1,11 +1,12 @@
 // Definición de roles y permisos para el sistema POS de droguería
  
-export type Role = "superadmin" | "admin" | "vendedor"
+export type Role = "superadmin" | "admin" | "vendedor" | "domiciliario" | "cliente"
 
 export type ViewKey =
   | "superadmin"
   | "dashboard"
   | "pos"
+  | "orders"
   | "products"
   | "clients"
   | "suppliers"
@@ -17,6 +18,8 @@ export type ViewKey =
   | "reports"
   | "personal"
   | "settings"
+  | "whatsapp"
+  | "api_docs"
 
 export interface RoleConfig {
   label: string
@@ -40,6 +43,7 @@ export const ROLE_CONFIG: Record<Role, RoleConfig> = {
       "superadmin",
       "dashboard",
       "pos",
+      "orders",
       "products",
       "purchases",
       "clients",
@@ -51,6 +55,8 @@ export const ROLE_CONFIG: Record<Role, RoleConfig> = {
       "reports",
       "personal",
       "settings",
+      "whatsapp",
+      "api_docs",
     ],
     canEditProducts: true,
     canManagePurchases: true,
@@ -64,7 +70,24 @@ export const ROLE_CONFIG: Record<Role, RoleConfig> = {
   admin: {
     label: "Administrador",
     description: "Acceso completo: inventario, compras, finanzas, reportes y configuración.",
-    views: ["dashboard", "pos", "products", "purchases", "clients", "suppliers", "sales", "cash", "finance", "credit", "reports", "personal", "settings"],
+    views: [
+      "dashboard",
+      "pos",
+      "orders",
+      "products",
+      "purchases",
+      "clients",
+      "suppliers",
+      "sales",
+      "cash",
+      "finance",
+      "credit",
+      "reports",
+      "personal",
+      "settings",
+      "whatsapp",
+      "api_docs",
+    ],
     canEditProducts: true,
     canManagePurchases: true,
     canManageClients: true,
@@ -77,7 +100,33 @@ export const ROLE_CONFIG: Record<Role, RoleConfig> = {
   vendedor: {
     label: "Vendedor",
     description: "Punto de venta, apertura/arqueo de caja y consulta de ventas. Sin acceso a costos ni edición de inventario.",
-    views: ["dashboard", "pos", "products", "sales", "cash"],
+    views: ["dashboard", "pos", "orders", "products", "sales", "cash", "api_docs"],
+    canEditProducts: false,
+    canManagePurchases: false,
+    canManageClients: false,
+    canManageSuppliers: false,
+    canManageFinance: false,
+    canAnnulSales: false,
+    canSeeCosts: false,
+    canSeedData: false,
+  },
+  domiciliario: {
+    label: "Domiciliario / Repartidor",
+    description: "Acceso a la app de domicilios, pedidos asignados y actualización de estado de entregas.",
+    views: ["dashboard", "orders", "api_docs"],
+    canEditProducts: false,
+    canManagePurchases: false,
+    canManageClients: false,
+    canManageSuppliers: false,
+    canManageFinance: false,
+    canAnnulSales: false,
+    canSeeCosts: false,
+    canSeedData: false,
+  },
+  cliente: {
+    label: "Cliente",
+    description: "Acceso a catálogo de tiendas, realización y seguimiento de pedidos online.",
+    views: ["dashboard", "orders", "api_docs"],
     canEditProducts: false,
     canManagePurchases: false,
     canManageClients: false,
@@ -95,6 +144,6 @@ export function canAccessView(role: Role, view: ViewKey): boolean {
 
 export function defaultViewFor(role: Role): ViewKey {
   if (role === "superadmin") return "superadmin"
+  if (role === "domiciliario" || role === "cliente") return "orders"
   return role === "admin" ? "dashboard" : "pos"
 }
-

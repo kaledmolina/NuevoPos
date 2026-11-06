@@ -1,0 +1,485 @@
+import { db } from "@/lib/db"
+
+export interface BotProcessResult {
+  reply: string
+  actionTaken?: "order_created" | "stock_checked" | "credit_checked" | "menu_shown" | "registered_client" | "ai_answered"
+  orderNumber?: string
+  total?: number
+  items?: { name: string; quantity: number; subtotal: number }[]
+  tokensUsed?: number
+  modelUsed?: string
+}
+
+/**
+ * Motor de Inteligencia de WhatsApp & DeepSeek para OmniPOS
+ * Multi-Sede: Opera con el catálogo, inventario, precios y pedidos exclusivos de la sede vinculada.
+ * Ahorro extremo de tokens: Inyecta únicamente los productos relevantes y mantiene el historial condensado.
+ */
+export async function processWhatsAppMessage(params: {
+  phone: string
+  customerName?: string
+  message: string
+  branchId?: string | null
+}): Promise<BotProcessResult> {
+  const { phone, message, branchId } = params
+  const cleanPhone = phone.replace(/[^0-9+]/g, "")
+  const text = message.trim()
+
+  // 1. Identificar la Sede y su Configuración
+  let resolvedBranchId = branchId
+  if (!resolvedBranchId) {
+    const mainBranch = await db.branch.findFirst({
+      where: { active: true },
+      orderBy: [{ isMain: "desc" }, { createdAt: "asc" }],
+    })
+    resolvedBranchId = mainBranch?.id || null
+  }
+
+  const branch = resolvedBranchId
+    ? await db.branch.findUnique({
+        where: { id: resolvedBranchId },
+        include: { whatsappConfig: true },
+      })
+    : null
+
+  const config = branch?.whatsappConfig
+  const branchFilter = resolvedBranchId ? { branchId: resolvedBranchId } : {}
+
+  // 2. Identificar o registrar cliente en el CRM de esta sede
+  let client = await db.client.findFirst({
+    where: {
+      OR: [
+        { phone: cleanPhone },
+        { phone: cleanPhone.replace("+", "") },
+      ],
+      ...branchFilter,
+    },
+    include: { creditAccount: true },
+  })
+
+  if (!client) {
+    client = await db.client.create({
+      data: {
+        name: params.customerName || `Cliente WhatsApp (${cleanPhone.slice(-4)})`,
+        phone: cleanPhone,
+        branchId: resolvedBranchId,
+        creditAccount: {
+          create: {
+            active: false,
+            creditLimit: 0,
+            balance: 0,
+          },
+        },
+      },
+      include: { creditAccount: true },
+    })
+  }
+
+  // Guardar mensaje entrante del cliente en el CRM
+  await db.whatsAppMessage.create({
+    data: {
+      phone: cleanPhone,
+      sender: "customer",
+      text: message,
+      status: "unread",
+      branchId: resolvedBranchId,
+      clientId: client.id,
+    },
+  }).catch(() => {})
+
+  let result: BotProcessResult | null = null
+  let createdOrderId: string | null = null
+
+  // 3. INTENTO 1: Si DeepSeek IA está habilitado y tiene API Key en esta Sede
+  if (config?.aiEnabled && config?.deepseekApiKey) {
+    try {
+      result = await processWithDeepSeekAI({
+        message,
+        cleanPhone,
+        client,
+        branch,
+        config,
+      })
+      if (result && result.orderNumber) {
+        // Encontrar el ID de la orden creada para vincularla al mensaje
+        const ord = await db.order.findUnique({
+          where: { orderNumber: result.orderNumber },
+          select: { id: true },
+        })
+        if (ord) createdOrderId = ord.id
+      }
+    } catch (aiErr) {
+      console.warn("[DeepSeek AI Fallback]", (aiErr as Error).message)
+      // Si falla DeepSeek (ej. token agotado o red), continúa al motor local abajo
+      result = null
+    }
+  }
+
+  // 4. INTENTO 2: Motor Local (Fallback y Reglas Deterministas)
+  if (!result) {
+    const lowerText = text.toLowerCase()
+
+    // Regla 1: Consulta de saldo / fiado
+    if (
+      lowerText.includes("debo") ||
+      lowerText.includes("saldo") ||
+      lowerText.includes("cuenta") ||
+      lowerText.includes("fiado") ||
+      lowerText.includes("deuda")
+    ) {
+      const acc = client.creditAccount
+      const balance = acc?.balance || 0
+      if (balance > 0) {
+        result = {
+          reply: `🧾 *Estado de tu Cuenta (${branch?.name || "Sede"})*\n👤 Hola, *${client.name}*\n💳 Tu saldo fiado pendiente es: *$${balance.toLocaleString("es-CO")}*\n🗓️ Plazo estipulado: 30 días.\n\nPuedes realizar tu abono en el mostrador o por transferencia. ¡Muchas gracias!`,
+          actionTaken: "credit_checked",
+        }
+      } else {
+        result = {
+          reply: `🧾 *Estado de tu Cuenta (${branch?.name || "Sede"})*\n👤 Hola, *${client.name}*\n✅ ¡Estás al día! No tienes deuda pendiente.\nTu cupo de crédito disponible es: *$${(acc?.creditLimit || 0).toLocaleString("es-CO")}*.`,
+          actionTaken: "credit_checked",
+        }
+      }
+    }
+
+    // Regla 2: Pedido a domicilio por reglas
+    else if (
+      (lowerText.includes("manda") ||
+        lowerText.includes("envia") ||
+        lowerText.includes("enviar") ||
+        lowerText.includes("quiero pedir") ||
+        lowerText.includes("domicilio") ||
+        lowerText.includes("orden") ||
+        lowerText.includes("pedido")) &&
+      (lowerText.includes("calle") ||
+        lowerText.includes("carrera") ||
+        lowerText.includes("cra") ||
+        lowerText.includes("cll") ||
+        lowerText.includes("av") ||
+        lowerText.includes("apto") ||
+        lowerText.includes("casa") ||
+        lowerText.includes("#"))
+    ) {
+      const allProducts = await db.product.findMany({
+        where: { active: true, stock: { gt: 0 }, ...branchFilter },
+      })
+
+      const detectedItems: {
+        product: typeof allProducts[0]
+        quantity: number
+        unitPrice: number
+        subtotal: number
+      }[] = []
+
+      for (const p of allProducts) {
+        const pName = p.name.toLowerCase()
+        if (lowerText.includes(pName)) {
+          let qty = 1
+          const words = lowerText.split(/\s+/)
+          const idx = words.findIndex((w) => pName.includes(w))
+          if (idx > 0 && !isNaN(Number(words[idx - 1]))) {
+            qty = Math.max(1, parseInt(words[idx - 1], 10))
+          }
+          detectedItems.push({
+            product: p,
+            quantity: qty,
+            unitPrice: p.price,
+            subtotal: qty * p.price,
+          })
+        }
+      }
+
+      if (detectedItems.length > 0) {
+        let address = client.address || "Dirección según chat"
+        const addrMatch = message.match(/(calle|carrera|cra|cll|av|diagonal|transversal)[^,\n.]+/i)
+        if (addrMatch) address = addrMatch[0].trim()
+
+        const subtotal = detectedItems.reduce((acc, it) => acc + it.subtotal, 0)
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "")
+        const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString()
+        const orderNumber = `PED-${dateStr}-${randomSuffix}`
+
+        const order = await db.order.create({
+          data: {
+            orderNumber,
+            branchId: resolvedBranchId,
+            clientId: client.id,
+            customerName: client.name,
+            customerPhone: cleanPhone,
+            deliveryAddress: address,
+            deliveryNotes: `Generado por WhatsApp (${branch?.name || "Sede"}).`,
+            subtotal,
+            tax: 0,
+            deliveryFee: 0,
+            total: subtotal,
+            paymentMethod: "efectivo",
+            paymentStatus: "pendiente",
+            status: "pendiente",
+            items: {
+              create: detectedItems.map((it) => ({
+                productId: it.product.id,
+                productName: it.product.name,
+                quantity: it.quantity,
+                unitPrice: it.unitPrice,
+                subtotal: it.subtotal,
+              })),
+            },
+          },
+        })
+
+        createdOrderId = order.id
+
+        const itemsSummary = detectedItems
+          .map((it) => `• ${it.quantity} × *${it.product.name}* ($${it.subtotal.toLocaleString("es-CO")})`)
+          .join("\n")
+
+        result = {
+          reply: `🎉 *¡Pedido Recibido con Éxito!*\n🏬 *Sede:* ${branch?.name || "Principal"}\n📦 *Orden:* #${order.orderNumber}\n👤 *Cliente:* ${client.name}\n📍 *Entrega:* ${address}\n\n🛒 *Productos:*\n${itemsSummary}\n\n💵 *Total:* *$${subtotal.toLocaleString("es-CO")}* (Pago contraentrega)\n⏱️ *Estado:* En preparación en tienda.`,
+          actionTaken: "order_created",
+          orderNumber: order.orderNumber,
+          total: order.total,
+          items: detectedItems.map((i) => ({
+            name: i.product.name,
+            quantity: i.quantity,
+            subtotal: i.subtotal,
+          })),
+        }
+      }
+    }
+
+    // Regla 3: Consulta de catálogo en esta sede
+    if (!result) {
+      const allProds = await db.product.findMany({
+        where: { active: true, ...branchFilter },
+        select: { name: true, price: true, stock: true, unit: true },
+      })
+
+      const matchedProds = allProds.filter((p) => {
+        const pWords = p.name.toLowerCase().split(" ").filter((w) => w.length > 2)
+        return pWords.some((w) => lowerText.includes(w))
+      })
+
+      if (matchedProds.length > 0) {
+        const listText = matchedProds
+          .slice(0, 5)
+          .map(
+            (p) =>
+              `• *${p.name}*: $${p.price.toLocaleString("es-CO")} (${p.stock > 0 ? `Stock: ${p.stock} ${p.unit}s` : "Agotado"})`
+          )
+          .join("\n")
+
+        result = {
+          reply: `🔍 *Catálogo Disponible (${branch?.name || "Esta Sede"})*\n\n${listText}\n\n¿Deseas que te enviemos algún producto a domicilio? Indícanos la cantidad y tu dirección de entrega.`,
+          actionTaken: "stock_checked",
+        }
+      } else {
+        result = {
+          reply: config?.welcomeMessage || `👋 *¡Hola! Bienvenido a la atención por WhatsApp de ${branch?.name || "OmniPOS"}.*\n\n¿En qué te podemos ayudar hoy?\n1️⃣ *Hacer un Pedido:* Envíanos tu lista y tu dirección de entrega.\n2️⃣ *Consultar Precios:* Escríbenos el nombre del producto que buscas.\n3️⃣ *Consultar Fiados / Deuda:* Pregúntanos _"¿Cuánto debo?"_.\n\n¡Estamos a tu servicio!`,
+          actionTaken: "menu_shown",
+        }
+      }
+    }
+  }
+
+  // 5. Guardar respuesta final en la base de datos de WhatsApp CRM
+  await db.whatsAppMessage.create({
+    data: {
+      phone: cleanPhone,
+      sender: "bot",
+      text: result.reply,
+      status: "delivered",
+      branchId: resolvedBranchId,
+      clientId: client.id,
+      orderId: createdOrderId,
+    },
+  }).catch(() => {})
+
+  return result
+}
+
+/**
+ * Módulo de Inteligencia Artificial con DeepSeek
+ * Optimizado para mínimo consumo de tokens con RAG ultraliviano
+ */
+async function processWithDeepSeekAI(params: {
+  message: string
+  cleanPhone: string
+  client: any
+  branch: any
+  config: any
+}): Promise<BotProcessResult> {
+  const { message, cleanPhone, client, branch, config } = params
+  const branchId = branch?.id
+  const branchName = branch?.name || "Sede Principal"
+  const branchFilter = branchId ? { branchId } : {}
+
+  // 1. Ahorro de Tokens: Extracción de palabras clave para filtrar catálogo
+  const cleanTokens = message
+    .toLowerCase()
+    .replace(/[^a-záéíóúñ0-9\s]/gi, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !["hola", "buenas", "dias", "tardes", "por", "favor", "gracias", "para", "quiero", "tienen"].includes(w))
+
+  // Buscar solo los 6 productos más relevantes de ESTA SEDE
+  const products = await db.product.findMany({
+    where: {
+      active: true,
+      ...branchFilter,
+      ...(cleanTokens.length > 0
+        ? {
+            OR: cleanTokens.map((t) => ({
+              name: { contains: t },
+            })),
+          }
+        : { stock: { gt: 0 } }),
+    },
+    select: { id: true, name: true, price: true, stock: true, unit: true },
+    take: 6,
+  })
+
+  const catalogContext = products.length > 0
+    ? products
+        .map((p) => `- ${p.name} | Precio: $${p.price.toLocaleString("es-CO")} | Stock: ${p.stock} ${p.unit}s`)
+        .join("\n")
+    : "Sin coincidencias específicas. Pide al cliente el nombre del producto."
+
+  const clientBalance = client.creditAccount?.balance || 0
+
+  // 2. Historial condensado: Últimos 4 mensajes (ahorro de tokens)
+  const recentMsgs = await db.whatsAppMessage.findMany({
+    where: { phone: cleanPhone },
+    orderBy: { createdAt: "desc" },
+    take: 4,
+    select: { sender: true, text: true },
+  })
+
+  const conversationHistory = recentMsgs.reverse().map((m) => ({
+    role: m.sender === "customer" ? "user" : "assistant",
+    content: m.text.slice(0, 200), // Máximo 200 caracteres por mensaje para ahorrar tokens
+  }))
+
+  // 3. Prompt de sistema ultra-conciso y optimizado
+  const systemPrompt = `Eres el asistente IA de "${branchName}" por WhatsApp.
+Tu misión: Atender con calidez, consultar precios y tomar pedidos a domicilio.
+
+REGLAS DE ORO:
+1. Responde en español en MÁXIMO 3 líneas usando formato WhatsApp (*negrita* y viñetas).
+2. SOLO cotiza los productos listados en el catálogo de esta sede adjunto. No inventes precios ni productos.
+3. El cliente se llama "${client.name}". Su saldo fiado es: $${clientBalance.toLocaleString("es-CO")}.
+4. Si el cliente pide a domicilio indicando productos y dirección (ej. Calle/Carrera/#), confirma el pedido y añade al final exactamente:
+[ORDEN_AUTO: {"items": [{"name": "nombre exacto", "qty": 1}], "address": "dirección"}]
+${config.aiSystemPrompt ? `Instrucciones extra: ${config.aiSystemPrompt}` : ""}
+
+CATÁLOGO DE ESTA SEDE (${branchName}):
+${catalogContext}`
+
+  // 4. Invocación a la API oficial de DeepSeek
+  const apiKey = config.deepseekApiKey?.trim()
+  const model = config.deepseekModel || "deepseek-chat"
+  const maxTokens = config.maxTokensPerReply || 250
+
+  const res = await fetch("https://api.deepseek.com/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...conversationHistory,
+        { role: "user", content: message },
+      ],
+      max_tokens: maxTokens,
+      temperature: 0.3,
+    }),
+  })
+
+  if (!res.ok) {
+    const errorText = await res.text()
+    throw new Error(`DeepSeek API error (${res.status}): ${errorText}`)
+  }
+
+  const aiData = await res.json()
+  let rawReply = aiData.choices?.[0]?.message?.content || ""
+  const tokensUsed = aiData.usage?.total_tokens || 0
+
+  let orderNumber: string | undefined
+  let orderTotal: number | undefined
+  let actionTaken: BotProcessResult["actionTaken"] = "ai_answered"
+
+  // 5. Detectar si DeepSeek generó una orden automática
+  const orderTagMatch = rawReply.match(/\[ORDEN_AUTO:\s*({[\s\S]*?})\]/)
+  if (orderTagMatch && config.autoCreateOrders) {
+    try {
+      const orderPayload = JSON.parse(orderTagMatch[1])
+      // Limpiar el tag técnico de la respuesta que ve el cliente
+      rawReply = rawReply.replace(orderTagMatch[0], "").trim()
+
+      const itemsToCreate: { product: any; qty: number }[] = []
+      if (Array.isArray(orderPayload.items)) {
+        for (const it of orderPayload.items) {
+          const match = products.find((p) => p.name.toLowerCase().includes(String(it.name).toLowerCase()))
+          if (match) {
+            itemsToCreate.push({ product: match, qty: Math.max(1, Number(it.qty) || 1) })
+          }
+        }
+      }
+
+      if (itemsToCreate.length > 0) {
+        const subtotal = itemsToCreate.reduce((acc, it) => acc + it.product.price * it.qty, 0)
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "")
+        const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString()
+        const genOrderNum = `PED-${dateStr}-${randomSuffix}`
+        const finalAddress = orderPayload.address || client.address || "Dirección WhatsApp"
+
+        const createdOrder = await db.order.create({
+          data: {
+            orderNumber: genOrderNum,
+            branchId,
+            clientId: client.id,
+            customerName: client.name,
+            customerPhone: cleanPhone,
+            deliveryAddress: finalAddress,
+            deliveryNotes: `Generado por DeepSeek IA (${branchName}).`,
+            subtotal,
+            tax: 0,
+            deliveryFee: 0,
+            total: subtotal,
+            paymentMethod: "efectivo",
+            paymentStatus: "pendiente",
+            status: "pendiente",
+            items: {
+              create: itemsToCreate.map((it) => ({
+                productId: it.product.id,
+                productName: it.product.name,
+                quantity: it.qty,
+                unitPrice: it.product.price,
+                subtotal: it.product.price * it.qty,
+              })),
+            },
+          },
+        })
+
+        orderNumber = createdOrder.orderNumber
+        orderTotal = createdOrder.total
+        actionTaken = "order_created"
+
+        // Agregar pie de confirmación con el # de orden
+        rawReply += `\n\n📦 *Pedido Generado:* #${createdOrder.orderNumber}\n💵 *Total:* $${subtotal.toLocaleString("es-CO")}\n📍 *Entrega:* ${finalAddress}`
+      }
+    } catch (parseErr) {
+      console.warn("[DeepSeek Order Parse Error]", parseErr)
+    }
+  }
+
+  return {
+    reply: rawReply,
+    actionTaken,
+    orderNumber,
+    total: orderTotal,
+    tokensUsed,
+    modelUsed: model,
+  }
+}

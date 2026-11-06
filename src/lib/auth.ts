@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
 
-export type Role = "superadmin" | "admin" | "vendedor"
+export type Role = "superadmin" | "admin" | "vendedor" | "domiciliario" | "cliente"
 
 const FALLBACK_SECRET = "drogueria-pos-dev-fallback-secret"
 const SECRET = process.env.AUTH_SECRET || FALLBACK_SECRET
@@ -10,9 +10,9 @@ if (process.env.NODE_ENV === "production" && SECRET === FALLBACK_SECRET) {
   console.error("⚠️  AUTH_SECRET no configurado. Define la variable de entorno AUTH_SECRET con un valor aleatorio (openssl rand -hex 32).")
 }
 const COOKIE_NAME = "pos_session"
-const MAX_AGE_SECONDS = 60 * 60 * 12 // 12 horas
+const MAX_AGE_SECONDS = 60 * 60 * 24 * 7 // 7 días para APIs y sesiones
 
-// --- Hashear PIN (HMAC-SHA256) ---
+// --- Hashear PIN / Contraseña (HMAC-SHA256) ---
 export function hashPin(pin: string): string {
   return crypto.createHmac("sha256", SECRET).update(`pin:${pin}`).digest("hex")
 }
@@ -24,22 +24,45 @@ export function verifyPin(pin: string, hash: string): boolean {
   return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(hash))
 }
 
-// --- Firma de sesión (token tipo JWT简化: payload.base64.firma) ---
+// --- Firma de sesión / Token API (JWT ultraliviano: payload.base64url.firma) ---
 export interface SessionPayload {
   role: Role
   name: string
   uid: string
   tenantId?: string | null
+  branchId?: string | null
+  clientId?: string | null
   iat: number
 }
 
-function sign(payload: SessionPayload): string {
+export function sign(payload: SessionPayload): string {
   const data = Buffer.from(JSON.stringify(payload)).toString("base64url")
   const sig = crypto.createHmac("sha256", SECRET).update(data).digest("base64url")
   return `${data}.${sig}`
 }
 
-function verify(token: string): SessionPayload | null {
+export function createApiToken(payload: { uid: string; name: string; role: Role; tenantId?: string | null; branchId?: string | null }): string {
+  return sign({
+    ...payload,
+    iat: Date.now(),
+  })
+}
+
+export function createMcpToken(payload: {
+  uid: string
+  name: string
+  role: Role
+  branchId?: string | null
+  tenantId?: string | null
+  clientId?: string | null
+}): string {
+  return sign({
+    ...payload,
+    iat: Date.now(),
+  })
+}
+
+export function verify(token: string): SessionPayload | null {
   try {
     const [data, sig] = token.split(".")
     if (!data || !sig) return null
@@ -47,17 +70,27 @@ function verify(token: string): SessionPayload | null {
     if (sig.length !== expected.length) return null
     if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null
     const payload = JSON.parse(Buffer.from(data, "base64url").toString())
-    // expiración
+    // Expiración: MAX_AGE_SECONDS
     if (Date.now() - (payload.iat || 0) > MAX_AGE_SECONDS * 1000) return null
-    if (payload.role !== "admin" && payload.role !== "vendedor" && payload.role !== "superadmin") return null
+    const VALID_ROLES: Role[] = ["superadmin", "admin", "vendedor", "domiciliario", "cliente"]
+    if (!VALID_ROLES.includes(payload.role)) return null
     return payload as SessionPayload
   } catch {
     return null
   }
 }
 
-// --- Leer sesión desde una request ---
+// --- Leer sesión desde una request (Soporta Bearer Token de apps móviles y Cookie de navegador) ---
 export function getSession(req: NextRequest): SessionPayload | null {
+  // 1. Bearer Token en encabezado Authorization (Apps externas, Postman, cURL, Flutter, React Native)
+  const authHeader = req.headers.get("authorization")
+  if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
+    const bearerToken = authHeader.slice(7).trim()
+    const payload = verify(bearerToken)
+    if (payload) return payload
+  }
+
+  // 2. Cookie de sesión de navegador
   const token = req.cookies.get(COOKIE_NAME)?.value
   if (!token) return null
   return verify(token)
@@ -130,11 +163,26 @@ export function requireAdmin(req: NextRequest): NextResponse | null {
   return null
 }
 
-// --- Guardia de autenticación (cualquier rol) ---
+// --- Guardia de autenticación (cualquier rol registrado) ---
 export function requireAuth(req: NextRequest): { session: SessionPayload } | NextResponse {
   const session = getSession(req)
   if (!session) {
     return NextResponse.json({ error: "No autenticado" }, { status: 401 })
+  }
+  return { session }
+}
+
+// --- Guardia granular por rol ---
+export function requireRole(req: NextRequest, allowedRoles: Role[]): { session: SessionPayload } | NextResponse {
+  const session = getSession(req)
+  if (!session) {
+    return NextResponse.json({ error: "No autenticado. Envía 'Authorization: Bearer <token>' o inicia sesión." }, { status: 401 })
+  }
+  if (!allowedRoles.includes(session.role) && session.role !== "superadmin") {
+    return NextResponse.json(
+      { error: `Acceso no autorizado. Roles permitidos: ${allowedRoles.join(", ")}. Rol actual: ${session.role}` },
+      { status: 403 }
+    )
   }
   return { session }
 }
@@ -170,7 +218,6 @@ export async function logAudit(entry: {
 }
 
 // --- Rate limiting simple en memoria para login ---
-// clave: nombre de usuario; valor: { count, firstAttempt }
 const loginAttempts = new Map<string, { count: number; firstAttempt: number }>()
 const MAX_ATTEMPTS = 5
 const WINDOW_MS = 5 * 60 * 1000 // 5 minutos
@@ -195,7 +242,6 @@ export function resetRateLimit(name: string) {
 }
 
 // --- Rate limiting para auto-registro SaaS ---
-// Previene spam y flooding de creación masiva de negocios
 const registerAttempts = new Map<string, { count: number; firstAttempt: number }>()
 const MAX_REGISTER_ATTEMPTS = 5
 const REGISTER_WINDOW_MS = 15 * 60 * 1000 // 15 minutos
@@ -218,4 +264,3 @@ export function checkRegisterRateLimit(ipOrKey: string): { allowed: boolean; rem
 export function resetRegisterRateLimit(ipOrKey: string) {
   registerAttempts.delete((ipOrKey || "anonymous").toLowerCase().trim())
 }
-

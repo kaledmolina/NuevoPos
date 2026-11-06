@@ -27,7 +27,31 @@ import {
 import { toast } from "sonner"
 import {
   Search, Truck, Plus, Eye, Ban, Package, Trash2, FileText, Filter,
+  Sparkles, Clock, Send, TrendingUp, RefreshCw, AlertTriangle, CheckCircle2,
 } from "lucide-react"
+import { cn } from "@/lib/utils"
+
+interface ReorderItem {
+  productId: string
+  productName: string
+  barcode: string | null
+  unit: string
+  currentStock: number
+  minStock: number
+  cost: number
+  salesLast30Days: number
+  dailyBurnRate: number
+  daysOfCoverage: number | null
+  urgency: "critico" | "urgente" | "atencion" | "optimo"
+  suggestedQuantity: number
+  estimatedOrderCost: number
+  supplier: {
+    id: string
+    name: string
+    phone: string | null
+    contactName: string | null
+  } | null
+}
 
 interface Supplier { id: string; name: string; document?: string | null }
 interface Product {
@@ -82,19 +106,23 @@ const STATUS_LABEL: Record<string, string> = {
 function StatusBadge({ status }: { status: string }) {
   if (status === "recibida") {
     return (
-      <Badge className="bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800">
+      <Badge className="bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 border-zinc-950 dark:border-white font-semibold">
         {STATUS_LABEL[status] ?? status}
       </Badge>
     )
   }
   if (status === "pendiente") {
     return (
-      <Badge className="bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800">
+      <Badge variant="outline" className="bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border-zinc-300 dark:border-zinc-700 font-semibold">
         {STATUS_LABEL[status] ?? status}
       </Badge>
     )
   }
-  return <Badge variant="destructive">{STATUS_LABEL[status] ?? status}</Badge>
+  return (
+    <Badge variant="outline" className="bg-zinc-200 dark:bg-zinc-900 text-muted-foreground border-zinc-300 dark:border-zinc-700 font-semibold">
+      {STATUS_LABEL[status] ?? status}
+    </Badge>
+  )
 }
 
 export default function PurchasesView() {
@@ -105,6 +133,20 @@ export default function PurchasesView() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Pestaña principal: Historial vs Reorden Predictivo
+  const [mainTab, setMainTab] = useState<"purchases" | "reorder">("purchases")
+  const [reorderList, setReorderList] = useState<ReorderItem[]>([])
+  const [reorderSummary, setReorderSummary] = useState<{
+    totalItemsNeedingReorder: number
+    criticalCount: number
+    urgentCount: number
+    attentionCount: number
+    totalEstimatedInvestment: number
+  } | null>(null)
+  const [targetDays, setTargetDays] = useState(30)
+  const [loadingReorder, setLoadingReorder] = useState(false)
+  const [urgencyFilter, setUrgencyFilter] = useState("all")
 
   const [query, setQuery] = useState("")
 
@@ -141,6 +183,74 @@ export default function PurchasesView() {
 
   const hasActiveFilters = query.trim() !== ""
   const clearFilters = () => setQuery("")
+
+  // Reorden Predictivo
+  const loadReorderData = useCallback(async (days = targetDays) => {
+    try {
+      setLoadingReorder(true)
+      const res = await apiFetch<{
+        ok: boolean
+        summary: any
+        suggestions: ReorderItem[]
+      }>(`/api/inventory/reorder?targetDays=${days}`)
+      if (res && res.ok) {
+        setReorderList(res.suggestions || [])
+        setReorderSummary(res.summary || null)
+      }
+    } catch {
+      toast.error("Error al cargar pronóstico de reorden")
+    } finally {
+      setLoadingReorder(false)
+    }
+  }, [targetDays])
+
+  useEffect(() => {
+    if (mainTab === "reorder") {
+      loadReorderData(targetDays)
+    }
+  }, [mainTab, targetDays, loadReorderData])
+
+  const addReorderToPurchase = (item: ReorderItem) => {
+    resetForm()
+    if (item.supplier?.id) {
+      setSupplierId(item.supplier.id)
+    }
+    const matchingProd = products.find((p) => p.id === item.productId)
+    if (matchingProd) {
+      setLines([
+        {
+          productId: matchingProd.id,
+          name: matchingProd.name,
+          unit: matchingProd.unit,
+          quantity: String(item.suggestedQuantity),
+          unitCost: String(matchingProd.cost),
+          batch: "",
+          expirationDate: "",
+        },
+      ])
+    }
+    setOpen(true)
+    toast.info(`Cargado a compra: ${item.productName}`, {
+      description: `Cantidad sugerida: ${item.suggestedQuantity} ${item.unit}s`,
+    })
+  }
+
+  const sendWhatsAppOrder = (item: ReorderItem) => {
+    const phone = item.supplier?.phone?.replace(/[^0-9]/g, "")
+    const text = encodeURIComponent(
+      `Hola ${item.supplier?.contactName || item.supplier?.name || "estimado proveedor"}, te saludamos desde nuestro comercio.\n\n` +
+      `Requerimos ordenar el siguiente producto:\n` +
+      `• Producto: ${item.productName}\n` +
+      `• Cantidad sugerida: ${item.suggestedQuantity} ${item.unit}(s)\n` +
+      `• Costo base registrado: ${formatCurrency(item.cost)}\n\n` +
+      `¿Podrías confirmarnos disponibilidad y fecha estimada de entrega? Muchas gracias.`
+    )
+    if (phone) {
+      window.open(`https://wa.me/${phone}?text=${text}`, "_blank")
+    } else {
+      window.open(`https://wa.me/?text=${text}`, "_blank")
+    }
+  }
 
   const filteredProducts = useMemo(() => {
     const q = productQuery.trim().toLowerCase()
@@ -298,16 +408,51 @@ export default function PurchasesView() {
         </Button>
       </div>
 
-      {/* Filtro */}
-      <div className="relative w-full md:max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar por referencia o proveedor…"
-          className="pl-9 h-10"
-        />
+      {/* Pestañas de Compras vs Reorden Predictivo */}
+      <div className="flex gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+        <button
+          onClick={() => setMainTab("purchases")}
+          className={cn(
+            "px-4 py-2 rounded-full text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2",
+            mainTab === "purchases"
+              ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 shadow-sm"
+              : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-900"
+          )}
+        >
+          <Truck className="h-4 w-4" />
+          Historial de Facturas ({purchases.length})
+        </button>
+        <button
+          onClick={() => setMainTab("reorder")}
+          className={cn(
+            "px-4 py-2 rounded-full text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2",
+            mainTab === "reorder"
+              ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 shadow-sm"
+              : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-900"
+          )}
+        >
+          <Sparkles className="h-4 w-4" />
+          Reorden Inteligente & Predicción IA
+          {reorderSummary?.criticalCount ? (
+            <Badge variant="outline" className="ml-1 text-[10px] font-mono bg-zinc-950 text-white dark:bg-white dark:text-zinc-950">
+              {reorderSummary.criticalCount} críticos
+            </Badge>
+          ) : null}
+        </button>
       </div>
+
+      {mainTab === "purchases" ? (
+        <>
+          {/* Filtro */}
+          <div className="relative w-full md:max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar por referencia o proveedor…"
+              className="pl-9 h-10"
+            />
+          </div>
 
       {/* Tabla (desktop) */}
       <div className="hidden md:block">
@@ -461,6 +606,214 @@ export default function PurchasesView() {
           ))
         )}
       </div>
+      </>
+      ) : (
+        /* VISTA DE REORDEN INTELIGENTE & PREDICCIÓN IA */
+        <div className="space-y-5">
+          {/* Barra de Controles y Parámetros */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-2xs">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5 text-xs font-semibold">
+                <Clock className="h-4 w-4 text-zinc-950 dark:text-white" />
+                <span>Meta de abastecimiento:</span>
+              </div>
+              <div className="flex items-center gap-1 bg-white dark:bg-zinc-950 p-1 rounded-full border border-zinc-200 dark:border-zinc-800 text-xs">
+                {[15, 30, 45, 60].map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => { setTargetDays(d); loadReorderData(d); }}
+                    className={cn(
+                      "px-2.5 py-1 rounded-full font-semibold transition-all cursor-pointer",
+                      targetDays === d
+                        ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 shadow-2xs"
+                        : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
+                    )}
+                  >
+                    {d} días
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Select value={urgencyFilter} onValueChange={setUrgencyFilter}>
+                <SelectTrigger className="h-9 w-40 text-xs bg-white dark:bg-zinc-950">
+                  <SelectValue placeholder="Filtrar criticidad" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los niveles</SelectItem>
+                  <SelectItem value="critico">Críticos (≤3 días)</SelectItem>
+                  <SelectItem value="urgente">Urgentes (≤7 días)</SelectItem>
+                  <SelectItem value="atencion">Atención (≤15 días)</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => loadReorderData(targetDays)}
+                disabled={loadingReorder}
+                className="h-9 text-xs"
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", loadingReorder && "animate-spin")} />
+                Actualizar
+              </Button>
+            </div>
+          </div>
+
+          {/* Tarjetas de Métricas de Reorden */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Card className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+              <CardContent className="p-4 space-y-1">
+                <p className="text-[11px] font-semibold text-zinc-500 uppercase">Productos a Reordenar</p>
+                <p className="text-2xl font-black text-zinc-950 dark:text-white">{reorderSummary?.totalItemsNeedingReorder || 0}</p>
+                <p className="text-[10px] text-zinc-400">Para {targetDays} días de ventas</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+              <CardContent className="p-4 space-y-1">
+                <p className="text-[11px] font-semibold text-zinc-500 uppercase">Críticos (≤3 Días)</p>
+                <p className="text-2xl font-black text-zinc-950 dark:text-white">{reorderSummary?.criticalCount || 0}</p>
+                <p className="text-[10px] text-zinc-400">Agotados o reposición urgente</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+              <CardContent className="p-4 space-y-1">
+                <p className="text-[11px] font-semibold text-zinc-500 uppercase">Urgentes (≤7 Días)</p>
+                <p className="text-2xl font-black text-zinc-950 dark:text-white">{reorderSummary?.urgentCount || 0}</p>
+                <p className="text-[10px] text-zinc-400">Pedir en los próximos 2 días</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+              <CardContent className="p-4 space-y-1">
+                <p className="text-[11px] font-semibold text-zinc-500 uppercase">Inversión Estimada</p>
+                <p className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white truncate">
+                  {formatCurrency(reorderSummary?.totalEstimatedInvestment || 0)}
+                </p>
+                <p className="text-[10px] text-zinc-400">Al costo registrado de compra</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Tabla de Productos Sugeridos */}
+          <Card className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xs">
+            <CardContent className="p-0">
+              {loadingReorder ? (
+                <div className="p-8 text-center text-xs text-zinc-500 space-y-2">
+                  <RefreshCw className="h-6 w-6 animate-spin mx-auto text-zinc-400" />
+                  <p>Calculando velocidad de ventas y días de cobertura...</p>
+                </div>
+              ) : reorderList.filter((s) => urgencyFilter === "all" || s.urgency === urgencyFilter).length === 0 ? (
+                <div className="p-12 text-center text-xs text-zinc-500 space-y-2">
+                  <CheckCircle2 className="h-10 w-10 mx-auto text-zinc-950 dark:text-white opacity-80" />
+                  <p className="font-bold text-sm text-zinc-950 dark:text-white">¡Inventario Óptimo!</p>
+                  <p className="text-zinc-400 max-w-sm mx-auto">
+                    No se detectan productos con riesgo de agotamiento para la meta de {targetDays} días seleccionada.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader className="bg-zinc-50/60 dark:bg-zinc-950/40 text-[10px] font-mono uppercase tracking-wider">
+                      <TableRow>
+                        <TableHead>Producto</TableHead>
+                        <TableHead className="text-center">Stock / Mínimo</TableHead>
+                        <TableHead className="text-center">Ventas 30d</TableHead>
+                        <TableHead className="text-center">Cobertura Restante</TableHead>
+                        <TableHead className="text-center">Pedido Sugerido</TableHead>
+                        <TableHead className="text-right">Inversión Est.</TableHead>
+                        <TableHead>Proveedor Habitual</TableHead>
+                        <TableHead className="text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {reorderList
+                        .filter((s) => urgencyFilter === "all" || s.urgency === urgencyFilter)
+                        .map((item) => (
+                          <TableRow key={item.productId} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-950/40 text-xs">
+                            <TableCell>
+                              <p className="font-bold text-zinc-950 dark:text-white">{item.productName}</p>
+                              <p className="text-[10px] text-zinc-400 font-mono">{item.barcode || "Sin código"} · {item.unit}</p>
+                            </TableCell>
+
+                            <TableCell className="text-center">
+                              <span className="font-bold text-zinc-950 dark:text-white">{item.currentStock}</span>
+                              <span className="text-zinc-400 text-[10px]"> / mín. {item.minStock}</span>
+                            </TableCell>
+
+                            <TableCell className="text-center">
+                              <span className="font-semibold text-zinc-950 dark:text-white">{item.salesLast30Days}</span>
+                              <span className="text-[10px] text-zinc-400 block font-mono">({item.dailyBurnRate}/día)</span>
+                            </TableCell>
+
+                            <TableCell className="text-center">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[10px] font-bold font-mono",
+                                  item.urgency === "critico"
+                                    ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 border-zinc-950 dark:border-white"
+                                    : item.urgency === "urgente"
+                                    ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border-zinc-400"
+                                    : "text-zinc-600 dark:text-zinc-400 border-zinc-300 dark:border-zinc-700"
+                                )}
+                              >
+                                {item.daysOfCoverage !== null ? `${item.daysOfCoverage} días` : "Agotado"}
+                              </Badge>
+                            </TableCell>
+
+                            <TableCell className="text-center font-bold font-mono text-zinc-950 dark:text-white">
+                              +{item.suggestedQuantity} {item.unit}s
+                            </TableCell>
+
+                            <TableCell className="text-right font-bold text-zinc-950 dark:text-white font-mono">
+                              {formatCurrency(item.estimatedOrderCost)}
+                            </TableCell>
+
+                            <TableCell className="max-w-[160px] truncate text-zinc-600 dark:text-zinc-400">
+                              <p className="font-medium truncate">{item.supplier?.name || "Sin proveedor asignado"}</p>
+                              {item.supplier?.phone && (
+                                <p className="text-[10px] text-zinc-400 font-mono truncate">{item.supplier.phone}</p>
+                              )}
+                            </TableCell>
+
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => addReorderToPurchase(item)}
+                                  className="h-7 text-[11px] font-semibold"
+                                  title="Cargar a formulario de compra"
+                                >
+                                  <Plus className="h-3.5 w-3.5 mr-1" />
+                                  Cargar
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => sendWhatsAppOrder(item)}
+                                  className="h-7 text-[11px] font-semibold"
+                                  title="Pedir por WhatsApp al proveedor"
+                                >
+                                  <Send className="h-3.5 w-3.5 mr-1" />
+                                  Pedir
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Diálogo nueva compra */}
       <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) resetForm() }}>

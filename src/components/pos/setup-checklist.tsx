@@ -136,23 +136,26 @@ export default function SetupChecklist() {
               <div
                 key={i}
                 className={cn(
-                  "flex items-center gap-3 rounded-xl border p-3 transition-all",
-                  s.done ? "border-primary/20 bg-primary/5" : "border-border"
+                  "flex items-center justify-between gap-2.5 rounded-xl border p-2.5 sm:p-3 transition-all",
+                  s.done ? "border-primary/20 bg-primary/5" : "border-border hover:bg-muted/30"
                 )}
               >
-                <div className={cn(
-                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors",
-                  s.done ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                )}>
-                  {s.done ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className={cn("text-sm font-medium", s.done && "line-through text-muted-foreground")}>{s.title}</p>
-                  <p className="text-[11px] text-muted-foreground">{s.desc}</p>
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className={cn(
+                    "flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl transition-colors shadow-2xs",
+                    s.done ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                  )}>
+                    {s.done ? <Check className="h-4 w-4 stroke-[2.5]" /> : <Icon className="h-4 w-4" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className={cn("text-xs sm:text-sm font-semibold truncate", s.done && "line-through text-muted-foreground")}>{s.title}</p>
+                    <p className="text-[10px] sm:text-[11px] text-muted-foreground truncate">{s.desc}</p>
+                  </div>
                 </div>
                 {!s.done && (
-                  <Button size="sm" variant="ghost" className="h-7 text-xs shrink-0" onClick={s.action}>
-                    {s.actionLabel}
+                  <Button size="sm" variant="outline" className="h-7 sm:h-8 px-2 sm:px-2.5 text-[11px] sm:text-xs shrink-0 rounded-lg active:scale-[0.96]" onClick={s.action}>
+                    <span className="hidden sm:inline">{s.actionLabel}</span>
+                    <span className="sm:hidden">Ir</span>
                   </Button>
                 )}
               </div>

@@ -36,6 +36,16 @@ export async function GET(req: NextRequest) {
           minStock: true,
           unit: true,
           expirationDate: true,
+          batch: true,
+          batches: {
+            where: { stock: { gt: 0 } },
+            select: {
+              id: true,
+              batch: true,
+              stock: true,
+              expirationDate: true,
+            },
+          },
         },
       }),
       db.cashSession.findFirst({
@@ -93,44 +103,52 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    // 3. Productos vencidos
-    const expired = products.filter((p) => {
+    // 3. Productos / Lotes vencidos
+    const expiredProducts = products.filter((p) => {
+      const hasExpiredBatch = p.batches?.some((b) => {
+        const d = daysUntil(b.expirationDate)
+        return d !== null && d < 0
+      })
       const d = daysUntil(p.expirationDate)
-      return d !== null && d < 0
+      return hasExpiredBatch || (d !== null && d < 0)
     })
-    if (expired.length > 0) {
+    if (expiredProducts.length > 0) {
       notifications.push({
         id: "expired-summary",
         type: "expired",
         severity: "critical",
-        title: `${expired.length} ${expired.length === 1 ? "producto vencido" : "productos vencidos"}`,
+        title: `${expiredProducts.length} ${expiredProducts.length === 1 ? "producto con lote vencido" : "productos con lotes vencidos"}`,
         description:
-          expired.length === 1
-            ? `"${expired[0].name}" ya venció. Retíralo del inventario para evitar ventas no permitidas.`
-            : `Hay ${expired.length} productos vencidos listos para descarte o devolución.`,
+          expiredProducts.length === 1
+            ? `"${expiredProducts[0].name}" tiene lote vencido. Retíralo del inventario para evitar ventas no conformes.`
+            : `Hay ${expiredProducts.length} productos con lotes vencidos listos para descarte o devolución a proveedor.`,
         targetView: "products",
-        count: expired.length,
+        count: expiredProducts.length,
         timestamp: now.toISOString(),
       })
     }
 
-    // 4. Productos por vencer en los próximos 30 días
-    const expiringSoon = products.filter((p) => {
+    // 4. Productos / Lotes por vencer en los próximos 30 días
+    const expiringSoonProducts = products.filter((p) => {
+      const hasExpiringBatch = p.batches?.some((b) => {
+        const d = daysUntil(b.expirationDate)
+        return d !== null && d >= 0 && d <= 30
+      })
       const d = daysUntil(p.expirationDate)
-      return d !== null && d >= 0 && d <= 30
+      return hasExpiringBatch || (d !== null && d >= 0 && d <= 30)
     })
-    if (expiringSoon.length > 0) {
+    if (expiringSoonProducts.length > 0) {
       notifications.push({
         id: "expiring-soon-summary",
         type: "expiring_soon",
         severity: "warning",
-        title: `${expiringSoon.length} ${expiringSoon.length === 1 ? "producto por vencer" : "productos por vencer"}`,
+        title: `${expiringSoonProducts.length} ${expiringSoonProducts.length === 1 ? "producto por vencer (≤30d)" : "productos por vencer (≤30d)"}`,
         description:
-          expiringSoon.length === 1
-            ? `"${expiringSoon[0].name}" vence pronto. Considera promocionarlo.`
-            : `${expiringSoon.length} productos vencen en menos de 30 días.`,
+          expiringSoonProducts.length === 1
+            ? `"${expiringSoonProducts[0].name}" vence pronto. Considera rotación rápida o descuento.`
+            : `${expiringSoonProducts.length} productos tienen lotes próximos a vencer en menos de 30 días.`,
         targetView: "products",
-        count: expiringSoon.length,
+        count: expiringSoonProducts.length,
         timestamp: now.toISOString(),
       })
     }
