@@ -212,7 +212,20 @@ export default function WhatsAppAgentView() {
   // Modal: Simular mensaje entrante
   const [simModalOpen, setSimModalOpen] = useState(false)
   const [simText, setSimText] = useState("")
+  const [simPhone, setSimPhone] = useState("+573105551234")
+  const [simCustomerName, setSimCustomerName] = useState("Carlos Mendoza")
   const [simulating, setSimulating] = useState(false)
+
+  const openSimModal = () => {
+    if (selectedPhone) {
+      setSimPhone(selectedPhone)
+      setSimCustomerName(selectedConv?.client?.name || "Cliente WhatsApp")
+    } else {
+      setSimPhone("+573105551234")
+      setSimCustomerName("Carlos Mendoza")
+    }
+    setSimModalOpen(true)
+  }
 
   // Estado Configuración por Sede
   const [config, setConfig] = useState<BranchConfig>({
@@ -483,10 +496,16 @@ export default function WhatsAppAgentView() {
     }
   }
 
-  // Simular mensaje de entrada con IA DeepSeek
+  // Simular mensaje de entrada con IA DeepSeek u OpenRouter
   const handleSimulateInbound = async (presetText?: string) => {
     const text = (presetText || simText).trim()
-    if (!selectedPhone || !text) return
+    const targetPhone = (simPhone || selectedPhone || "+573105551234").trim()
+    const targetName = (simCustomerName || selectedConv?.client?.name || "Carlos Mendoza").trim()
+
+    if (!text) {
+      toast.error("Ingresa el mensaje a simular")
+      return
+    }
 
     setSimulating(true)
     try {
@@ -498,8 +517,8 @@ export default function WhatsAppAgentView() {
       }>("/api/whatsapp/simulate", {
         method: "POST",
         body: JSON.stringify({
-          phone: selectedPhone,
-          customerName: selectedConv?.client?.name || "Cliente WhatsApp",
+          phone: targetPhone,
+          customerName: targetName,
           message: text,
           branchId: currentBranchId,
         }),
@@ -508,8 +527,9 @@ export default function WhatsAppAgentView() {
       if (res && res.ok) {
         setSimText("")
         setSimModalOpen(false)
-        loadMessages(selectedPhone, true)
-        loadConversations(false)
+        setSelectedPhone(targetPhone)
+        await loadConversations(false)
+        await loadMessages(targetPhone, false)
         if (res.orderNumber) {
           toast.success(`¡Orden #${res.orderNumber} creada automáticamente en la sede!`)
         } else {
@@ -925,7 +945,7 @@ export default function WhatsAppAgentView() {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => setSimModalOpen(true)}
+                onClick={openSimModal}
                 className="h-7 text-xs font-semibold gap-1"
               >
                 <IconPlus className="h-3.5 w-3.5" />
@@ -1170,7 +1190,7 @@ export default function WhatsAppAgentView() {
                 </p>
                 <Button
                   size="sm"
-                  onClick={() => setSimModalOpen(true)}
+                  onClick={openSimModal}
                   className="rounded-full text-xs h-8 mt-2"
                 >
                   <IconPlus className="h-3.5 w-3.5 mr-1" />
@@ -1864,6 +1884,28 @@ export default function WhatsAppAgentView() {
           </DialogHeader>
 
           <div className="space-y-3 pt-2">
+            {/* Datos del Cliente simulado */}
+            <div className="grid grid-cols-2 gap-2 pb-2 border-b border-zinc-100 dark:border-zinc-800">
+              <div className="space-y-1">
+                <Label className="text-[11px] font-semibold">Teléfono / WhatsApp</Label>
+                <Input
+                  value={simPhone}
+                  onChange={(e) => setSimPhone(e.target.value)}
+                  placeholder="+573105551234"
+                  className="h-8 text-xs font-mono rounded-lg"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px] font-semibold">Nombre del Cliente</Label>
+                <Input
+                  value={simCustomerName}
+                  onChange={(e) => setSimCustomerName(e.target.value)}
+                  placeholder="Carlos Mendoza"
+                  className="h-8 text-xs rounded-lg"
+                />
+              </div>
+            </div>
+
             <div className="space-y-1">
               <Label className="text-xs font-semibold">Mensaje del Cliente</Label>
               <Textarea
