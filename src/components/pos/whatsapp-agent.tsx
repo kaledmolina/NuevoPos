@@ -1713,41 +1713,6 @@ export default function WhatsAppAgentView() {
                                 : "Sin costo ($0)"}
                             </span>
                           </div>
-
-                          {/* Chips rápidos de tarifas para intervención humana en 1 clic */}
-                          <div className="flex items-center gap-1 pt-1 overflow-x-auto no-scrollbar">
-                            <span className="text-[9px] text-zinc-400 shrink-0 font-medium">Fijar:</span>
-                            {[0, 2000, 3000, 4000, 5000, 8000].map((fee) => (
-                              <button
-                                key={fee}
-                                type="button"
-                                onClick={() => handleQuickUpdateDeliveryFee(selectedConv.latestOrder!.id, fee)}
-                                className={cn(
-                                  "px-1.5 py-0.5 rounded-md text-[9px] font-mono transition-all cursor-pointer shrink-0 border",
-                                  (selectedConv.latestOrder?.deliveryFee || 0) === fee
-                                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 font-bold border-zinc-900 dark:border-zinc-100 shadow-2xs"
-                                    : "bg-white dark:bg-zinc-800/80 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700"
-                                )}
-                              >
-                                {fee === 0 ? "Gratis" : `$${(fee / 1000).toFixed(0)}k`}
-                              </button>
-                            ))}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const currentFee = selectedConv.latestOrder?.deliveryFee || 0
-                                const val = prompt("Ingresa el costo del domicilio para esta zona/barrio (ej: 6500):", String(currentFee))
-                                if (val !== null) {
-                                  const num = parseFloat(val.replace(/[^\d.]/g, ""))
-                                  if (!isNaN(num)) handleQuickUpdateDeliveryFee(selectedConv.latestOrder!.id, num)
-                                }
-                              }}
-                              className="px-1.5 py-0.5 rounded-md text-[9px] font-medium transition-all cursor-pointer shrink-0 border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 hover:underline"
-                              title="Ingresar valor personalizado según el barrio"
-                            >
-                              ✏️ Otro
-                            </button>
-                          </div>
                         </div>
 
                         {/* Fila Total y Estado de Pago */}
