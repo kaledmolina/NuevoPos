@@ -142,36 +142,239 @@ export async function processWhatsAppMessage(params: {
     }
   }
 
-  // 4. INTENTO 2: Motor Local (Fallback y Reglas Deterministas)
+  // 4. INTENTO 2: Motor Local (Fallback y Reglas Deterministas con Memoria de Conversación)
   if (!result) {
     const lowerText = text.toLowerCase()
     const cleanLowerText = lowerText.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
-    const isAffirmative = /^(si|claro|dale|ok|listo|correcto|a esa|a esa misma|a mi direccion|por favor|confirmo|si por favor)$/i.test(cleanLowerText)
 
-    // Regla 0: Confirmación afirmativa en conversación en curso (ej. cliente responde "Si" a la pregunta de dirección)
-    if (isAffirmative) {
-      if (client.address) {
-        const deliveryConfig = await getDeliveryConfig(resolvedBranchId || undefined)
-        const feeRes = resolveDeliveryFee(`${client.address} ${cleanLowerText}`, deliveryConfig)
-        result = {
-          reply: `¡Perfecto! Te lo enviamos a tu dirección registrada (*${client.address}*).\n🛵 *Envío:* $${feeRes.fee.toLocaleString("es-CO")} (${feeRes.appliedRule})\n\n¿Prefieres cancelar en *efectivo* contraentrega o por *transferencia* previa?`,
-          actionTaken: "ai_answered",
+    // Consultar el último mensaje del bot para reconstruir el estado de la conversación
+    const lastBotMsg = await db.whatsAppMessage.findFirst({
+      where: { phone: cleanPhone, sender: "bot" },
+      orderBy: { createdAt: "desc" },
+    })
+    const lastBotText = (lastBotMsg?.text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    const deliveryConfig = await getDeliveryConfig(resolvedBranchId || undefined)
+
+    // Regla 0.1: Cliente elige método de pago ("Efectivo", "Transferencia", "Nequi") tras cotización
+    const isPaymentResponse =
+      /^(efectivo|transferencia|nequi|daviplata|contraentrega|pago en efectivo|por transferencia|en efectivo|transfer)$/i.test(cleanLowerText) ||
+      (cleanLowerText.length < 30 && (cleanLowerText.includes("efectivo") || cleanLowerText.includes("transfer") || cleanLowerText.includes("nequi") || cleanLowerText.includes("davi")))
+
+    const isAwaitingPayment =
+      lastBotText.includes("prefieres") ||
+      lastBotText.includes("total a pagar") ||
+      lastBotText.includes("cancelar:") ||
+      lastBotText.includes("contraentrega o por transferencia")
+
+    if (isPaymentResponse && isAwaitingPayment) {
+      const isTransfer = cleanLowerText.includes("transf") || cleanLowerText.includes("nequi") || cleanLowerText.includes("davi")
+      const paymentMethod = isTransfer ? "transferencia" : "efectivo"
+
+      // Extraer total y costo de envío de la cotización previa del bot
+      const totalMatch = lastBotText.match(/total[^\$\d]*\$\s*([\d\.,]+)/i)
+      const deliveryMatch = lastBotText.match(/env[ií]o[^\$\d]*\$\s*([\d\.,]+)/i) || lastBotText.match(/domicilio[^\$\d]*\$\s*([\d\.,]+)/i)
+
+      let total = 0
+      if (totalMatch) {
+        total = parseFloat(totalMatch[1].replace(/\./g, "").replace(/,/g, ".")) || 0
+      }
+
+      let deliveryFee = 0
+      if (deliveryMatch) {
+        deliveryFee = parseFloat(deliveryMatch[1].replace(/\./g, "").replace(/,/g, ".")) || 0
+      }
+      if (deliveryFee <= 0) {
+        deliveryFee = deliveryConfig.globalFee || 5000
+      }
+
+      const allActiveProds = await db.product.findMany({
+        where: { active: true, ...branchFilter },
+        select: { id: true, name: true, price: true, stock: true, unit: true },
+      })
+
+      // Buscar qué producto(s) estaban en la cotización
+      const itemsToCreate: { product: any; qty: number }[] = []
+      for (const p of allActiveProds) {
+        const pNorm = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        if (lastBotText.includes(pNorm)) {
+          let qty = 1
+          const qMatch = lastBotText.match(new RegExp(`(\\d+)\\s*x\\s*${pNorm.slice(0, 6)}`, "i"))
+          if (qMatch) qty = parseInt(qMatch[1], 10) || 1
+          itemsToCreate.push({ product: p, qty })
         }
-      } else {
+      }
+
+      // Si no coincidió por nombre completo, buscar por palabra clave principal
+      if (itemsToCreate.length === 0) {
+        for (const p of allActiveProds) {
+          const pWords = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/).filter((w) => w.length >= 4)
+          if (pWords.some((w) => lastBotText.includes(w))) {
+            itemsToCreate.push({ product: p, qty: 1 })
+            break
+          }
+        }
+      }
+
+      if (itemsToCreate.length > 0) {
+        const subtotal = itemsToCreate.reduce((acc, it) => acc + it.product.price * it.qty, 0)
+        if (total <= 0) total = subtotal + deliveryFee
+
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "")
+        const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString()
+        const genOrderNum = `PED-${dateStr}-${randomSuffix}`
+        const finalAddress = client.address || (isTelegram ? "Dirección confirmada según Telegram" : "Dirección confirmada según WhatsApp")
+
+        let paymentNote = ""
+        if (!isTransfer) {
+          paymentNote = `💵 Pago en Efectivo: Cobrar $${total.toLocaleString("es-CO")} contraentrega ($${subtotal.toLocaleString("es-CO")} productos + $${deliveryFee.toLocaleString("es-CO")} envío).`
+        } else {
+          paymentNote = `💳 Pago por Transferencia: Pendiente verificar comprobante por $${total.toLocaleString("es-CO")}. Una vez verificado por caja, el repartidor no cobra ($0).`
+        }
+
+        const createdOrder = await db.order.create({
+          data: {
+            orderNumber: genOrderNum,
+            tenantId: branch?.tenantId || null,
+            branchId: resolvedBranchId,
+            clientId: client.id,
+            customerName: client.name,
+            customerPhone: cleanPhone,
+            deliveryAddress: finalAddress,
+            deliveryNotes: paymentNote,
+            notes: `Generado automáticamente por WhatsApp (${branch?.name || "Sede"}). Confirmación directa de pago ${paymentMethod}.`,
+            subtotal,
+            tax: 0,
+            deliveryFee,
+            total,
+            paymentMethod,
+            paymentStatus: "pendiente",
+            status: "pendiente",
+            items: {
+              create: itemsToCreate.map((it) => ({
+                productId: it.product.id,
+                productName: it.product.name,
+                quantity: it.qty,
+                unitPrice: it.product.price,
+                subtotal: it.product.price * it.qty,
+              })),
+            },
+          },
+        })
+
+        createdOrderId = createdOrder.id
+
+        const itemsSummary = itemsToCreate
+          .map((it) => `• ${it.qty}x *${it.product.name}* ($${(it.qty * it.product.price).toLocaleString("es-CO")})`)
+          .join("\n")
+        const feeLine = deliveryFee > 0 ? `\n🛵 *Costo Domicilio:* $${deliveryFee.toLocaleString("es-CO")}` : ""
+        const paymentSummary = isTransfer
+          ? "💳 *Método de Pago:* Transferencia previa (Por favor envía el comprobante por este chat para verificar y despachar tu pedido)"
+          : `💵 *Método de Pago:* Efectivo ($${total.toLocaleString("es-CO")} a cobrar contraentrega)`
+
         result = {
-          reply: `¡Entendido! Por favor confírmanos a qué dirección y en qué barrio te lo enviamos para calcular el valor del domicilio y despacharte de inmediato.`,
-          actionTaken: "ai_answered",
+          reply: `🎉 *¡Pedido Confirmado con Éxito!*\n🏬 *Sede:* ${branch?.name || "Principal"}\n📦 *Orden:* #${createdOrder.orderNumber}\n👤 *Cliente:* ${client.name}\n📍 *Entrega:* ${finalAddress}\n\n🛒 *Productos:*\n${itemsSummary}${feeLine}\n💵 *Total a Pagar:* *$${total.toLocaleString("es-CO")}*\n${paymentSummary}\n\n⏱️ *Estado:* Recibido en tienda y en fila de alistamiento.`,
+          actionTaken: "order_created",
+          orderNumber: createdOrder.orderNumber,
+          total: createdOrder.total,
+        }
+      }
+    }
+
+    // Regla 0.2: Cliente indica su dirección o barrio tras consultar producto
+    if (!result) {
+      const hasAddressWords =
+        cleanLowerText.includes("barrio") ||
+        cleanLowerText.includes("calle") ||
+        cleanLowerText.includes("cra") ||
+        cleanLowerText.includes("cll") ||
+        cleanLowerText.includes("carrera") ||
+        cleanLowerText.includes("manzana") ||
+        cleanLowerText.includes("maza") ||
+        cleanLowerText.includes("lote") ||
+        cleanLowerText.includes("casa") ||
+        cleanLowerText.includes("apto") ||
+        cleanLowerText.includes("torre") ||
+        cleanLowerText.includes("#")
+
+      const isAwaitingAddress =
+        lastBotText.includes("direccion") ||
+        lastBotText.includes("barrio") ||
+        lastBotText.includes("domicilio") ||
+        lastBotText.includes("catalogo disponible")
+
+      if (hasAddressWords && isAwaitingAddress) {
+        // Actualizar dirección del cliente si no tenía
+        if (!client.address || cleanLowerText.length > 8) {
+          await db.client.update({
+            where: { id: client.id },
+            data: { address: text },
+          }).catch(() => {})
+          client.address = text
+        }
+
+        // Detectar si el cliente también indicó cantidad (ej. "Si , 2 barrio el dorado manzana 12")
+        const qtyMatch = cleanLowerText.match(/\b([1-9]|10)\b/)
+        const requestedQty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1
+
+        // Buscar qué producto consultó en el mensaje anterior
+        const allActiveProds = await db.product.findMany({
+          where: { active: true, ...branchFilter },
+          select: { id: true, name: true, price: true, stock: true },
+        })
+
+        let targetProduct = allActiveProds.find((p) => {
+          const pNorm = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+          return lastBotText.includes(pNorm)
+        })
+
+        if (!targetProduct) {
+          targetProduct = allActiveProds.find((p) => {
+            const words = p.name.toLowerCase().split(/\s+/).filter((w) => w.length >= 4)
+            return words.some((w) => lastBotText.includes(w))
+          })
+        }
+
+        if (targetProduct) {
+          const subtotal = targetProduct.price * requestedQty
+          const feeRes = resolveDeliveryFee(`${text} ${cleanLowerText}`, deliveryConfig)
+          const total = subtotal + feeRes.fee
+
+          result = {
+            reply: `¡Perfecto! Te confirmo el pedido para entrega en *${text}*:\n\n• ${requestedQty}x *${targetProduct.name}* = $${subtotal.toLocaleString("es-CO")}\n🛵 *Envío:* $${feeRes.fee.toLocaleString("es-CO")} (${feeRes.appliedRule})\n💵 *Total a pagar:* *$${total.toLocaleString("es-CO")}*\n\n¿Cómo prefieres cancelar: en *efectivo* contraentrega o por *transferencia* previa?`,
+            actionTaken: "ai_answered",
+          }
+        }
+      }
+    }
+
+    // Regla 0.3: Confirmación afirmativa simple ("Si", "Dale", "Ok", "A esa")
+    if (!result) {
+      const isAffirmative = /^(si|claro|dale|ok|listo|correcto|a esa|a esa misma|a mi direccion|por favor|confirmo|si por favor)$/i.test(cleanLowerText)
+      if (isAffirmative) {
+        if (client.address) {
+          const feeRes = resolveDeliveryFee(`${client.address} ${cleanLowerText}`, deliveryConfig)
+          result = {
+            reply: `¡Perfecto! Te lo enviamos a tu dirección registrada (*${client.address}*).\n🛵 *Envío:* $${feeRes.fee.toLocaleString("es-CO")} (${feeRes.appliedRule})\n\n¿Prefieres cancelar en *efectivo* contraentrega o por *transferencia* previa?`,
+            actionTaken: "ai_answered",
+          }
+        } else {
+          result = {
+            reply: `¡Entendido! Por favor confírmanos a qué dirección y en qué barrio te lo enviamos para calcular el valor del domicilio y despacharte de inmediato.`,
+            actionTaken: "ai_answered",
+          }
         }
       }
     }
 
     // Regla 1: Consulta de saldo / fiado
-    else if (
-      lowerText.includes("debo") ||
-      lowerText.includes("saldo") ||
-      lowerText.includes("cuenta") ||
-      lowerText.includes("fiado") ||
-      lowerText.includes("deuda")
+    if (
+      !result && (
+        lowerText.includes("debo") ||
+        lowerText.includes("saldo") ||
+        lowerText.includes("cuenta") ||
+        lowerText.includes("fiado") ||
+        lowerText.includes("deuda")
+      )
     ) {
       const acc = client.creditAccount
       const balance = acc?.balance || 0
@@ -490,8 +693,28 @@ async function processWithLLMAI(params: {
     ? "https://openrouter.ai/api/v1/chat/completions"
     : "https://api.deepseek.com/chat/completions"
 
-  // 1. Ahorro de Tokens & Contexto Real del Catálogo de la Sede
-  // Palabras generales de consulta que NO son nombres de productos
+  // 1. Historial de conversación previo (excluyendo el mensaje entrante actual para evitar mensajes de usuario consecutivos duplicados)
+  const recentMsgs = await db.whatsAppMessage.findMany({
+    where: { phone: cleanPhone },
+    orderBy: { createdAt: "desc" },
+    skip: 1, // Salta el mensaje actual recién guardado
+    take: 8, // Últimos 8 mensajes previos para mantener el hilo y contexto del pedido
+    select: { sender: true, text: true },
+  })
+
+  const conversationHistory = recentMsgs.reverse().map((m) => ({
+    role: m.sender === "customer" ? "user" : "assistant",
+    content: m.text.slice(0, 300), // Ahorro de tokens
+  }))
+
+  // 1.1 Ahorro de Tokens & Contexto Real del Catálogo de la Sede
+  // Extraer palabras clave combinando el mensaje entrante con los últimos mensajes de la conversación
+  // Así los productos mencionados antes (ej. "jabón", "gasa") siguen vigentes en el catálogo context
+  const fullConversationSearchText = [
+    message,
+    ...recentMsgs.map((m) => m.text),
+  ].join(" ")
+
   const GENERAL_QUERY_WORDS = new Set([
     "hola", "buenas", "buenos", "dias", "tardes", "noches", "por", "favor", "gracias",
     "para", "quiero", "tienen", "tiene", "venden", "vende", "hay", "que", "cual", "cuales",
@@ -500,7 +723,7 @@ async function processWithLLMAI(params: {
     "stock", "medicamentos", "medicamento", "remedios", "remedio", "droga", "drogas", "farmacia"
   ])
 
-  const messageWords = message
+  const messageWords = fullConversationSearchText
     .toLowerCase()
     .replace(/[^a-záéíóúñ0-9\s]/gi, " ")
     .split(/\s+/)
@@ -607,21 +830,7 @@ async function processWithLLMAI(params: {
 - Dirección de entrega: ${activeOrder.deliveryAddress || "N/A"}${driverText}`
   }
 
-  // 2. Historial de conversación previo (excluyendo el mensaje entrante actual para evitar mensajes de usuario consecutivos duplicados)
-  const recentMsgs = await db.whatsAppMessage.findMany({
-    where: { phone: cleanPhone },
-    orderBy: { createdAt: "desc" },
-    skip: 1, // Salta el mensaje actual recién guardado
-    take: 8, // Últimos 8 mensajes previos para mantener el hilo y contexto del pedido
-    select: { sender: true, text: true },
-  })
-
-  const conversationHistory = recentMsgs.reverse().map((m) => ({
-    role: m.sender === "customer" ? "user" : "assistant",
-    content: m.text.slice(0, 300), // Ahorro de tokens
-  }))
-
-  // 2.1 Cargar configuración oficial de tarifas de domicilio para esta sede
+  // 2. Cargar configuración oficial de tarifas de domicilio para esta sede
   const deliveryConfig = await getDeliveryConfig(branchId)
   const deliveryPromptContext = formatDeliveryPromptContext(deliveryConfig)
 
@@ -851,17 +1060,15 @@ ${catalogContext}`
   // Limpiar SIEMPRE el tag técnico de la respuesta que ve el cliente en WhatsApp
   rawReply = rawReply.replace(/\[ORDEN_AUTO:\s*\{[\s\S]*\}\s*\]/g, "").trim()
 
-  // Si la respuesta quedó vacía, lanzar error para activar el motor local determinista
-  if (!rawReply || !rawReply.trim()) {
-    throw new Error("AI returned empty content after processing")
-  }
-
   // Evitar creación prematura si el bot todavía le está preguntando al cliente si confirma su dirección o método de pago
   const isAskingConfirmation =
     rawReply.includes("?") &&
     /\b(confirmas|confirma|a qu[eé] direcci[oó]n|cu[aá]l es tu direcci[oó]n|a d[oó]nde te lo enviamos|deseas pagar|con cu[aá]nto cancelas|a esa direcci[oó]n|a tu direcci[oó]n)\b/i.test(rawReply)
 
   if (orderTagMatch && config.autoCreateOrders && !isAskingConfirmation) {
+    if (!rawReply) {
+      rawReply = "🎉 ¡Perfecto! Hemos registrado tu pedido a domicilio."
+    }
     try {
       const orderPayload = JSON.parse(orderTagMatch[1])
       const itemsToCreate: { product: any; qty: number }[] = []
@@ -872,11 +1079,13 @@ ${catalogContext}`
           if (!rawName) continue
 
           // 1. Buscar en los productos cargados
-          let match: (typeof products)[0] | null | undefined = products.find((p) =>
-            p.name.toLowerCase().includes(rawName) || rawName.includes(p.name.toLowerCase())
-          )
+          let match: (typeof products)[0] | null | undefined = products.find((p) => {
+            const pNorm = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+            const rNorm = rawName.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+            return pNorm.includes(rNorm) || rNorm.includes(pNorm)
+          })
 
-          // 2. Si no estaba en el subconjunto, buscar en toda la BD de esta sede
+          // 2. Si no estaba en el subconjunto, buscar en toda la BD de esta sede por nombre
           if (!match) {
             match = await db.product.findFirst({
               where: {
@@ -886,6 +1095,21 @@ ${catalogContext}`
               },
               select: { id: true, name: true, price: true, stock: true, unit: true },
             })
+          }
+
+          // 3. Si sigue sin encontrar, buscar por palabras clave
+          if (!match) {
+            const rWords = rawName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/).filter((w) => w.length >= 3 && !GENERAL_QUERY_WORDS.has(w))
+            if (rWords.length > 0) {
+              match = await db.product.findFirst({
+                where: {
+                  active: true,
+                  ...branchFilter,
+                  OR: rWords.map((w) => ({ name: { contains: w } })),
+                },
+                select: { id: true, name: true, price: true, stock: true, unit: true },
+              })
+            }
           }
 
           if (match) {
@@ -996,6 +1220,15 @@ ${catalogContext}`
       }
     } catch (parseErr) {
       console.warn(`[${providerName} Order Parse Error]`, parseErr)
+    }
+  }
+
+  // Si la respuesta sigue vacía y no se generó orden, activar el motor local determinista
+  if (!rawReply || !rawReply.trim()) {
+    if (orderNumber) {
+      rawReply = `🎉 *¡Pedido Recibido con Éxito!*\nTu orden #${orderNumber} ha sido registrada.`
+    } else {
+      throw new Error("AI returned empty content after processing")
     }
   }
 
