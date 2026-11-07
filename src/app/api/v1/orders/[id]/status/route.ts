@@ -165,6 +165,16 @@ export async function PATCH(
       }).catch(() => {})
     }
 
+    // Si la orden fue entregada, cerrar la conversación automáticamente para que la próxima compra inicie en limpio
+    if (newStatus === "entregado" && updated.customerPhone) {
+      try {
+        const { closeConversationSession } = await import("@/lib/conversation-session")
+        await closeConversationSession(updated.customerPhone, "order_created", updated.orderNumber)
+      } catch (err: any) {
+        console.warn("[Order Delivered] Error cerrando sesión:", err.message)
+      }
+    }
+
     await logAudit({
       action: "api_order_status_update",
       entityType: "order",

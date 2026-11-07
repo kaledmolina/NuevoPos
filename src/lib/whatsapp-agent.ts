@@ -4,6 +4,7 @@ import {
   ensureActiveConversationSession,
   closeConversationSession,
   getConversationSession,
+  setConversationSessionStatus,
 } from "@/lib/conversation-session"
 
 export interface BotProcessResult {
@@ -17,11 +18,122 @@ export interface BotProcessResult {
 }
 
 /**
- * Motor de Inteligencia de WhatsApp & DeepSeek para OmniPOS
- * Multi-Sede: Opera con el catálogo, inventario, precios y pedidos exclusivos de la sede vinculada.
- * Ahorro extremo de tokens: Inyecta únicamente los productos relevantes y mantiene el historial condensado.
+ * Sanitiza la respuesta del LLM para evitar fugas de razonamiento interno (Chain of Thought),
+ * etiquetas <think>, o listas de pasos tipo "1. **Analyze the user's input:**"
+ */
+function sanitizeBotReply(reply: string, clientName?: string, activeOrder?: any): string {
+  let cleaned = (reply || "").trim()
+
+  // 1. Eliminar etiquetas <think>...</think> o <think> sin cerrar
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "")
+  cleaned = cleaned.replace(/<think>[\s\S]*/gi, "")
+
+  // 2. Detectar si el modelo generó formato de razonamiento / Chain-of-Thought (ej: 1. **Analyze... 2. Check catalog...)
+  const isReasoningLeak =
+    /(?:^|\n)(?:\d+\.\s*\*\*(?:Analyze|Check|Evaluate|Formulate|Reasoning)|(?:\*\*(?:Thinking Process|Analysis|Razonamiento|Análisis)\*\*)|(?:\*Rule\s*\d+:))/i.test(cleaned)
+
+  if (isReasoningLeak) {
+    // Si el modelo puso la respuesta final al final (ej: "Omnipos: ...", "Respuesta: ...", "Bot: ...")
+    const matchExplicitReply = cleaned.match(/(?:Omnipos|Bot|Asistente|Respuesta(?: al cliente)?):\s*([\s\S]+)$/i)
+    if (matchExplicitReply && matchExplicitReply[1].trim()) {
+      cleaned = matchExplicitReply[1].trim()
+    } else {
+      // Intentar extraer el último bloque que no sea parte de la lista de pasos analíticos
+      const paragraphs = cleaned.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)
+      const nonStepParagraphs = paragraphs.filter(
+        (p) => !/^(?:\d+\.\s*\*|\*Rule|\*\*Analyze|\*\*Check|\*\*Evaluate|\*\*Formulate|\* Politely|\* Suggest|\* Keep|\* Current real-time|\* Check the catalog|\* Evaluate against|\* Formulate response)/i.test(p)
+      )
+      if (nonStepParagraphs.length > 0) {
+        cleaned = nonStepParagraphs[nonStepParagraphs.length - 1]
+      } else {
+        // Si todo el texto era exclusivamente razonamiento sin respuesta conversacional:
+        if (activeOrder && activeOrder.orderNumber) {
+          cleaned = `Tu pedido #${activeOrder.orderNumber} se encuentra en proceso (${activeOrder.status || "registrado"}). Pronto lo coordinamos a tu dirección. ¡Quedamos atentos!`
+        } else {
+          cleaned = `¡Hola${clientName ? ` ${clientName}` : ""}! Con gusto te colaboramos con tu pedido o consulta. ¿Qué producto necesitas a domicilio?`
+        }
+      }
+    }
+  }
+
+  // 3. Limpiar cualquier resto de "Omnipos:", "Bot:" al principio del mensaje
+  cleaned = cleaned.replace(/^(?:Omnipos|Bot|Asistente|Respuesta):\s*/i, "").trim()
+
+  return cleaned
+}
+
+// Cola de procesamiento secuencial para atención "uno a uno" similar a un humano
+interface QueuedMessageTask {
+  params: {
+    phone: string
+    customerName?: string
+    message: string
+    branchId?: string | null
+    channel?: "whatsapp" | "telegram"
+  }
+  resolve: (res: BotProcessResult) => void
+  reject: (err: any) => void
+}
+
+const messageQueue: QueuedMessageTask[] = []
+let isQueueProcessing = false
+
+async function runQueueWorker() {
+  if (isQueueProcessing) return
+  isQueueProcessing = true
+
+  while (messageQueue.length > 0) {
+    const task = messageQueue.shift()
+    if (!task) break
+
+    try {
+      // Espaciado humano entre respuestas (1.2s) para dar tiempo natural de lectura y proteger cuota de API
+      await new Promise((r) => setTimeout(r, 1200))
+      const res = await executeWhatsAppMessage(task.params)
+      task.resolve(res)
+    } catch (err) {
+      task.reject(err)
+    }
+  }
+
+  isQueueProcessing = false
+}
+
+/**
+ * Punto de entrada público: encola peticiones concurrentes para atender "uno a uno"
+ * Los chats en espera quedan marcados en estado "pendiente" en el CRM
  */
 export async function processWhatsAppMessage(params: {
+  phone: string
+  customerName?: string
+  message: string
+  branchId?: string | null
+  channel?: "whatsapp" | "telegram"
+}): Promise<BotProcessResult> {
+  const { phone, channel } = params
+  const isTelegram = channel === "telegram" || phone.startsWith("tg_")
+  const cleanPhone = isTelegram ? (phone.startsWith("tg_") ? phone : `tg_${phone}`) : phone.replace(/[^0-9+]/g, "")
+
+  // 1. Asegurar sesión activa y marcar de inmediato como "pendiente" mientras está en espera
+  try {
+    await ensureActiveConversationSession(cleanPhone)
+    await setConversationSessionStatus(cleanPhone, "pendiente")
+  } catch {
+    /* noop */
+  }
+
+  // 2. Procesar secuencialmente en la cola
+  return new Promise<BotProcessResult>((resolve, reject) => {
+    messageQueue.push({ params, resolve, reject })
+    runQueueWorker()
+  })
+}
+
+/**
+ * Motor de Inteligencia de WhatsApp & DeepSeek para OmniPOS
+ * Multi-Sede: Opera con el catálogo, inventario, precios y pedidos exclusivos de la sede vinculada.
+ */
+async function executeWhatsAppMessage(params: {
   phone: string
   customerName?: string
   message: string
@@ -684,6 +796,16 @@ export async function processWhatsAppMessage(params: {
     }
   }
 
+  // Si la sesión sigue en estado pendiente y no fue concluida/cerrada por orden o despedida, marcar como abierta
+  try {
+    const currentSession = await getConversationSession(cleanPhone)
+    if (currentSession.status === "pendiente") {
+      await setConversationSessionStatus(cleanPhone, "abierta")
+    }
+  } catch {
+    /* noop */
+  }
+
   return result
 }
 
@@ -705,7 +827,7 @@ async function processWithLLMAI(params: {
   const channelLabel = isTelegram ? "Telegram" : "WhatsApp"
   const branchId = branch?.id
   const branchName = branch?.name || "Sede Principal"
-  const branchFilter = branchId ? { branchId } : {}
+  const branchFilter = branchId ? { OR: [{ branchId }, { branchId: null }] } : {}
 
   // Determinar proveedor activo (OpenRouter o DeepSeek) y credenciales
   const openerKey = config.openrouterApiKey?.trim() || process.env.OPENROUTER_API_KEY?.trim() || ""
@@ -758,69 +880,27 @@ async function processWithLLMAI(params: {
 
   const GENERAL_QUERY_WORDS = new Set([
     "hola", "buenas", "buenos", "dias", "tardes", "noches", "por", "favor", "gracias",
-    "para", "quiero", "tienen", "tiene", "venden", "vende", "hay", "que", "cual", "cuales",
+    "para", "quiero", "tienen", "tiene", "venden", "vende", "vendes", "hay", "que", "cual", "cuales",
     "productos", "producto", "catalogo", "disponible", "disponibles", "lista", "precios",
     "precio", "costo", "cuanto", "vale", "muestrame", "menu", "servicios", "articulos",
-    "stock", "medicamentos", "medicamento", "remedios", "remedio", "droga", "drogas", "farmacia"
+    "stock", "medicamentos", "medicamento", "remedios", "remedio", "droga", "drogas", "farmacia",
+    "consigues", "consigue", "pides", "pide", "das", "da", "regalas", "regala", "ofreces", "ofrece",
+    "manejan", "maneja", "llevas", "lleva", "traes", "trae", "haces", "hace", "enviar", "envias",
+    "envia", "mandas", "manda", "pedir", "pido", "comprar", "compro", "ordenar", "recomiendas", "recomienda",
+    "casa", "domicilio", "mi", "un", "una", "unos", "unas", "dos", "tres", "cuatro", "cinco", "vender"
   ])
 
-  const messageWords = fullConversationSearchText
-    .toLowerCase()
-    .replace(/[^a-záéíóúñ0-9\s]/gi, " ")
-    .split(/\s+/)
-    .filter((w) => w.length >= 2)
-
-  const specificKeywords = messageWords.filter((w) => !GENERAL_QUERY_WORDS.has(w) && w.length > 2)
-  const expandedKeywords = new Set<string>()
-  for (const w of specificKeywords) {
-    expandedKeywords.add(w)
-    const norm = w.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    if (norm) {
-      expandedKeywords.add(norm)
-      expandedKeywords.add(norm.replace(/o/g, "ó"))
-      expandedKeywords.add(norm.replace(/a/g, "á"))
-      expandedKeywords.add(norm.replace(/e/g, "é"))
-      expandedKeywords.add(norm.replace(/i/g, "í"))
-      expandedKeywords.add(norm.replace(/u/g, "ú"))
-    }
-  }
-  const searchKeywords = Array.from(expandedKeywords).filter((k) => k.length >= 3)
-
-  // Siempre obtener los productos destacados / disponibles de esta sede (máximo 8 para ahorrar tokens)
-  const defaultBranchProducts = await db.product.findMany({
+  // Catálogo completo de la sede activa (hasta 150 productos en stock para no omitir ningún producto)
+  const products = await db.product.findMany({
     where: {
       active: true,
       ...branchFilter,
       stock: { gt: 0 },
     },
     select: { id: true, name: true, price: true, stock: true, unit: true },
-    orderBy: { stock: "desc" },
-    take: 8,
+    orderBy: [{ stock: "desc" }, { name: "asc" }],
+    take: 150,
   })
-
-  // Si el usuario mencionó palabras específicas (ej. alcohol, ibuprofeno, jabon/jabón), buscarlas
-  let matchedProducts: typeof defaultBranchProducts = []
-  if (searchKeywords.length > 0) {
-    matchedProducts = await db.product.findMany({
-      where: {
-        active: true,
-        ...branchFilter,
-        OR: searchKeywords.map((k) => ({
-          name: { contains: k },
-        })),
-      },
-      select: { id: true, name: true, price: true, stock: true, unit: true },
-      take: 6,
-    })
-  }
-
-  // Combinar los productos que coinciden con los destacados sin duplicados
-  const combinedProductsMap = new Map<string, (typeof defaultBranchProducts)[0]>()
-  for (const p of matchedProducts) combinedProductsMap.set(p.id, p)
-  for (const p of defaultBranchProducts) {
-    if (combinedProductsMap.size < 8) combinedProductsMap.set(p.id, p)
-  }
-  const products = Array.from(combinedProductsMap.values())
 
   const catalogContext = products.length > 0
     ? products
@@ -828,10 +908,27 @@ async function processWithLLMAI(params: {
         .join("\n")
     : "Catálogo vacío para esta sede. Informa que pronto se cargarán existencias."
 
-  // Nota para el LLM si buscó algo específico que NO existe en la sede
-  const specificNotFoundNote = specificKeywords.length > 0 && matchedProducts.length === 0
-    ? `\n⚠️ ATENCIÓN: El cliente consultó por "${specificKeywords.join(", ")}", pero NO está en el catálogo de esta sede. Infórmale con amabilidad que no disponemos de ese artículo y ofrécele los que sí tenemos en la lista de abajo.`
-    : ""
+  // Verificar si el cliente consultó por un artículo que realmente no existe en el catálogo
+  const messageWords = fullConversationSearchText
+    .toLowerCase()
+    .replace(/[^a-záéíóúñ0-9\s]/gi, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !GENERAL_QUERY_WORDS.has(w))
+
+  let specificNotFoundNote = ""
+  if (messageWords.length > 0 && products.length > 0) {
+    const hasAnyMatch = messageWords.some((w) => {
+      const norm = w.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      return products.some((p) => {
+        const pNorm = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        return pNorm.includes(norm) || norm.includes(pNorm)
+      })
+    })
+
+    if (!hasAnyMatch && messageWords.length <= 3) {
+      specificNotFoundNote = `\n⚠️ ATENCIÓN: El cliente consultó por "${messageWords.join(", ")}", pero NO está en el catálogo de esta sede. Infórmale con amabilidad que no disponemos de ese artículo y ofrécele los que sí tenemos en la lista de abajo.`
+    }
+  }
 
   const clientBalance = client.creditAccount?.balance || 0
 
@@ -880,8 +977,9 @@ async function processWithLLMAI(params: {
 Tu misión: Atender con calidez, consultar precios, sugerir productos, dar estado de pedidos en tiempo real y tomar órdenes a domicilio.
 
 REGLAS DE ORO (Ahorro de tokens y precisión):
+0. ⚠️ PROHIBIDO PENSAR EN VOZ ALTA: NUNCA expongas análisis, razonamiento interno, pasos de verificación ni listas tipo "1. **Analyze...", "2. Check...". Tu respuesta debe ser EXCLUSIVAMENTE el mensaje final en español directo para el cliente.
 1. Responde SIEMPRE en español de forma concisa (MÁXIMO 3 líneas o viñetas limpias).
-2. CATÁLOGO REAL: SOLO cotiza y vende los productos listados en el "CATÁLOGO DE ESTA SEDE". NUNCA inventes productos ni precios.
+2. CATÁLOGO REAL: Cotiza y vende los productos listados en el "CATÁLOGO DE ESTA SEDE". Si un producto aparece en la lista de abajo (ej. Jabón, Gasa, Suero, etc.), NUNCA digas que no lo manejas; ofrécelo de inmediato con su precio exacto y disponibilidad.
 3. Si el cliente saluda, envía "/start" o pregunta qué productos hay o qué venden, dale la bienvenida a "${branchName}" y lista los productos disponibles indicando su precio exacto y disponibilidad.
 4. Si el cliente pide o menciona un producto que NO está en el catálogo, indícale amablemente que no lo manejas en esta sede y recomiéndale los que sí tienes disponibles.
 5. Datos del cliente: Nombre "${client.name}". Fiado / saldo pendiente: $${clientBalance.toLocaleString("es-CO")}. Dirección registrada: ${client.address ? `"${client.address}"` : "Ninguna"}.
@@ -964,6 +1062,7 @@ ${catalogContext}`
           ],
           max_tokens: maxTokens,
           temperature: 0.3,
+          include_reasoning: false,
         }),
         signal: controller.signal,
       })
@@ -1061,12 +1160,7 @@ ${catalogContext}`
   }
 
   let rawReply = aiData?.choices?.[0]?.message?.content || ""
-  if (!rawReply || !rawReply.trim()) {
-    const reasoning = aiData?.choices?.[0]?.message?.reasoning_content
-    if (reasoning && typeof reasoning === "string" && reasoning.trim()) {
-      rawReply = reasoning.trim()
-    }
-  }
+  rawReply = sanitizeBotReply(rawReply, client?.name, activeOrder)
 
   const isModelFree = isOpener && (actualModel === "openrouter/free" || actualModel.includes("free"))
   const tokensUsed = aiData?.usage?.total_tokens || 0
