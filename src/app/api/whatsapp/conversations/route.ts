@@ -8,6 +8,12 @@ export const dynamic = "force-dynamic"
 export interface ConversationItem {
   phone: string
   channel: "whatsapp" | "telegram"
+  session?: {
+    status: "abierta" | "pendiente" | "cerrada"
+    openedAt: string
+    closedAt: string | null
+    closedReason?: string | null
+  } | null
   aiUsage?: ClientAiUsage | null
   client: {
     id: string
@@ -177,6 +183,20 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Cargar sesiones de conversación para determinar estados (abierta / pendiente / cerrada)
+    const sessionSettings = await db.setting.findMany({
+      where: { key: { startsWith: "conv_session:" } },
+    })
+    const sessionMap = new Map<string, any>()
+    for (const s of sessionSettings) {
+      try {
+        const p = s.key.replace("conv_session:", "")
+        sessionMap.set(p, JSON.parse(s.value))
+      } catch {
+        /* noop */
+      }
+    }
+
     // Búsqueda en BATCH del consumo de tokens y gasto IA por cliente
     const aiUsageSettings = await db.setting.findMany({
       where: { key: { startsWith: "ai_usage:" } },
@@ -270,6 +290,11 @@ export async function GET(req: NextRequest) {
         latestOrder,
         totalOrders: totalOrdersCount,
         aiUsage: aiUsageMap.get(phone) || null,
+        session: sessionMap.get(phone) || {
+          status: "abierta",
+          openedAt: data.messages[0]?.createdAt.toISOString() || new Date().toISOString(),
+          closedAt: null,
+        },
       })
     }
 

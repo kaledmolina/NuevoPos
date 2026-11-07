@@ -75,6 +75,9 @@ import {
   IconExternalLink,
   IconAlertTriangle,
   IconAlertCircle,
+  IconChevronDown,
+  IconChevronRight,
+  IconCircleCheck,
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -83,6 +86,12 @@ import type { ClientAiUsage } from "@/lib/ai-token-tracker"
 interface Conversation {
   phone: string
   channel?: "whatsapp" | "telegram"
+  session?: {
+    status: "abierta" | "pendiente" | "cerrada"
+    openedAt: string
+    closedAt: string | null
+    closedReason?: string | null
+  } | null
   aiUsage?: ClientAiUsage | null
   client: {
     id: string
@@ -243,7 +252,7 @@ export default function WhatsAppAgentView() {
   const [loadingConv, setLoadingConv] = useState(true)
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null)
   const [searchFilter, setSearchFilter] = useState("")
-  const [statusFilter, setStatusFilter] = useState<"all" | "whatsapp" | "telegram" | "unread" | "with_orders">("all")
+  const [statusFilter, setStatusFilter] = useState<"all" | "whatsapp" | "telegram" | "unread" | "with_orders" | "abiertas" | "cerradas">("all")
 
   // Mensajes del chat seleccionado
   const [chatMessages, setChatMessages] = useState<Message[]>([])
@@ -945,6 +954,40 @@ export default function WhatsAppAgentView() {
     }
   }
 
+  // Cambiar estado o cerrar/reabrir sesión de conversación (Estrategia Chatbot)
+  const handleToggleSession = async (
+    action: "close" | "reopen" | "status",
+    targetStatus?: "abierta" | "pendiente" | "cerrada"
+  ) => {
+    if (!selectedPhone) return
+    const isClosing = action === "close" || targetStatus === "cerrada"
+    const newStatus = targetStatus || (action === "reopen" ? "abierta" : "cerrada")
+
+    try {
+      const res = await apiFetch<{ ok: boolean; session: any }>("/api/whatsapp/conversations/session", {
+        method: "POST",
+        body: JSON.stringify({
+          phone: selectedPhone,
+          action: isClosing ? "close" : undefined,
+          status: newStatus,
+        }),
+      })
+
+      if (res?.ok && res.session) {
+        setConversations((prev) =>
+          prev.map((c) => (c.phone === selectedPhone ? { ...c, session: res.session } : c))
+        )
+        if (isClosing) {
+          toast.success("Conversación cerrada con éxito. El próximo pedido iniciará limpio.")
+        } else {
+          toast.success(`Conversación marcada como ${newStatus}`)
+        }
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Error al actualizar sesión de conversación")
+    }
+  }
+
   // Enviar campaña de promoción
   const handleSendBroadcast = async (onlyCurrentContact = true) => {
     if (!selectedTemplateId) {
@@ -1089,6 +1132,8 @@ export default function WhatsAppAgentView() {
     if (statusFilter === "telegram") return isTg
     if (statusFilter === "unread") return c.unreadCount > 0
     if (statusFilter === "with_orders") return c.latestOrder !== null
+    if (statusFilter === "abiertas") return (c.session?.status || "abierta") !== "cerrada"
+    if (statusFilter === "cerradas") return c.session?.status === "cerrada"
     return true
   })
 
@@ -1279,6 +1324,26 @@ export default function WhatsAppAgentView() {
                   Todos
                 </button>
                 <button
+                  onClick={() => setStatusFilter("abiertas")}
+                  className={cn(
+                    "px-1.5 py-0.5 rounded-md font-semibold transition-colors cursor-pointer flex items-center gap-1",
+                    statusFilter === "abiertas" ? "bg-emerald-600 text-white font-bold" : "text-zinc-500 hover:text-foreground"
+                  )}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                  Abiertas
+                </button>
+                <button
+                  onClick={() => setStatusFilter("cerradas")}
+                  className={cn(
+                    "px-1.5 py-0.5 rounded-md font-semibold transition-colors cursor-pointer flex items-center gap-1",
+                    statusFilter === "cerradas" ? "bg-zinc-700 text-white font-bold" : "text-zinc-500 hover:text-foreground"
+                  )}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+                  Cerradas
+                </button>
+                <button
                   onClick={() => setStatusFilter("whatsapp")}
                   className={cn(
                     "px-1.5 py-0.5 rounded-md font-semibold transition-colors cursor-pointer flex items-center gap-1",
@@ -1393,6 +1458,22 @@ export default function WhatsAppAgentView() {
                         </p>
 
                         <div className="flex items-center gap-1.5 pt-0.5 flex-wrap">
+                          {c.session?.status === "cerrada" ? (
+                            <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono text-zinc-500 border-zinc-300 dark:border-zinc-700 bg-zinc-100/70 dark:bg-zinc-800/60 gap-1">
+                              <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+                              Cerrada
+                            </Badge>
+                          ) : c.session?.status === "pendiente" ? (
+                            <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-800 bg-amber-500/10 gap-1">
+                              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                              Pendiente
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono text-emerald-600 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 bg-emerald-500/10 gap-1">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                              Abierta
+                            </Badge>
+                          )}
                           {isTg ? (
                             <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/30 gap-0.5">
                               <IconBrandTelegram className="h-2.5 w-2.5" /> Telegram
@@ -1472,10 +1553,71 @@ export default function WhatsAppAgentView() {
                             )}
                           </div>
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <p className="font-bold text-xs truncate text-zinc-950 dark:text-white">
                                 {displayName}
                               </p>
+
+                              {/* PILL DE ESTADO DE SESIÓN (ABIERTA / PENDIENTE / CERRADA) idéntico a la referencia */}
+                              {(() => {
+                                const currentStatus = selectedConv.session?.status || "abierta"
+                                return (
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <button
+                                        type="button"
+                                        className={cn(
+                                          "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border transition-all cursor-pointer shadow-2xs hover:opacity-90",
+                                          currentStatus === "pendiente"
+                                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-400/40 hover:bg-amber-500/20"
+                                            : currentStatus === "cerrada"
+                                            ? "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 border-zinc-400/40 hover:bg-zinc-500/20"
+                                            : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-400/40 hover:bg-emerald-500/20"
+                                        )}
+                                        title="Haz clic para cambiar el estado de la conversación"
+                                      >
+                                        <span
+                                          className={cn(
+                                            "h-2 w-2 rounded-full shrink-0 shadow-xs",
+                                            currentStatus === "pendiente"
+                                              ? "bg-amber-500"
+                                              : currentStatus === "cerrada"
+                                              ? "bg-zinc-400"
+                                              : "bg-emerald-500"
+                                          )}
+                                        />
+                                        <span className="capitalize">{currentStatus}</span>
+                                        <IconChevronRight className="h-3 w-3 opacity-60 ml-0.5" />
+                                      </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="start" className="w-52 text-xs rounded-xl shadow-lg">
+                                      <DropdownMenuItem
+                                        onClick={() => handleToggleSession("status", "abierta")}
+                                        className="cursor-pointer gap-2"
+                                      >
+                                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                        <span>🟢 Marcar como <strong>Abierta</strong></span>
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        onClick={() => handleToggleSession("status", "pendiente")}
+                                        className="cursor-pointer gap-2"
+                                      >
+                                        <span className="h-2 w-2 rounded-full bg-amber-500" />
+                                        <span>🟠 Marcar como <strong>Pendiente</strong></span>
+                                      </DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        onClick={() => handleToggleSession("close")}
+                                        className="cursor-pointer gap-2 text-rose-600 focus:text-rose-700"
+                                      >
+                                        <span className="h-2 w-2 rounded-full bg-zinc-400" />
+                                        <span>⚪ <strong>Cerrar Conversación</strong> (Iniciar ciclo nuevo)</span>
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                )
+                              })()}
+
                               {isTg ? (
                                 <Badge variant="outline" className="text-[9px] font-mono border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 gap-1">
                                   <IconBrandTelegram className="h-3 w-3 text-blue-500" /> Telegram ID: {selectedPhone.replace("tg_", "")}
@@ -1502,6 +1644,31 @@ export default function WhatsAppAgentView() {
 
                   {/* Acciones de cabecera */}
                   <div className="flex items-center gap-1.5 shrink-0">
+                    {/* Botón Cerrar / Reabrir estilo referencia exacta */}
+                    {selectedConv.session?.status === "cerrada" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleToggleSession("reopen")}
+                        className="h-7 text-xs font-semibold rounded-lg gap-1 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 bg-emerald-50/60 dark:bg-emerald-950/40 hover:bg-emerald-100 cursor-pointer shadow-2xs"
+                        title="Reabrir esta conversación para nuevo ciclo"
+                      >
+                        <IconRefresh className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                        Reabrir
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleToggleSession("close")}
+                        className="h-7 text-xs font-semibold rounded-lg gap-1.5 border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer shadow-2xs"
+                        title="Cerrar conversación: el bot no tomará productos de este pedido en la próxima charla"
+                      >
+                        <IconCircleCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                        Cerrar
+                      </Button>
+                    )}
+
                     <Button
                       size="sm"
                       variant="outline"
@@ -1732,6 +1899,23 @@ export default function WhatsAppAgentView() {
                   )}
                   <div ref={chatScrollRef} />
                 </div>
+
+                {/* Banner de sesión concluida / cerrada si aplica */}
+                {selectedConv.session?.status === "cerrada" && (
+                  <div className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800/80 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-[11px] text-zinc-500">
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+                      Conversación cerrada. El próximo mensaje del cliente abrirá un ciclo nuevo en limpio.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSession("reopen")}
+                      className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 cursor-pointer ml-2 shrink-0"
+                    >
+                      Reabrir ahora
+                    </button>
+                  </div>
+                )}
 
                 {/* Input de respuesta manual del agente */}
                 <div className="p-2.5 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0">

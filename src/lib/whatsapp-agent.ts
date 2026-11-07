@@ -1,5 +1,10 @@
 import { db, ensureMySqlTextColumns } from "@/lib/db"
 import { getDeliveryConfig, resolveDeliveryFee, formatDeliveryPromptContext } from "@/lib/delivery-config"
+import {
+  ensureActiveConversationSession,
+  closeConversationSession,
+  getConversationSession,
+} from "@/lib/conversation-session"
 
 export interface BotProcessResult {
   reply: string
@@ -85,6 +90,10 @@ export async function processWhatsAppMessage(params: {
     })
   }
 
+  // 0. Asegurar sesión activa de conversación (Estrategia Abrir / Cerrar Conversación)
+  // Si la conversación anterior fue concluida o cerrada, este nuevo mensaje abre una nueva sesión limpia
+  await ensureActiveConversationSession(cleanPhone)
+
   // Guardar mensaje entrante del cliente en el CRM
   try {
     await db.whatsAppMessage.create({
@@ -147,9 +156,19 @@ export async function processWhatsAppMessage(params: {
     const lowerText = text.toLowerCase()
     const cleanLowerText = lowerText.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
 
-    // Consultar el último mensaje del bot para reconstruir el estado de la conversación
+    const session = await getConversationSession(cleanPhone)
+    const sessionStart = session.status !== "cerrada" && session.openedAt
+      ? new Date(session.openedAt)
+      : new Date(Date.now() - 3 * 60 * 60 * 1000)
+
+    // Consultar el último mensaje del bot de la sesión activa para reconstruir el estado de la conversación
+    // (Solo de la sesión actual, NUNCA de pedidos pasados ya concluidos)
     const lastBotMsg = await db.whatsAppMessage.findFirst({
-      where: { phone: cleanPhone, sender: "bot" },
+      where: {
+        phone: cleanPhone,
+        sender: "bot",
+        createdAt: { gte: sessionStart },
+      },
       orderBy: { createdAt: "desc" },
     })
     const lastBotText = (lastBotMsg?.text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -262,6 +281,7 @@ export async function processWhatsAppMessage(params: {
         })
 
         createdOrderId = createdOrder.id
+        await closeConversationSession(cleanPhone, "order_created", createdOrder.orderNumber)
 
         const itemsSummary = itemsToCreate
           .map((it) => `• ${it.qty}x *${it.product.name}* ($${(it.qty * it.product.price).toLocaleString("es-CO")})`)
@@ -362,6 +382,18 @@ export async function processWhatsAppMessage(params: {
             reply: `¡Entendido! Por favor confírmanos a qué dirección y en qué barrio te lo enviamos para calcular el valor del domicilio y despacharte de inmediato.`,
             actionTaken: "ai_answered",
           }
+        }
+      }
+    }
+
+    // Regla 0.4: Despedida y cierre natural de la conversación (Estrategia Chatbot)
+    if (!result) {
+      const isFarewell = /^(gracias|muchas gracias|muchas gracias por todo|listo gracias|gracias hasta luego|hasta luego|chao|adios|feliz dia|que tengas buen dia|listo muchas gracias)$/i.test(cleanLowerText)
+      if (isFarewell) {
+        await closeConversationSession(cleanPhone, "farewell")
+        result = {
+          reply: `¡Con muchísimo gusto! Que tengas un excelente día. Quedamos a tu servicio siempre en ${branch?.name || "nuestra tienda"}. 👋`,
+          actionTaken: "ai_answered",
         }
       }
     }
@@ -693,12 +725,21 @@ async function processWithLLMAI(params: {
     ? "https://openrouter.ai/api/v1/chat/completions"
     : "https://api.deepseek.com/chat/completions"
 
-  // 1. Historial de conversación previo (excluyendo el mensaje entrante actual para evitar mensajes de usuario consecutivos duplicados)
+  // 1. Historial de conversación previo limitado a la sesión activa actual
+  // Esto GARANTIZA que nunca se tomen productos ni palabras de pedidos pasados ya concluidos
+  const session = await getConversationSession(cleanPhone)
+  const sessionStart = session.status !== "cerrada" && session.openedAt
+    ? new Date(session.openedAt)
+    : new Date(Date.now() - 3 * 60 * 60 * 1000)
+
   const recentMsgs = await db.whatsAppMessage.findMany({
-    where: { phone: cleanPhone },
+    where: {
+      phone: cleanPhone,
+      createdAt: { gte: sessionStart },
+    },
     orderBy: { createdAt: "desc" },
     skip: 1, // Salta el mensaje actual recién guardado
-    take: 8, // Últimos 8 mensajes previos para mantener el hilo y contexto del pedido
+    take: 8, // Últimos 8 mensajes de la sesión activa
     select: { sender: true, text: true },
   })
 
@@ -1217,6 +1258,9 @@ ${catalogContext}`
           : `💵 *Método de Pago:* Efectivo ($${total.toLocaleString("es-CO")} a cobrar contraentrega)`
 
         rawReply += `\n\n📦 *Pedido Generado:* #${createdOrder.orderNumber}\n🧾 *Subtotal Productos:* $${subtotal.toLocaleString("es-CO")}${feeLine}\n💵 *Total:* $${total.toLocaleString("es-CO")}\n${paymentSummary}\n📍 *Entrega:* ${finalAddress}`
+
+        // Cerrar la sesión de conversación para que futuras consultas arranquen desde cero sin arrastrar este pedido
+        await closeConversationSession(cleanPhone, "order_created", createdOrder.orderNumber)
       }
     } catch (parseErr) {
       console.warn(`[${providerName} Order Parse Error]`, parseErr)
