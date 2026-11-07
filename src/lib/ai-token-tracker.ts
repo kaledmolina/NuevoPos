@@ -35,8 +35,13 @@ export function calculateTokenCost(
 ): { costUsd: number; isFree: boolean } {
   const m = (model || "").toLowerCase().trim()
 
-  // 1. Modelos 100% gratuitos (OpenRouter Free Router o variantes :free)
-  if (m === "openrouter/free" || m.includes(":free")) {
+  // 1. Modelos 100% gratuitos (OpenRouter Free Router o variantes :free o que contengan "free")
+  if (
+    m === "openrouter/free" ||
+    m.includes("openrouter/free") ||
+    m.includes(":free") ||
+    m.includes("free")
+  ) {
     return { costUsd: 0, isFree: true }
   }
 
@@ -104,13 +109,16 @@ export async function recordClientAiUsage(params: {
   promptTokens?: number
   completionTokens?: number
   totalTokens?: number
+  isFree?: boolean
 }): Promise<ClientAiUsage> {
   const { phone, clientId, clientName, model } = params
   const promptTokens = Math.max(0, Number(params.promptTokens) || 0)
   const completionTokens = Math.max(0, Number(params.completionTokens) || 0)
   const totalTokens = Math.max(0, Number(params.totalTokens) || promptTokens + completionTokens)
 
-  const { costUsd, isFree } = calculateTokenCost(model, promptTokens, completionTokens)
+  const costCalc = calculateTokenCost(model, promptTokens, completionTokens)
+  const isFree = params.isFree !== undefined ? params.isFree : costCalc.isFree
+  const costUsd = isFree ? 0 : costCalc.costUsd
   const settingKey = `ai_usage:${phone}`
 
   let currentUsage: ClientAiUsage = {
@@ -150,6 +158,7 @@ export async function recordClientAiUsage(params: {
   }
 
   // Acumular
+  const effectiveCostUsd = isFree ? 0 : costUsd
   const updatedUsage: ClientAiUsage = {
     phone,
     clientId: clientId || currentUsage.clientId || null,
@@ -158,8 +167,10 @@ export async function recordClientAiUsage(params: {
     promptTokens: currentUsage.promptTokens + promptTokens,
     completionTokens: currentUsage.completionTokens + completionTokens,
     totalReplies: currentUsage.totalReplies + 1,
-    estimatedCostUsd: Number((currentUsage.estimatedCostUsd + costUsd).toFixed(6)),
-    isFreePlan: currentUsage.totalReplies === 0 ? isFree : (currentUsage.isFreePlan && isFree),
+    estimatedCostUsd: isFree && (currentUsage.isFreePlan || currentUsage.totalReplies === 0)
+      ? 0
+      : Number((currentUsage.estimatedCostUsd + effectiveCostUsd).toFixed(6)),
+    isFreePlan: isFree,
     lastModelUsed: model,
     lastUsedAt: new Date().toISOString(),
     history: [
@@ -169,7 +180,7 @@ export async function recordClientAiUsage(params: {
         promptTokens,
         completionTokens,
         totalTokens,
-        costUsd,
+        costUsd: effectiveCostUsd,
         isFree,
       },
       ...(currentUsage.history || []).slice(0, 9), // conservar últimas 10 interacciones
@@ -198,7 +209,15 @@ export async function getClientAiUsage(phone: string): Promise<ClientAiUsage | n
       where: { key: `ai_usage:${phone}` },
     })
     if (!record?.value) return null
-    return JSON.parse(record.value) as ClientAiUsage
+    const parsed = JSON.parse(record.value) as ClientAiUsage
+    if (
+      parsed.isFreePlan ||
+      (parsed.lastModelUsed && parsed.lastModelUsed.toLowerCase().includes("free"))
+    ) {
+      parsed.estimatedCostUsd = 0
+      parsed.isFreePlan = true
+    }
+    return parsed
   } catch {
     return null
   }
@@ -235,11 +254,20 @@ export async function getAllClientsAiUsage(): Promise<{
     for (const r of records) {
       try {
         const parsed = JSON.parse(r.value) as ClientAiUsage
+        const isFree = Boolean(
+          parsed.isFreePlan ||
+          (parsed.lastModelUsed && parsed.lastModelUsed.toLowerCase().includes("free"))
+        )
+        if (isFree) {
+          parsed.estimatedCostUsd = 0
+          parsed.isFreePlan = true
+        }
+
         clients.push(parsed)
         totalTokens += parsed.totalTokens || 0
         promptTokens += parsed.promptTokens || 0
         completionTokens += parsed.completionTokens || 0
-        totalCostUsd += parsed.estimatedCostUsd || 0
+        totalCostUsd += isFree ? 0 : (parsed.estimatedCostUsd || 0)
         totalReplies += parsed.totalReplies || 0
 
         const freeReplies = (parsed.history || []).filter((h) => h.isFree).length

@@ -1,6 +1,6 @@
 import { db } from "@/lib/db"
 export * from "./returns-types"
-import type { ReturnItemInput, ReturnReason, RefundMethod, SaleReturn } from "./returns-types"
+import { RETURN_REASONS_LABELS, type ReturnItemInput, type ReturnReason, type RefundMethod, type SaleReturn } from "./returns-types"
 
 /**
  * Genera el siguiente número consecutivo único para devoluciones: DEV-YYMM-0001

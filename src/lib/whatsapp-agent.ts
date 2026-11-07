@@ -145,9 +145,28 @@ export async function processWhatsAppMessage(params: {
   // 4. INTENTO 2: Motor Local (Fallback y Reglas Deterministas)
   if (!result) {
     const lowerText = text.toLowerCase()
+    const cleanLowerText = lowerText.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
+    const isAffirmative = /^(si|claro|dale|ok|listo|correcto|a esa|a esa misma|a mi direccion|por favor|confirmo|si por favor)$/i.test(cleanLowerText)
+
+    // Regla 0: Confirmación afirmativa en conversación en curso (ej. cliente responde "Si" a la pregunta de dirección)
+    if (isAffirmative) {
+      if (client.address) {
+        const deliveryConfig = await getDeliveryConfig(resolvedBranchId || undefined)
+        const feeRes = resolveDeliveryFee(`${client.address} ${cleanLowerText}`, deliveryConfig)
+        result = {
+          reply: `¡Perfecto! Te lo enviamos a tu dirección registrada (*${client.address}*).\n🛵 *Envío:* $${feeRes.fee.toLocaleString("es-CO")} (${feeRes.appliedRule})\n\n¿Prefieres cancelar en *efectivo* contraentrega o por *transferencia* previa?`,
+          actionTaken: "ai_answered",
+        }
+      } else {
+        result = {
+          reply: `¡Entendido! Por favor confírmanos a qué dirección y en qué barrio te lo enviamos para calcular el valor del domicilio y despacharte de inmediato.`,
+          actionTaken: "ai_answered",
+        }
+      }
+    }
 
     // Regla 1: Consulta de saldo / fiado
-    if (
+    else if (
       lowerText.includes("debo") ||
       lowerText.includes("saldo") ||
       lowerText.includes("cuenta") ||
@@ -321,16 +340,22 @@ export async function processWhatsAppMessage(params: {
       }
     }
 
-    // Regla 3: Consulta de catálogo en esta sede
+    // Regla 4: Consulta de catálogo en esta sede (búsqueda robusta insensible a tildes)
     if (!result) {
       const allProds = await db.product.findMany({
         where: { active: true, ...branchFilter },
         select: { name: true, price: true, stock: true, unit: true },
       })
 
+      const clientKeywords = cleanLowerText.split(/\s+/).filter((w) => w.length >= 3)
       const matchedProds = allProds.filter((p) => {
-        const pWords = p.name.toLowerCase().split(" ").filter((w) => w.length > 2)
-        return pWords.some((w) => lowerText.includes(w))
+        const normName = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        if (cleanLowerText.includes(normName) || normName.includes(cleanLowerText)) return true
+        const pWords = normName.split(/\s+/).filter((w) => w.length >= 3)
+        return (
+          clientKeywords.some((k) => normName.includes(k)) ||
+          pWords.some((w) => cleanLowerText.includes(w))
+        )
       })
 
       if (matchedProds.length > 0) {
@@ -458,6 +483,9 @@ async function processWithLLMAI(params: {
   let model = isOpener
     ? (config.openrouterModel || "openrouter/free").trim()
     : (config.deepseekModel || "deepseek-chat").trim()
+  if (isOpener && model.endsWith(":free") && model !== "openrouter/free") {
+    model = "openrouter/free"
+  }
   let endpoint = isOpener
     ? "https://openrouter.ai/api/v1/chat/completions"
     : "https://api.deepseek.com/chat/completions"
@@ -479,6 +507,20 @@ async function processWithLLMAI(params: {
     .filter((w) => w.length >= 2)
 
   const specificKeywords = messageWords.filter((w) => !GENERAL_QUERY_WORDS.has(w) && w.length > 2)
+  const expandedKeywords = new Set<string>()
+  for (const w of specificKeywords) {
+    expandedKeywords.add(w)
+    const norm = w.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    if (norm) {
+      expandedKeywords.add(norm)
+      expandedKeywords.add(norm.replace(/o/g, "ó"))
+      expandedKeywords.add(norm.replace(/a/g, "á"))
+      expandedKeywords.add(norm.replace(/e/g, "é"))
+      expandedKeywords.add(norm.replace(/i/g, "í"))
+      expandedKeywords.add(norm.replace(/u/g, "ú"))
+    }
+  }
+  const searchKeywords = Array.from(expandedKeywords).filter((k) => k.length >= 3)
 
   // Siempre obtener los productos destacados / disponibles de esta sede (máximo 8 para ahorrar tokens)
   const defaultBranchProducts = await db.product.findMany({
@@ -492,14 +534,14 @@ async function processWithLLMAI(params: {
     take: 8,
   })
 
-  // Si el usuario mencionó palabras específicas (ej. alcohol, ibuprofeno, acetaminofen), buscarlas
+  // Si el usuario mencionó palabras específicas (ej. alcohol, ibuprofeno, jabon/jabón), buscarlas
   let matchedProducts: typeof defaultBranchProducts = []
-  if (specificKeywords.length > 0) {
+  if (searchKeywords.length > 0) {
     matchedProducts = await db.product.findMany({
       where: {
         active: true,
         ...branchFilter,
-        OR: specificKeywords.map((k) => ({
+        OR: searchKeywords.map((k) => ({
           name: { contains: k },
         })),
       },
@@ -565,17 +607,18 @@ async function processWithLLMAI(params: {
 - Dirección de entrega: ${activeOrder.deliveryAddress || "N/A"}${driverText}`
   }
 
-  // 2. Historial condensado: Últimos 4 mensajes (ahorro de tokens)
+  // 2. Historial de conversación previo (excluyendo el mensaje entrante actual para evitar mensajes de usuario consecutivos duplicados)
   const recentMsgs = await db.whatsAppMessage.findMany({
     where: { phone: cleanPhone },
     orderBy: { createdAt: "desc" },
-    take: 4,
+    skip: 1, // Salta el mensaje actual recién guardado
+    take: 8, // Últimos 8 mensajes previos para mantener el hilo y contexto del pedido
     select: { sender: true, text: true },
   })
 
   const conversationHistory = recentMsgs.reverse().map((m) => ({
     role: m.sender === "customer" ? "user" : "assistant",
-    content: m.text.slice(0, 200), // Máximo 200 caracteres por mensaje para ahorrar tokens
+    content: m.text.slice(0, 300), // Ahorro de tokens
   }))
 
   // 2.1 Cargar configuración oficial de tarifas de domicilio para esta sede
@@ -600,6 +643,13 @@ ${deliveryPromptContext}
     TÚ debes preguntarle directamente: "¿A qué dirección te lo enviamos y en qué barrio te encuentras?".
   * Si el cliente ya tiene dirección registrada (${client.address ? `"${client.address}"` : "ninguna"}):
     Pregúntale: "¿Te lo enviamos a tu dirección registrada ${client.address || "..."} o a otra dirección? Por favor confírmanos también en qué barrio te encuentras".
+
+- CONFIRMACIÓN DIRECTA DE DIRECCIÓN Y PEDIDO:
+  * Si tú preguntaste "¿Te lo enviamos a tu dirección registrada [Dirección]...?" y el cliente responde afirmativamente ("sí", "si", "a esa", "correcto", "a esa misma", "a mi dirección", "dale", "ok", "por favor"):
+    -> SIGNIFICA QUE CONFIRMA SU DIRECCIÓN REGISTRADA (${client.address || "..."}). NUNCA repitas el saludo de bienvenida.
+    -> Inmediatamente toma el barrio de su dirección registrada (${client.address || "..."}) y aplica la tarifa correspondiente de ese barrio (si el barrio no está en la tabla de tarifas guardadas, aplica la tarifa global obligatoria de $${deliveryConfig.globalFee.toLocaleString("es-CO")}).
+    -> Responde confirmando los productos y el total con envío:
+       "¡Perfecto! Te lo enviamos a ${client.address || "tu dirección registrada"}. Tus productos suman $[Subtotal] + envío ($[Tarifa]) = Total a pagar: $[Total]. ¿Cómo prefieres cancelar: en efectivo contraentrega o por transferencia?".
 
 - EL AGENTE ES QUIEN DEFINE Y VALIDA LA TARIFA (NUNCA EL CLIENTE):
   * TÚ analizas lo que respondió el cliente y verificas si el barrio coincide con la tabla de tarifas guardadas:
@@ -630,8 +680,8 @@ ${orderTrackingContext}
 CATÁLOGO DE ESTA SEDE (${branchName}):
 ${catalogContext}`
 
-  // 4. Invocación a la API oficial (OpenRouter o DeepSeek) con timeout estricto de 8.5s y failover automático
-  const maxTokens = config.maxTokensPerReply || 250
+  // 4. Invocación a la API oficial (OpenRouter o DeepSeek) con timeout de 20s y failover automático
+  const maxTokens = Math.max(config.maxTokensPerReply || 450, 450)
 
   async function sendAiRequest(
     currEndpoint: string,
@@ -641,7 +691,7 @@ ${catalogContext}`
     currProvider: string
   ) {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 8500) // 8.5 segundos máximo
+    const timer = setTimeout(() => controller.abort(), 20000) // 20 segundos máximo para modelos OpenRouter Free
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${currKey}`,
@@ -761,6 +811,14 @@ ${catalogContext}`
   }
 
   let rawReply = aiData?.choices?.[0]?.message?.content || ""
+  if (!rawReply || !rawReply.trim()) {
+    const reasoning = aiData?.choices?.[0]?.message?.reasoning_content
+    if (reasoning && typeof reasoning === "string" && reasoning.trim()) {
+      rawReply = reasoning.trim()
+    }
+  }
+
+  const isModelFree = isOpener && (actualModel === "openrouter/free" || actualModel.includes("free"))
   const tokensUsed = aiData?.usage?.total_tokens || 0
   const promptTokens = aiData?.usage?.prompt_tokens || 0
   const completionTokens = aiData?.usage?.completion_tokens || 0
@@ -777,6 +835,7 @@ ${catalogContext}`
       promptTokens,
       completionTokens,
       totalTokens: tokensUsed,
+      isFree: isModelFree,
     })
   } catch (trackErr: any) {
     console.warn("[AI Token Tracker Warning]:", trackErr.message)
@@ -791,6 +850,11 @@ ${catalogContext}`
 
   // Limpiar SIEMPRE el tag técnico de la respuesta que ve el cliente en WhatsApp
   rawReply = rawReply.replace(/\[ORDEN_AUTO:\s*\{[\s\S]*\}\s*\]/g, "").trim()
+
+  // Si la respuesta quedó vacía, lanzar error para activar el motor local determinista
+  if (!rawReply || !rawReply.trim()) {
+    throw new Error("AI returned empty content after processing")
+  }
 
   // Evitar creación prematura si el bot todavía le está preguntando al cliente si confirma su dirección o método de pago
   const isAskingConfirmation =

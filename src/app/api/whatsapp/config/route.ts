@@ -134,7 +134,9 @@ export async function POST(req: NextRequest) {
       telegramEnabled: Boolean(telegramEnabled),
       aiProvider: aiProvider || "deepseek",
       deepseekModel: deepseekModel || "deepseek-chat",
-      openrouterModel: openrouterModel || "deepseek/deepseek-chat",
+      openrouterModel: (openrouterModel && String(openrouterModel).endsWith(":free") && openrouterModel !== "openrouter/free")
+        ? "openrouter/free"
+        : (openrouterModel || "openrouter/free"),
       aiEnabled: Boolean(aiEnabled),
       aiSystemPrompt: aiSystemPrompt ?? null,
       welcomeMessage: welcomeMessage ?? null,

@@ -155,14 +155,14 @@ interface Template {
 }
 
 export const CURATED_OPENROUTER_MODELS = [
-  // --- MODELOS GRATUITOS (0 COSTO / AHORRO DE TOKENS) ---
-  { id: "openrouter/free", name: "OpenRouter Free Models Router", provider: "OpenRouter", badge: "🎁 100% Gratis (Auto Router)", isFree: true },
-  { id: "deepseek/deepseek-r1:free", name: "DeepSeek R1 (Gratis)", provider: "DeepSeek", badge: "🧠 Razonamiento / Gratis", isFree: true },
-  { id: "deepseek/deepseek-chat:free", name: "DeepSeek V3 (Gratis)", provider: "DeepSeek", badge: "⚡ Rápido / Gratis", isFree: true },
-  { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Meta Llama 3.3 70B (Gratis)", provider: "Meta", badge: "✨ Potente 70B / Gratis", isFree: true },
-  { id: "google/gemini-2.0-flash-exp:free", name: "Google Gemini 2.0 Flash (Gratis)", provider: "Google", badge: "🚀 Ultra Veloz / Gratis", isFree: true },
-  { id: "qwen/qwen-2.5-72b-instruct:free", name: "Qwen 2.5 72B (Gratis)", provider: "Alibaba", badge: "📊 Preciso / Gratis", isFree: true },
-  { id: "meta-llama/llama-3.2-3b-instruct:free", name: "Meta Llama 3.2 3B (Gratis)", provider: "Meta", badge: "🍃 Liviano / Gratis", isFree: true },
+  // --- MODELO GRATUITO OFICIAL (ROUTER AUTOMÁTICO DE MODELOS FREE DE OPENROUTER) ---
+  {
+    id: "openrouter/free",
+    name: "OpenRouter Free Models Router",
+    provider: "OpenRouter",
+    badge: "🎁 100% Gratis ($0) • Auto-Ruta",
+    isFree: true,
+  },
 
   // --- MODELOS ESTÁNDAR / PAGO ---
   { id: "deepseek/deepseek-chat", name: "DeepSeek V3 (Chat Pago)", provider: "DeepSeek", badge: "🔥 Muy Económico", isFree: false },
@@ -447,7 +447,10 @@ export default function WhatsAppAgentView() {
       setLoadingConfig(true)
       const res = await apiFetch<{ ok: boolean; config: BranchConfig }>(`/api/whatsapp/config?branchId=${encodeURIComponent(bId)}`)
       if (res && res.config) {
-        const loadedModel = res.config.openrouterModel || "deepseek/deepseek-chat"
+        let loadedModel = res.config.openrouterModel || "openrouter/free"
+        if (loadedModel.endsWith(":free") && loadedModel !== "openrouter/free") {
+          loadedModel = "openrouter/free"
+        }
         const isPreset = CURATED_OPENROUTER_MODELS.some((m) => m.id === loadedModel)
         setIsCustomModel(!isPreset && !!loadedModel)
         if (!isPreset && loadedModel) {
@@ -2182,13 +2185,17 @@ export default function WhatsAppAgentView() {
                           <div className="p-2 rounded-lg bg-white dark:bg-zinc-900 border border-purple-500/10">
                             <span className="text-[9px] text-muted-foreground block">Gasto Estimado IA</span>
                             <span className="font-mono font-black text-sm text-foreground block">
-                              {selectedConv.aiUsage.isFreePlan
-                                ? "$0.00 USD"
+                              {selectedConv.aiUsage.isFreePlan ||
+                              (config.aiProvider === "openrouter" && (config.openrouterModel === "openrouter/free" || config.openrouterModel?.includes("free"))) ||
+                              (selectedConv.aiUsage.lastModelUsed && selectedConv.aiUsage.lastModelUsed.toLowerCase().includes("free"))
+                                ? "$0 COP (Gratis)"
                                 : `$${Number(selectedConv.aiUsage.estimatedCostUsd).toFixed(4)} USD`}
                             </span>
                             <span className="text-[9px] text-zinc-500 block">
-                              {selectedConv.aiUsage.isFreePlan
-                                ? "100% Ahorro de Tokens"
+                              {selectedConv.aiUsage.isFreePlan ||
+                              (config.aiProvider === "openrouter" && (config.openrouterModel === "openrouter/free" || config.openrouterModel?.includes("free"))) ||
+                              (selectedConv.aiUsage.lastModelUsed && selectedConv.aiUsage.lastModelUsed.toLowerCase().includes("free"))
+                                ? "🎁 Plan Gratuito ($0 facturados)"
                                 : `~$${Math.round((selectedConv.aiUsage.estimatedCostUsd || 0) * 4200).toLocaleString("es-CO")} COP`}
                             </span>
                           </div>
@@ -3817,13 +3824,13 @@ export default function WhatsAppAgentView() {
                         <div className="flex items-center gap-2 shrink-0">
                           <div className="text-right">
                             <span className="font-mono font-bold text-xs text-foreground block">
-                              {item.isFreePlan
-                                ? "$0.00 USD"
+                              {item.isFreePlan || (item.lastModelUsed && item.lastModelUsed.toLowerCase().includes("free"))
+                                ? "$0 COP (Gratis)"
                                 : `$${Number(item.estimatedCostUsd).toFixed(4)} USD`}
                             </span>
                             <span className="text-[9px] text-muted-foreground block font-mono">
-                              {item.isFreePlan
-                                ? "Plan Free ($0)"
+                              {item.isFreePlan || (item.lastModelUsed && item.lastModelUsed.toLowerCase().includes("free"))
+                                ? "Plan Gratuito ($0)"
                                 : `~$${Math.round((item.estimatedCostUsd || 0) * 4200).toLocaleString("es-CO")} COP`}
                             </span>
                           </div>
