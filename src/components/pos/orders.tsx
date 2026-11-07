@@ -189,6 +189,33 @@ const STATUS_CONFIG: Record<
   },
 }
 
+export const PAYMENT_STATUS_CONFIG: Record<
+  string,
+  { label: string; badgeClass: string; icon: string }
+> = {
+  pagado: {
+    label: "Pagado",
+    badgeClass: "bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/30",
+    icon: "💰",
+  },
+  pendiente: {
+    label: "Pendiente de Pago",
+    badgeClass: "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30",
+    icon: "⏳",
+  },
+}
+
+export const PAYMENT_METHOD_CONFIG: Record<
+  string,
+  { label: string; icon: string; short: string }
+> = {
+  efectivo: { label: "Efectivo", icon: "💵", short: "Efectivo" },
+  contraentrega: { label: "Efectivo Contraentrega", icon: "💵", short: "Contraentrega" },
+  transferencia: { label: "Transferencia (Nequi/Banco)", icon: "📲", short: "Transf." },
+  tarjeta: { label: "Tarjeta Débito/Crédito", icon: "💳", short: "Tarjeta" },
+  credito: { label: "Fiado / Crédito", icon: "📝", short: "Fiado" },
+}
+
 export default function OrdersView() {
   const { role, userName } = useAppStore()
 
@@ -196,6 +223,8 @@ export default function OrdersView() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("all")
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>("all")
   const [driverFilter, setDriverFilter] = useState<string>("all")
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards")
 
@@ -403,10 +432,29 @@ export default function OrdersView() {
     fetchDeliverySettings()
   }, [fetchOrders, fetchStaff, fetchProducts, fetchDeliverySettings])
 
-  // Filtrado
+  // Filtrado multidimensional
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
+      // 1. Filtro por Estado de Envío (Logística)
       if (statusFilter !== "all" && o.status !== statusFilter) return false
+
+      // 2. Filtro por Estado de Pago
+      if (paymentStatusFilter !== "all") {
+        const isPaid = o.paymentStatus === "pagado"
+        if (paymentStatusFilter === "pagado" && !isPaid) return false
+        if (paymentStatusFilter === "pendiente" && isPaid) return false
+      }
+
+      // 3. Filtro por Medio de Pago
+      if (paymentMethodFilter !== "all") {
+        const m = (o.paymentMethod || "").toLowerCase()
+        if (paymentMethodFilter === "efectivo" && !m.includes("efectivo") && !m.includes("contra")) return false
+        if (paymentMethodFilter === "transferencia" && !m.includes("transf") && !m.includes("nequi") && !m.includes("davi")) return false
+        if (paymentMethodFilter === "tarjeta" && !m.includes("tarjeta")) return false
+        if (paymentMethodFilter === "credito" && !m.includes("credito") && !m.includes("fiado")) return false
+      }
+
+      // 4. Filtro por Conductor
       if (driverFilter === "unassigned" && o.deliveryDriverId) return false
       if (driverFilter === "assigned" && !o.deliveryDriverId && !o.deliveryDriverName) return false
       if (
@@ -419,6 +467,7 @@ export default function OrdersView() {
         return false
       }
 
+      // 5. Búsqueda por texto
       if (search.trim()) {
         const q = search.toLowerCase()
         const matchNumber = o.orderNumber.toLowerCase().includes(q)
@@ -431,9 +480,9 @@ export default function OrdersView() {
 
       return true
     })
-  }, [orders, statusFilter, driverFilter, search])
+  }, [orders, statusFilter, paymentStatusFilter, paymentMethodFilter, driverFilter, search])
 
-  // Métricas
+  // Métricas completas
   const metrics = useMemo(() => {
     const total = orders.length
     const pending = orders.filter((o) => o.status === "pendiente").length
@@ -442,7 +491,13 @@ export default function OrdersView() {
     const delivered = orders.filter((o) => o.status === "entregado").length
     const unassigned = orders.filter((o) => !o.deliveryDriverName && o.status !== "cancelado" && o.status !== "entregado").length
 
-    return { total, pending, inPrep, inTransit, delivered, unassigned }
+    const countPaid = orders.filter((o) => o.paymentStatus === "pagado").length
+    const countPendingPayment = orders.filter((o) => o.paymentStatus !== "pagado" && o.status !== "cancelado").length
+    const totalPendingMoney = orders
+      .filter((o) => o.paymentStatus !== "pagado" && o.status !== "cancelado")
+      .reduce((acc, o) => acc + (o.total || 0), 0)
+
+    return { total, pending, inPrep, inTransit, delivered, unassigned, countPaid, countPendingPayment, totalPendingMoney }
   }, [orders])
 
   const dedicatedDrivers = useMemo(() => staffDrivers.filter((s) => s.role === "domiciliario"), [staffDrivers])
@@ -614,6 +669,24 @@ export default function OrdersView() {
     } catch (e) {
       console.error(e)
       toast.error((e as Error).message || "Error al actualizar estado de pago")
+    }
+  }
+
+  // Actualizar medio de pago (efectivo, transferencia, tarjeta, credito)
+  const handleUpdatePaymentMethod = async (orderId: string, paymentMethod: string) => {
+    try {
+      await apiFetch(`/api/v1/orders/${orderId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ paymentMethod }),
+      })
+      toast.success(`Medio de pago actualizado a: ${PAYMENT_METHOD_CONFIG[paymentMethod]?.label || paymentMethod}`)
+      fetchOrders()
+      if (detailOrder && detailOrder.id === orderId) {
+        setDetailOrder({ ...detailOrder, paymentMethod })
+      }
+    } catch (e) {
+      console.error(e)
+      toast.error((e as Error).message || "Error al actualizar medio de pago")
     }
   }
 
@@ -812,12 +885,16 @@ export default function OrdersView() {
       </div>
 
       {/* Tarjetas KPI / Métricas Rápidas */}
-      <div data-tour="orders-kpi-grid" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div data-tour="orders-kpi-grid" className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
         <Card
-          onClick={() => setStatusFilter("all")}
+          onClick={() => {
+            setStatusFilter("all")
+            setPaymentStatusFilter("all")
+            setDriverFilter("all")
+          }}
           className={cn(
             "rounded-2xl border transition-all cursor-pointer shadow-xs p-3 hover:border-zinc-950 dark:hover:border-white",
-            statusFilter === "all" && "ring-2 ring-zinc-950/30 dark:ring-white/30 bg-zinc-100 dark:bg-zinc-800"
+            statusFilter === "all" && paymentStatusFilter === "all" && driverFilter === "all" && "ring-2 ring-zinc-950/30 dark:ring-white/30 bg-zinc-100 dark:bg-zinc-800"
           )}
         >
           <div className="text-[11px] font-semibold text-muted-foreground">Total Pedidos</div>
@@ -845,6 +922,7 @@ export default function OrdersView() {
         <Card
           onClick={() => {
             setStatusFilter("pendiente")
+            setPaymentStatusFilter("all")
             setDriverFilter("all")
           }}
           className={cn(
@@ -859,6 +937,7 @@ export default function OrdersView() {
         <Card
           onClick={() => {
             setStatusFilter("en_preparacion")
+            setPaymentStatusFilter("all")
             setDriverFilter("all")
           }}
           className={cn(
@@ -873,6 +952,7 @@ export default function OrdersView() {
         <Card
           onClick={() => {
             setStatusFilter("en_camino")
+            setPaymentStatusFilter("all")
             setDriverFilter("all")
           }}
           className={cn(
@@ -891,6 +971,7 @@ export default function OrdersView() {
         <Card
           onClick={() => {
             setStatusFilter("entregado")
+            setPaymentStatusFilter("all")
             setDriverFilter("all")
           }}
           className={cn(
@@ -903,16 +984,52 @@ export default function OrdersView() {
             {metrics.delivered}
           </div>
         </Card>
+
+        {/* Métrica de Estado de Pago: Por Cobrar */}
+        <Card
+          onClick={() => {
+            setPaymentStatusFilter(paymentStatusFilter === "pendiente" ? "all" : "pendiente")
+          }}
+          className={cn(
+            "rounded-2xl border transition-all cursor-pointer shadow-xs p-3 hover:border-amber-500 bg-amber-500/5 dark:bg-amber-500/10",
+            paymentStatusFilter === "pendiente" && "ring-2 ring-amber-500 bg-amber-500/20"
+          )}
+        >
+          <div className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1 truncate">
+            ⏳ Por Cobrar ({metrics.countPendingPayment})
+          </div>
+          <div className="text-base sm:text-lg font-bold text-amber-800 dark:text-amber-300 mt-1 truncate">
+            {formatCurrency(metrics.totalPendingMoney)}
+          </div>
+        </Card>
+
+        {/* Métrica de Estado de Pago: Pagados */}
+        <Card
+          onClick={() => {
+            setPaymentStatusFilter(paymentStatusFilter === "pagado" ? "all" : "pagado")
+          }}
+          className={cn(
+            "rounded-2xl border transition-all cursor-pointer shadow-xs p-3 hover:border-emerald-500 bg-emerald-500/5 dark:bg-emerald-500/10",
+            paymentStatusFilter === "pagado" && "ring-2 ring-emerald-500 bg-emerald-500/20"
+          )}
+        >
+          <div className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+            💰 Pagados
+          </div>
+          <div className="text-xl sm:text-2xl font-bold text-emerald-800 dark:text-emerald-300 mt-1">
+            {metrics.countPaid}
+          </div>
+        </Card>
       </div>
 
-      {/* Barra de Búsqueda y Filtros */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-card p-3 rounded-2xl border shadow-2xs">
+      {/* Barra de Búsqueda y Filtros Detallados (Envío, Pago, Medio) */}
+      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5 bg-card p-3 rounded-2xl border shadow-2xs">
         <div className="relative flex-1">
           <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por # pedido, cliente, dirección o conductor..."
+            placeholder="Buscar por # orden, cliente, dirección o conductor..."
             className="pl-9 h-9 text-xs rounded-xl border-border bg-background"
           />
           {search && (
@@ -925,30 +1042,56 @@ export default function OrdersView() {
           )}
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Filtro de Estado */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {/* 1. Filtro de Estado de Envío (Logística) */}
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-9 text-xs rounded-xl w-[140px] sm:w-[160px]">
-              <SelectValue placeholder="Estado" />
+            <SelectTrigger className="h-9 text-xs rounded-xl w-[130px] sm:w-[145px]" title="Filtrar por Estado de Envío">
+              <SelectValue placeholder="Estado Envío" />
             </SelectTrigger>
             <SelectContent className="rounded-xl text-xs">
-              <SelectItem value="all">Todos los estados</SelectItem>
-              <SelectItem value="pendiente">Pendientes</SelectItem>
-              <SelectItem value="confirmado">Confirmados</SelectItem>
-              <SelectItem value="en_preparacion">En Preparación</SelectItem>
-              <SelectItem value="en_camino">En Camino</SelectItem>
-              <SelectItem value="entregado">Entregados</SelectItem>
-              <SelectItem value="cancelado">Cancelados</SelectItem>
+              <SelectItem value="all">📦 Todos los envíos</SelectItem>
+              <SelectItem value="pendiente">🟡 Pendientes</SelectItem>
+              <SelectItem value="confirmado">🟢 Confirmados</SelectItem>
+              <SelectItem value="en_preparacion">🔵 En Preparación</SelectItem>
+              <SelectItem value="en_camino">🟣 En Camino</SelectItem>
+              <SelectItem value="entregado">✅ Entregados</SelectItem>
+              <SelectItem value="cancelado">🔴 Cancelados</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* 2. Filtro de Estado de Pago */}
+          <Select value={paymentStatusFilter} onValueChange={setPaymentStatusFilter}>
+            <SelectTrigger className="h-9 text-xs rounded-xl w-[125px] sm:w-[140px]" title="Filtrar por Estado de Pago">
+              <SelectValue placeholder="Estado Pago" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl text-xs">
+              <SelectItem value="all">💳 Todos los pagos</SelectItem>
+              <SelectItem value="pagado">✅ Solo Pagados</SelectItem>
+              <SelectItem value="pendiente">⏳ Por Cobrar</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* 3. Filtro de Medio de Pago */}
+          <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+            <SelectTrigger className="h-9 text-xs rounded-xl w-[125px] sm:w-[145px]" title="Filtrar por Medio de Pago">
+              <SelectValue placeholder="Medio Pago" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl text-xs">
+              <SelectItem value="all">🏦 Todos los medios</SelectItem>
+              <SelectItem value="efectivo">💵 Efectivo</SelectItem>
+              <SelectItem value="transferencia">📲 Transferencia</SelectItem>
+              <SelectItem value="tarjeta">💳 Tarjeta</SelectItem>
+              <SelectItem value="credito">📝 Fiado / Crédito</SelectItem>
             </SelectContent>
           </Select>
 
           {/* Filtro de Conductor */}
           <Select value={driverFilter} onValueChange={setDriverFilter}>
-            <SelectTrigger className="h-9 text-xs rounded-xl w-[140px] sm:w-[170px]">
+            <SelectTrigger className="h-9 text-xs rounded-xl w-[125px] sm:w-[150px]">
               <SelectValue placeholder="Conductor" />
             </SelectTrigger>
             <SelectContent className="rounded-xl text-xs">
-              <SelectItem value="all">Todos los conductores</SelectItem>
+              <SelectItem value="all">🛵 Todos los conductores</SelectItem>
               <SelectItem value="unassigned">⚠️ Sin Asignar</SelectItem>
               <SelectItem value="assigned">✅ Con Conductor</SelectItem>
               {staffDrivers.map((d) => (
@@ -1111,9 +1254,9 @@ export default function OrdersView() {
                     </div>
 
                     {/* Cuerpo de la tarjeta */}
-                    <CardContent className="p-4 space-y-3.5 flex-1 flex flex-col justify-between">
+                    <CardContent className="p-4 space-y-3 flex-1 flex flex-col justify-between">
                       {/* Datos del Cliente y Destino */}
-                      <div className="space-y-2">
+                      <div className="space-y-2.5">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <p className="text-xs font-bold text-foreground truncate flex items-center gap-1">
@@ -1133,34 +1276,79 @@ export default function OrdersView() {
                           </div>
 
                           <div className="text-right shrink-0">
-                            <span className="text-xs font-mono font-bold text-foreground block">
+                            <span className="text-xs font-mono font-black text-foreground block">
                               {formatCurrency(order.total)}
                             </span>
-                            {order.paymentStatus === "pagado" ? (
-                              <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded mt-0.5">
-                                ✅ Pagado ($0 a cobrar)
-                              </span>
-                            ) : order.paymentMethod === "transferencia" ? (
-                              <div className="flex flex-col items-end gap-1 mt-0.5">
-                                <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded">
-                                  ⏳ Transf. Por verificar
-                                </span>
+                            <span className="text-[10px] text-muted-foreground font-medium block">
+                              {order.deliveryFee > 0 ? `(Envío: ${formatCurrency(order.deliveryFee)})` : "(Envío gratis)"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Control Detallado de Estados: Pago & Medio de Pago */}
+                        <div className="p-2.5 rounded-xl bg-muted/40 border border-border/80 space-y-2">
+                          <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                            {/* Estado de Pago interactivo */}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Pago:</span>
+                              {order.paymentStatus === "pagado" ? (
                                 <button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleUpdatePaymentStatus(order.id, "pagado")
-                                  }}
-                                  className="text-[9px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-1.5 py-0.5 rounded shadow-2xs cursor-pointer active:scale-95 transition-all"
-                                  title="Confirmar que se verificó la transferencia en la app bancaria"
+                                  type="button"
+                                  onClick={() => handleUpdatePaymentStatus(order.id, "pendiente")}
+                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 px-2 py-0.5 rounded-md cursor-pointer transition-all active:scale-95 shadow-2xs"
+                                  title="Pago verificado. Clic para cambiar a Pendiente"
                                 >
-                                  Verificar Pago
+                                  💰 Pagado
                                 </button>
-                              </div>
-                            ) : (
-                              <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.5 rounded mt-0.5">
-                                💵 Cobrar contraentrega
-                              </span>
-                            )}
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdatePaymentStatus(order.id, "pagado")}
+                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 px-2 py-0.5 rounded-md cursor-pointer transition-all active:scale-95 shadow-2xs"
+                                  title="Clic para marcar como Pagado (Verificado)"
+                                >
+                                  ⏳ Por Cobrar
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Medio de Pago interactivo */}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Medio:</span>
+                              <Select
+                                value={order.paymentMethod || "efectivo"}
+                                onValueChange={(val) => handleUpdatePaymentMethod(order.id, val)}
+                              >
+                                <SelectTrigger className="h-6 text-[10px] font-bold rounded-lg border px-2 gap-1 w-auto bg-background cursor-pointer shadow-2xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="text-xs rounded-xl shadow-lg">
+                                  <SelectItem value="efectivo">💵 Efectivo</SelectItem>
+                                  <SelectItem value="contraentrega">💵 Contraentrega</SelectItem>
+                                  <SelectItem value="transferencia">📲 Transferencia</SelectItem>
+                                  <SelectItem value="tarjeta">💳 Tarjeta</SelectItem>
+                                  <SelectItem value="credito">📝 Fiado / Crédito</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+
+                          {/* Indicador de cobro al cliente para el repartidor */}
+                          <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-dashed">
+                            <span className="text-muted-foreground">
+                              {order.paymentStatus === "pagado" ? (
+                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                                  ✅ Ya liquidado: Cobrar $0
+                                </span>
+                              ) : (
+                                <span className="text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1">
+                                  ⚠️ Domiciliario debe cobrar:
+                                </span>
+                              )}
+                            </span>
+                            <span className="font-mono font-bold text-foreground">
+                              {order.paymentStatus === "pagado" ? "$0" : formatCurrency(order.total)}
+                            </span>
                           </div>
                         </div>
 
@@ -1312,7 +1500,7 @@ export default function OrdersView() {
           </AnimatePresence>
         </div>
       ) : (
-        /* VISTA DE TABLA */
+        /* VISTA DE TABLA DETALLADA (ENVÍO, PAGO, MEDIO) */
         <Card className="rounded-2xl border shadow-xs overflow-hidden">
           <div className="overflow-x-auto">
             <Table>
@@ -1321,8 +1509,10 @@ export default function OrdersView() {
                   <TableHead className="text-xs font-bold">Orden</TableHead>
                   <TableHead className="text-xs font-bold">Cliente</TableHead>
                   <TableHead className="text-xs font-bold">Dirección</TableHead>
-                  <TableHead className="text-xs font-bold">Total</TableHead>
-                  <TableHead className="text-xs font-bold">Estado</TableHead>
+                  <TableHead className="text-xs font-bold">Valores</TableHead>
+                  <TableHead className="text-xs font-bold">Estado Envío</TableHead>
+                  <TableHead className="text-xs font-bold">Estado Pago</TableHead>
+                  <TableHead className="text-xs font-bold">Medio Pago</TableHead>
                   <TableHead className="text-xs font-bold">Conductor</TableHead>
                   <TableHead className="text-xs font-bold text-right">Acciones</TableHead>
                 </TableRow>
@@ -1330,9 +1520,10 @@ export default function OrdersView() {
               <TableBody>
                 {filteredOrders.map((order) => {
                   const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.pendiente
+                  const productTotal = order.subtotal || Math.max(0, order.total - order.deliveryFee)
                   return (
                     <TableRow key={order.id} className="hover:bg-muted/20">
-                      <TableCell className="font-mono font-bold text-xs">
+                      <TableCell className="font-mono font-bold text-xs whitespace-nowrap">
                         {order.orderNumber}
                         <span className="block text-[10px] text-muted-foreground font-normal">
                           {formatDateTime(order.createdAt)}
@@ -1342,39 +1533,23 @@ export default function OrdersView() {
                         <p className="text-xs font-bold text-foreground">{order.customerName}</p>
                         <p className="text-[11px] text-muted-foreground">{order.customerPhone}</p>
                       </TableCell>
-                      <TableCell className="max-w-[200px]">
+                      <TableCell className="max-w-[180px]">
                         <p className="text-xs truncate">{order.deliveryAddress || "N/A"}</p>
                         {order.deliveryNotes && (
                           <p className="text-[10px] text-muted-foreground truncate">{order.deliveryNotes}</p>
                         )}
                       </TableCell>
-                      <TableCell className="font-mono text-xs">
+                      <TableCell className="font-mono text-xs whitespace-nowrap">
                         <div className="font-bold text-foreground">
                           {formatCurrency(order.total)}
                         </div>
-                        {order.paymentStatus === "pagado" ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded-md mt-0.5">
-                            ✅ Pagado ($0 a entregar)
-                          </span>
-                        ) : order.paymentMethod === "transferencia" ? (
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded-md">
-                              ⏳ Por verificar
-                            </span>
-                            <button
-                              onClick={() => handleUpdatePaymentStatus(order.id, "pagado")}
-                              className="text-[9px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-1.5 py-0.5 rounded shadow-2xs cursor-pointer active:scale-95 transition-all"
-                              title="Marcar como transferencia confirmada"
-                            >
-                              Verificar
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.5 rounded-md mt-0.5">
-                            💵 Cobrar contraentrega
-                          </span>
-                        )}
+                        <div className="text-[10px] text-muted-foreground">
+                          Prod: {formatCurrency(productTotal)}
+                          {order.deliveryFee > 0 ? ` + Env: ${formatCurrency(order.deliveryFee)}` : " (Envío $0)"}
+                        </div>
                       </TableCell>
+
+                      {/* 1. Estado de Envío (Logística) */}
                       <TableCell>
                         <Select
                           value={order.status}
@@ -1382,7 +1557,7 @@ export default function OrdersView() {
                         >
                           <SelectTrigger
                             className={cn(
-                              "h-7 text-[11px] font-bold rounded-full border px-2.5 gap-1.5 w-[145px] transition-all cursor-pointer shadow-2xs",
+                              "h-7 text-[11px] font-bold rounded-full border px-2.5 gap-1.5 w-[140px] transition-all cursor-pointer shadow-2xs",
                               statusCfg.color,
                               statusCfg.bg,
                               statusCfg.border
@@ -1400,6 +1575,50 @@ export default function OrdersView() {
                           </SelectContent>
                         </Select>
                       </TableCell>
+
+                      {/* 2. Estado de Pago (Toggle interactivo) */}
+                      <TableCell>
+                        {order.paymentStatus === "pagado" ? (
+                          <button
+                            type="button"
+                            onClick={() => handleUpdatePaymentStatus(order.id, "pendiente")}
+                            className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 px-2 py-1 rounded-md cursor-pointer transition-all active:scale-95 shadow-2xs whitespace-nowrap"
+                            title="Pagado. Clic para cambiar a Pendiente"
+                          >
+                            💰 Pagado ($0 a cobrar)
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleUpdatePaymentStatus(order.id, "pagado")}
+                            className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 px-2 py-1 rounded-md cursor-pointer transition-all active:scale-95 shadow-2xs whitespace-nowrap"
+                            title="Pendiente de cobro. Clic para marcar Pagado"
+                          >
+                            ⏳ Por Cobrar ({formatCurrency(order.total)})
+                          </button>
+                        )}
+                      </TableCell>
+
+                      {/* 3. Medio de Pago (Selector interactivo) */}
+                      <TableCell>
+                        <Select
+                          value={order.paymentMethod || "efectivo"}
+                          onValueChange={(val) => handleUpdatePaymentMethod(order.id, val)}
+                        >
+                          <SelectTrigger className="h-7 text-[11px] font-bold rounded-lg border px-2 gap-1 w-[125px] bg-background cursor-pointer shadow-2xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="text-xs rounded-xl shadow-lg">
+                            <SelectItem value="efectivo">💵 Efectivo</SelectItem>
+                            <SelectItem value="contraentrega">💵 Contraentrega</SelectItem>
+                            <SelectItem value="transferencia">📲 Transferencia</SelectItem>
+                            <SelectItem value="tarjeta">💳 Tarjeta</SelectItem>
+                            <SelectItem value="credito">📝 Fiado / Crédito</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+
+                      {/* Conductor */}
                       <TableCell>
                         {order.deliveryDriverName ? (
                           <div className="flex items-center gap-1.5">
@@ -1417,12 +1636,14 @@ export default function OrdersView() {
                           </Badge>
                         )}
                       </TableCell>
-                      <TableCell className="text-right space-x-1">
+
+                      {/* Acciones */}
+                      <TableCell className="text-right space-x-1 whitespace-nowrap">
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => handleOpenAssign(order)}
-                          className="h-7 text-xs rounded-lg px-2.5"
+                          className="h-7 text-xs rounded-lg px-2"
                         >
                           <IconMotorbike className="h-3.5 w-3.5 mr-1" />
                           {order.deliveryDriverName ? "Cambiar" : "Asignar"}
@@ -1958,7 +2179,7 @@ export default function OrdersView() {
               {/* Liquidación y Control para el Domiciliario */}
               <div
                 className={cn(
-                  "p-3.5 rounded-xl border text-xs space-y-2",
+                  "p-3.5 rounded-xl border text-xs space-y-3",
                   detailOrder.paymentStatus === "pagado"
                     ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 text-emerald-900 dark:text-emerald-200"
                     : detailOrder.paymentMethod === "transferencia"
@@ -1989,18 +2210,49 @@ export default function OrdersView() {
                     ? "⚠️ El cliente indicó pago por transferencia bancaria (Nequi/Daviplata). Verifica el comprobante en tu app bancaria o chat antes de despachar."
                     : `⚠️ Cobro en efectivo contraentrega. El domiciliario DEBE cobrar ${formatCurrency(detailOrder.total)} al cliente y entregarlo en caja al regresar.`}
                 </p>
-                {detailOrder.paymentStatus !== "pagado" && (
-                  <div className="pt-1 flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      onClick={() => handleUpdatePaymentStatus(detailOrder.id, "pagado")}
-                      className="h-7 text-xs rounded-lg font-bold bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+
+                {/* Controles para cambiar Estado de Pago y Medio de Pago en el detalle */}
+                <div className="pt-2 border-t border-dashed flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Medio:</span>
+                    <Select
+                      value={detailOrder.paymentMethod || "efectivo"}
+                      onValueChange={(val) => handleUpdatePaymentMethod(detailOrder.id, val)}
                     >
-                      <IconCheck className="h-3.5 w-3.5" />
-                      Marcar Pago como Verificado
-                    </Button>
+                      <SelectTrigger className="h-7 text-xs rounded-lg border w-[135px] bg-background text-foreground">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="text-xs rounded-xl">
+                        <SelectItem value="efectivo">💵 Efectivo</SelectItem>
+                        <SelectItem value="contraentrega">💵 Contraentrega</SelectItem>
+                        <SelectItem value="transferencia">📲 Transferencia</SelectItem>
+                        <SelectItem value="tarjeta">💳 Tarjeta</SelectItem>
+                        <SelectItem value="credito">📝 Fiado / Crédito</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
-                )}
+
+                  <div>
+                    {detailOrder.paymentStatus !== "pagado" ? (
+                      <Button
+                        size="sm"
+                        onClick={() => handleUpdatePaymentStatus(detailOrder.id, "pagado")}
+                        className="h-7 text-xs rounded-lg font-bold bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                      >
+                        <IconCheck className="h-3.5 w-3.5" /> Marcar como Pagado
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleUpdatePaymentStatus(detailOrder.id, "pendiente")}
+                        className="h-7 text-xs rounded-lg border-emerald-500/40 text-emerald-700 dark:text-emerald-300 gap-1"
+                      >
+                        Revertir a Pendiente
+                      </Button>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )}

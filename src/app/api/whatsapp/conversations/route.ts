@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireBranchAccess } from "@/lib/branch"
+import type { ClientAiUsage } from "@/lib/ai-token-tracker"
 
 export const dynamic = "force-dynamic"
 
 export interface ConversationItem {
   phone: string
   channel: "whatsapp" | "telegram"
+  aiUsage?: ClientAiUsage | null
   client: {
     id: string
     name: string
@@ -175,6 +177,21 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Búsqueda en BATCH del consumo de tokens y gasto IA por cliente
+    const aiUsageSettings = await db.setting.findMany({
+      where: { key: { startsWith: "ai_usage:" } },
+    })
+    const aiUsageMap = new Map<string, ClientAiUsage>()
+    for (const s of aiUsageSettings) {
+      try {
+        const parsed = JSON.parse(s.value) as ClientAiUsage
+        const phoneKey = s.key.replace("ai_usage:", "")
+        aiUsageMap.set(phoneKey, parsed)
+      } catch {
+        /* skip */
+      }
+    }
+
     const conversations: ConversationItem[] = []
 
     for (const [phone, data] of convMap.entries()) {
@@ -252,6 +269,7 @@ export async function GET(req: NextRequest) {
         unreadCount,
         latestOrder,
         totalOrders: totalOrdersCount,
+        aiUsage: aiUsageMap.get(phone) || null,
       })
     }
 

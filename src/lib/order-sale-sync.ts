@@ -51,6 +51,20 @@ export async function syncOrderToSale(orderIdOrNumber: string, customDb?: any) {
   })
 
   if (existingSale) {
+    // Si la venta previa tenía el costo de domicilio sumado al total, ajustarla para que sea solo el valor del producto
+    const productOnlyTotal = Math.max(
+      0,
+      Number(order.subtotal || 0) - Number(order.discount || 0) + Number(order.tax || 0)
+    )
+    if (existingSale.total !== productOnlyTotal && (order.deliveryFee || 0) > 0) {
+      await client.sale.update({
+        where: { id: existingSale.id },
+        data: {
+          total: productOnlyTotal,
+          amountReceived: existingSale.paymentMethod === "credito" ? existingSale.amountReceived : productOnlyTotal,
+        },
+      }).catch(() => {})
+    }
     return existingSale
   }
 
@@ -158,6 +172,12 @@ export async function syncOrderToSale(orderIdOrNumber: string, customDb?: any) {
   const deliveryNote = order.deliveryFee > 0 ? ` (Costo Domicilio: $${order.deliveryFee.toLocaleString("es-CO")})` : ""
   const fullNotes = `Venta por Domicilio/Pedido ${orderMarker}.${deliveryNote} Cliente: ${order.customerName} - Tel: ${order.customerPhone}. Dirección: ${order.deliveryAddress || "N/A"}.`
 
+  // 6.2 Total oficial de la venta: ÚNICAMENTE EL VALOR DEL PRODUCTO (el valor del domicilio no se incluye en la venta)
+  const productOnlyTotal = Math.max(
+    0,
+    Number(order.subtotal || 0) - Number(order.discount || 0) + Number(order.tax || 0)
+  )
+
   // 7. Crear la venta
   const createdSale = await client.sale.create({
     data: {
@@ -167,9 +187,9 @@ export async function syncOrderToSale(orderIdOrNumber: string, customDb?: any) {
       subtotal: order.subtotal,
       tax: order.tax || 0,
       discount: order.discount || 0,
-      total: order.total,
+      total: productOnlyTotal,
       paymentMethod,
-      amountReceived: order.total,
+      amountReceived: productOnlyTotal,
       change: 0,
       status: "completada",
       cashSessionId: openSession?.id || null,

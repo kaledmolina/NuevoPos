@@ -78,10 +78,12 @@ import {
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import type { ClientAiUsage } from "@/lib/ai-token-tracker"
 
 interface Conversation {
   phone: string
   channel?: "whatsapp" | "telegram"
+  aiUsage?: ClientAiUsage | null
   client: {
     id: string
     name: string
@@ -275,6 +277,62 @@ export default function WhatsAppAgentView() {
   const [customerOrdersModalOpen, setCustomerOrdersModalOpen] = useState(false)
   const [customerOrdersList, setCustomerOrdersList] = useState<any[]>([])
   const [loadingCustomerOrders, setLoadingCustomerOrders] = useState(false)
+
+  // Modal: Ranking y Reporte de Consumo de Tokens por Cliente
+  const [aiUsageModalOpen, setAiUsageModalOpen] = useState(false)
+  const [aiUsageReport, setAiUsageReport] = useState<{
+    clients: ClientAiUsage[]
+    summary: {
+      totalTokens: number
+      promptTokens: number
+      completionTokens: number
+      totalCostUsd: number
+      totalClients: number
+      totalReplies: number
+      freeModelReplies: number
+    }
+  } | null>(null)
+  const [loadingAiUsageReport, setLoadingAiUsageReport] = useState(false)
+  const [aiUsageSearch, setAiUsageSearch] = useState("")
+
+  // Modal: Historial detallado de consultas de un cliente
+  const [historyModalOpen, setHistoryModalOpen] = useState(false)
+  const [selectedClientUsageDetail, setSelectedClientUsageDetail] = useState<ClientAiUsage | null>(null)
+
+  const fetchAiUsageReport = async () => {
+    try {
+      setLoadingAiUsageReport(true)
+      const res = await apiFetch<{
+        ok: boolean
+        clients: ClientAiUsage[]
+        summary: any
+      }>("/api/whatsapp/ai-usage")
+      if (res && res.ok) {
+        setAiUsageReport({ clients: res.clients, summary: res.summary })
+      }
+    } catch {
+      // noop
+    } finally {
+      setLoadingAiUsageReport(false)
+    }
+  }
+
+  const handleResetClientAiTokens = async (phone: string) => {
+    if (!confirm("¿Deseas restablecer a 0 el conteo de tokens y gasto de IA de este cliente?")) return
+    try {
+      const res = await apiFetch<{ ok: boolean; message?: string }>("/api/whatsapp/ai-usage", {
+        method: "POST",
+        body: JSON.stringify({ action: "reset", phone }),
+      })
+      if (res && res.ok) {
+        toast.success("Contador de tokens de este cliente restablecido a 0")
+        loadConversations(false)
+        if (aiUsageModalOpen) fetchAiUsageReport()
+      }
+    } catch (e: any) {
+      toast.error("Error al restablecer: " + e.message)
+    }
+  }
 
   // Modal: Simular mensaje entrante
   const [simModalOpen, setSimModalOpen] = useState(false)
@@ -1128,6 +1186,22 @@ export default function WhatsAppAgentView() {
             </div>
           )}
 
+          {/* Botón Consumo IA por Cliente */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              fetchAiUsageReport()
+              setAiUsageModalOpen(true)
+            }}
+            className="h-8 text-xs font-bold rounded-full gap-1.5 border-purple-300 dark:border-purple-800 bg-purple-500/10 text-purple-700 dark:text-purple-300 hover:bg-purple-500/20 cursor-pointer shadow-2xs"
+            title="Ver cuánto en tokens y gasto de IA ha consumido cada cliente"
+          >
+            <IconBolt className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
+            <span className="hidden sm:inline">Consumo IA por Cliente</span>
+            <span className="sm:hidden">Tokens IA</span>
+          </Button>
+
           {/* Selector de Pestañas */}
           <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-900 p-1 rounded-full border border-zinc-200 dark:border-zinc-800 text-xs">
             <button
@@ -1335,6 +1409,15 @@ export default function WhatsAppAgentView() {
                               Fiado: {formatCurrency(c.client.creditBalance)}
                             </Badge>
                           ) : null}
+                          {c.aiUsage && c.aiUsage.totalTokens > 0 && (
+                            <Badge
+                              variant="outline"
+                              className="text-[9px] py-0 px-1 font-mono bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800 gap-0.5"
+                              title={`Consumo IA: ${c.aiUsage.totalTokens.toLocaleString()} tokens (${c.aiUsage.totalReplies} respuestas). Gasto: $${c.aiUsage.estimatedCostUsd} USD`}
+                            >
+                              ⚡ {c.aiUsage.totalTokens >= 1000 ? `${(c.aiUsage.totalTokens / 1000).toFixed(1)}k` : c.aiUsage.totalTokens} tok
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     </button>
@@ -2054,6 +2137,113 @@ export default function WhatsAppAgentView() {
                     ) : (
                       <div className="p-3 text-center text-xs text-zinc-400 border border-dashed rounded-xl bg-zinc-50/50 dark:bg-zinc-950/20">
                         Sin pedidos registrados para este contacto.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Tarjeta de Consumo de Tokens & Gasto IA de este Cliente */}
+                  <div className="p-3 rounded-xl bg-purple-500/5 border border-purple-500/20 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <IconBolt className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
+                        <span className="text-[11px] font-bold text-purple-950 dark:text-purple-200">
+                          Consumo de Tokens & Gasto IA
+                        </span>
+                      </div>
+                      {selectedConv.aiUsage && selectedConv.aiUsage.totalReplies > 0 && (
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[9px] px-1.5 py-0 font-mono",
+                            selectedConv.aiUsage.isFreePlan
+                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                              : "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30"
+                          )}
+                        >
+                          {selectedConv.aiUsage.isFreePlan ? "🎁 Plan Gratis ($0)" : "⚡ Modelo Pago"}
+                        </Badge>
+                      )}
+                    </div>
+
+                    {selectedConv.aiUsage && selectedConv.aiUsage.totalTokens > 0 ? (
+                      <div className="space-y-2 text-xs">
+                        {/* Métricas principales */}
+                        <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+                          <div className="p-2 rounded-lg bg-white dark:bg-zinc-900 border border-purple-500/10">
+                            <span className="text-[9px] text-muted-foreground block">Tokens Acumulados</span>
+                            <span className="font-mono font-black text-sm text-purple-950 dark:text-purple-200 block">
+                              {selectedConv.aiUsage.totalTokens.toLocaleString()}
+                            </span>
+                            <span className="text-[9px] text-zinc-500 block">
+                              {selectedConv.aiUsage.totalReplies} {selectedConv.aiUsage.totalReplies === 1 ? "respuesta" : "respuestas"}
+                            </span>
+                          </div>
+
+                          <div className="p-2 rounded-lg bg-white dark:bg-zinc-900 border border-purple-500/10">
+                            <span className="text-[9px] text-muted-foreground block">Gasto Estimado IA</span>
+                            <span className="font-mono font-black text-sm text-foreground block">
+                              {selectedConv.aiUsage.isFreePlan
+                                ? "$0.00 USD"
+                                : `$${Number(selectedConv.aiUsage.estimatedCostUsd).toFixed(4)} USD`}
+                            </span>
+                            <span className="text-[9px] text-zinc-500 block">
+                              {selectedConv.aiUsage.isFreePlan
+                                ? "100% Ahorro de Tokens"
+                                : `~$${Math.round((selectedConv.aiUsage.estimatedCostUsd || 0) * 4200).toLocaleString("es-CO")} COP`}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Desglose Entrada vs Salida */}
+                        <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/70 border border-purple-500/10 text-[10px] space-y-1">
+                          <div className="flex items-center justify-between text-zinc-600 dark:text-zinc-400">
+                            <span>Tokens Entrada (Prompt):</span>
+                            <span className="font-mono font-semibold">
+                              {selectedConv.aiUsage.promptTokens.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-zinc-600 dark:text-zinc-400">
+                            <span>Tokens Salida (Respuestas):</span>
+                            <span className="font-mono font-semibold">
+                              {selectedConv.aiUsage.completionTokens.toLocaleString()}
+                            </span>
+                          </div>
+                          {selectedConv.aiUsage.lastModelUsed && (
+                            <div className="pt-1 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-zinc-500">
+                              <span>Último modelo:</span>
+                              <span className="font-mono font-medium truncate max-w-[130px]" title={selectedConv.aiUsage.lastModelUsed}>
+                                {selectedConv.aiUsage.lastModelUsed.split("/")[1] || selectedConv.aiUsage.lastModelUsed}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Botones de acción */}
+                        <div className="flex items-center justify-between pt-0.5">
+                          {selectedConv.aiUsage.history && selectedConv.aiUsage.history.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedClientUsageDetail(selectedConv.aiUsage!)
+                                setHistoryModalOpen(true)
+                              }}
+                              className="text-[10px] text-purple-700 dark:text-purple-300 hover:underline font-semibold cursor-pointer"
+                            >
+                              Ver historial ({selectedConv.aiUsage.history.length})
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleResetClientAiTokens(selectedConv.phone)}
+                            className="text-[10px] text-rose-500 hover:text-rose-700 hover:underline ml-auto cursor-pointer"
+                          >
+                            Restablecer a 0
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-2.5 text-center text-[10px] text-zinc-500 rounded-lg bg-white/40 dark:bg-zinc-900/40 border border-dashed border-purple-500/20">
+                        Este cliente aún no ha generado consumo de tokens con el bot IA.
                       </div>
                     )}
                   </div>
@@ -3469,6 +3659,309 @@ export default function WhatsAppAgentView() {
 
           <DialogFooter className="pt-2">
             <Button variant="outline" size="sm" onClick={() => setCustomerOrdersModalOpen(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ========================================================= */}
+      {/* MODAL: RANKING Y REPORTE DE CONSUMO DE TOKENS POR CLIENTE */}
+      {/* ========================================================= */}
+      <Dialog open={aiUsageModalOpen} onOpenChange={setAiUsageModalOpen}>
+        <DialogContent className="max-w-3xl rounded-2xl max-h-[90vh] flex flex-col p-4 sm:p-6">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+                <IconBolt className="h-4 w-4" />
+              </div>
+              <div>
+                <DialogTitle className="text-base font-black">
+                  Consumo de Tokens & Gasto IA por Cliente
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  Monitorea el total de tokens consumidos y el costo generado por cada cliente atendido por la IA.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {/* Tarjetas de Resumen Global */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 shrink-0">
+            <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/20">
+              <span className="text-[10px] text-purple-900/80 dark:text-purple-300/80 font-medium block">
+                Total Tokens Consumidos
+              </span>
+              <span className="font-mono font-black text-base text-purple-950 dark:text-purple-100">
+                {(aiUsageReport?.summary?.totalTokens || 0).toLocaleString()}
+              </span>
+              <span className="text-[9px] text-muted-foreground block">
+                {aiUsageReport?.summary?.promptTokens?.toLocaleString() || 0} in / {aiUsageReport?.summary?.completionTokens?.toLocaleString() || 0} out
+              </span>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+              <span className="text-[10px] text-emerald-900/80 dark:text-emerald-300/80 font-medium block">
+                Gasto Estimado Total
+              </span>
+              <span className="font-mono font-black text-base text-emerald-950 dark:text-emerald-100">
+                ${(aiUsageReport?.summary?.totalCostUsd || 0).toFixed(4)} USD
+              </span>
+              <span className="text-[9px] text-emerald-700 dark:text-emerald-400 font-semibold block">
+                ~${Math.round((aiUsageReport?.summary?.totalCostUsd || 0) * 4200).toLocaleString("es-CO")} COP
+              </span>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+              <span className="text-[10px] text-muted-foreground font-medium block">
+                Clientes Atendidos
+              </span>
+              <span className="font-mono font-black text-base text-foreground">
+                {aiUsageReport?.summary?.totalClients || 0}
+              </span>
+              <span className="text-[9px] text-muted-foreground block">
+                Con interacciones IA
+              </span>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+              <span className="text-[10px] text-muted-foreground font-medium block">
+                Respuestas Generadas
+              </span>
+              <span className="font-mono font-black text-base text-foreground">
+                {aiUsageReport?.summary?.totalReplies || 0}
+              </span>
+              <span className="text-[9px] text-muted-foreground block">
+                {aiUsageReport?.summary?.freeModelReplies || 0} en modo free ($0)
+              </span>
+            </div>
+          </div>
+
+          {/* Buscador de clientes */}
+          <div className="pt-2 flex items-center gap-2 shrink-0">
+            <div className="relative flex-1">
+              <IconSearch className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <Input
+                placeholder="Buscar por nombre de cliente o teléfono..."
+                value={aiUsageSearch}
+                onChange={(e) => setAiUsageSearch(e.target.value)}
+                className="h-8 pl-8 text-xs rounded-xl"
+              />
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={fetchAiUsageReport}
+              disabled={loadingAiUsageReport}
+              className="h-8 text-xs rounded-xl gap-1"
+            >
+              <IconRefresh className={cn("h-3 w-3", loadingAiUsageReport && "animate-spin")} />
+              Actualizar
+            </Button>
+          </div>
+
+          {/* Tabla / Lista de Clientes Ordenada */}
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pt-2">
+            {loadingAiUsageReport ? (
+              <div className="py-12 text-center text-xs text-zinc-400 space-y-2">
+                <IconRefresh className="h-5 w-5 animate-spin mx-auto text-zinc-400" />
+                <p>Calculando métricas y consumo por cliente...</p>
+              </div>
+            ) : !aiUsageReport?.clients || aiUsageReport.clients.length === 0 ? (
+              <div className="py-12 text-center text-xs text-zinc-400">
+                No hay consumo de tokens registrado aún. Cuando el bot atienda clientes, aparecerán aquí automáticamente.
+              </div>
+            ) : (
+              aiUsageReport.clients
+                .filter((c) => {
+                  if (!aiUsageSearch.trim()) return true
+                  const q = aiUsageSearch.toLowerCase()
+                  return (
+                    (c.clientName || "").toLowerCase().includes(q) ||
+                    c.phone.toLowerCase().includes(q) ||
+                    (c.lastModelUsed || "").toLowerCase().includes(q)
+                  )
+                })
+                .map((item, idx) => {
+                  const maxTokens = aiUsageReport.clients[0]?.totalTokens || 1
+                  const percent = Math.min(100, Math.round((item.totalTokens / maxTokens) * 100))
+
+                  return (
+                    <div
+                      key={item.phone}
+                      className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40 hover:bg-zinc-100/50 dark:hover:bg-zinc-900/50 transition-all space-y-2"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={cn(
+                            "h-6 w-6 rounded-lg text-[10px] font-black flex items-center justify-center shrink-0",
+                            idx === 0
+                              ? "bg-amber-500 text-white"
+                              : idx === 1
+                              ? "bg-zinc-400 text-white"
+                              : idx === 2
+                              ? "bg-amber-700 text-white"
+                              : "bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
+                          )}>
+                            #{idx + 1}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="font-bold text-xs truncate">
+                              {item.clientName || `Cliente (${item.phone.slice(-4)})`}
+                            </p>
+                            <p className="text-[10px] text-zinc-500 font-mono truncate">{item.phone}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="text-right">
+                            <span className="font-mono font-bold text-xs text-foreground block">
+                              {item.isFreePlan
+                                ? "$0.00 USD"
+                                : `$${Number(item.estimatedCostUsd).toFixed(4)} USD`}
+                            </span>
+                            <span className="text-[9px] text-muted-foreground block font-mono">
+                              {item.isFreePlan
+                                ? "Plan Free ($0)"
+                                : `~$${Math.round((item.estimatedCostUsd || 0) * 4200).toLocaleString("es-CO")} COP`}
+                            </span>
+                          </div>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setSelectedPhone(item.phone)
+                              setAiUsageModalOpen(false)
+                            }}
+                            className="h-7 px-2 text-[10px] font-bold rounded-lg cursor-pointer"
+                          >
+                            Ver Chat
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Barra de progreso de tokens */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className="font-mono font-bold text-purple-700 dark:text-purple-300">
+                            ⚡ {item.totalTokens.toLocaleString()} tokens ({item.totalReplies} respuestas)
+                          </span>
+                          <span className="text-[9px] text-muted-foreground font-mono">
+                            In: {item.promptTokens.toLocaleString()} | Out: {item.completionTokens.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
+                          <div
+                            className="h-full bg-purple-600 dark:bg-purple-400 rounded-full transition-all"
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Footer del card con detalles y botón reset */}
+                      <div className="flex items-center justify-between text-[10px] pt-1 border-t border-zinc-200/60 dark:border-zinc-800/60 text-zinc-500">
+                        <span className="truncate max-w-[280px]">
+                          Último modelo: <span className="font-mono font-medium">{item.lastModelUsed.split("/")[1] || item.lastModelUsed}</span>
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {item.history && item.history.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedClientUsageDetail(item)
+                                setHistoryModalOpen(true)
+                              }}
+                              className="text-purple-600 dark:text-purple-400 hover:underline font-semibold cursor-pointer"
+                            >
+                              Historial ({item.history.length})
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleResetClientAiTokens(item.phone)}
+                            className="text-rose-500 hover:text-rose-700 hover:underline cursor-pointer"
+                          >
+                            Restablecer
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })
+            )}
+          </div>
+
+          <DialogFooter className="pt-2">
+            <Button variant="outline" size="sm" onClick={() => setAiUsageModalOpen(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ========================================================= */}
+      {/* MODAL: HISTORIAL DE CONSULTAS IA DE UN CLIENTE ESPECÍFICO */}
+      {/* ========================================================= */}
+      <Dialog open={historyModalOpen} onOpenChange={setHistoryModalOpen}>
+        <DialogContent className="max-w-lg rounded-2xl max-h-[80vh] flex flex-col p-4 sm:p-5">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold flex items-center gap-1.5">
+              <IconBolt className="h-4 w-4 text-purple-600" />
+              Historial de Consultas IA — {selectedClientUsageDetail?.clientName || selectedClientUsageDetail?.phone}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Últimas interacciones procesadas para este cliente con desglose de tokens y costo.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pt-2">
+            {!selectedClientUsageDetail?.history || selectedClientUsageDetail.history.length === 0 ? (
+              <p className="text-xs text-zinc-400 py-6 text-center">No hay historial disponible para este contacto.</p>
+            ) : (
+              selectedClientUsageDetail.history.map((h, i) => (
+                <div
+                  key={i}
+                  className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40 text-xs space-y-1.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-[10px] text-zinc-500">
+                      {formatDateTime(h.at)}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-[9px] px-1.5 py-0 font-mono",
+                        h.isFree
+                          ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30"
+                          : "bg-purple-500/10 text-purple-600 border-purple-500/30"
+                      )}
+                    >
+                      {h.isFree ? "🎁 Gratis ($0)" : `$${Number(h.costUsd).toFixed(5)} USD`}
+                    </Badge>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-mono font-bold text-foreground">
+                      ⚡ {h.totalTokens.toLocaleString()} tokens
+                    </span>
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      Prompt: {h.promptTokens} | Salida: {h.completionTokens}
+                    </span>
+                  </div>
+
+                  <p className="text-[10px] text-zinc-500 font-mono truncate">
+                    Modelo: {h.model}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+
+          <DialogFooter className="pt-2">
+            <Button variant="outline" size="sm" onClick={() => setHistoryModalOpen(false)}>
               Cerrar
             </Button>
           </DialogFooter>

@@ -762,6 +762,25 @@ ${catalogContext}`
 
   let rawReply = aiData?.choices?.[0]?.message?.content || ""
   const tokensUsed = aiData?.usage?.total_tokens || 0
+  const promptTokens = aiData?.usage?.prompt_tokens || 0
+  const completionTokens = aiData?.usage?.completion_tokens || 0
+  const resolvedModelName = `${actualProvider}: ${aiData?.model || actualModel}`
+
+  // Registrar y acumular consumo de tokens y costo para este cliente
+  try {
+    const { recordClientAiUsage } = await import("@/lib/ai-token-tracker")
+    await recordClientAiUsage({
+      phone: cleanPhone,
+      clientId: client.id,
+      clientName: client.name,
+      model: resolvedModelName,
+      promptTokens,
+      completionTokens,
+      totalTokens: tokensUsed,
+    })
+  } catch (trackErr: any) {
+    console.warn("[AI Token Tracker Warning]:", trackErr.message)
+  }
 
   let orderNumber: string | undefined
   let orderTotal: number | undefined
