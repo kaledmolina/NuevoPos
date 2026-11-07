@@ -661,72 +661,6 @@ export default function WhatsAppAgentView() {
     }
   }
 
-  // Detección de dirección pendiente para anexar valor del domicilio con intervención humana
-  const detectedCustomerAddress = useMemo(() => {
-    if (!selectedConv) return null
-    // Si ya hay un pedido activo pendiente/confirmado/en camino, ya tiene orden
-    const hasActiveOrder =
-      selectedConv.latestOrder &&
-      ["pendiente", "confirmado", "en_preparacion", "en_camino"].includes(selectedConv.latestOrder.status)
-    if (hasActiveOrder) return null
-
-    // 1. Revisar dirección registrada del cliente
-    if (selectedConv.client?.address && selectedConv.client.address !== "Sin dirección guardada") {
-      return selectedConv.client.address
-    }
-
-    // 2. Revisar mensajes recientes del cliente para detectar si dio su ubicación
-    const customerMsgs = [...chatMessages].filter((m) => m.sender === "customer")
-    for (let i = customerMsgs.length - 1; i >= 0; i--) {
-      const text = customerMsgs[i].text
-      const match = text.match(
-        /\b(barrio|calle|cra|carrera|cll|diagonal|diag|transversal|transv|avenida|av|manzana|manz|mz|vereda|valle|sector)[\s\S]{3,60}/i
-      )
-      if (match) return match[0].trim()
-    }
-    return null
-  }, [selectedConv, chatMessages])
-
-  // Intervención Humana: Anexar costo de domicilio a la conversación antes de crear la orden
-  const handleSendDeliveryFeeToClient = async (fee: number, address: string) => {
-    if (!selectedPhone || sendingReply) return
-    const feeText = fee > 0 ? formatCurrency(fee) : "GRATIS ($0)"
-    const msg =
-      fee > 0
-        ? `🛵 Para tu dirección en *${address}*, el costo del domicilio es de *${feeText}*.\n\nPor favor indícanos: ¿deseas pagar en efectivo o por transferencia (Nequi/Daviplata)?`
-        : `🛵 ¡Buenas noticias! El domicilio para tu dirección en *${address}* es *GRATIS ($0)*.\n\nPor favor indícanos: ¿deseas pagar en efectivo o por transferencia (Nequi/Daviplata)?`
-
-    setSendingReply(true)
-    const optimisticMessage: Message = {
-      id: "temp-" + Date.now(),
-      text: msg,
-      sender: "agent",
-      status: "sent",
-      createdAt: new Date().toISOString(),
-    }
-    setChatMessages((prev) => [...prev, optimisticMessage])
-    setTimeout(() => scrollToBottom(true), 50)
-
-    try {
-      await apiFetch("/api/whatsapp/conversations", {
-        method: "POST",
-        body: JSON.stringify({
-          phone: selectedPhone,
-          text: msg,
-          branchId: currentBranchId,
-        }),
-      })
-      toast.success(`Costo de domicilio (${feeText}) anexado y enviado al cliente`)
-      await loadMessages(selectedPhone, true)
-      loadConversations(false)
-    } catch (e) {
-      toast.error("Error al anexar costo de domicilio: " + (e as Error).message)
-      loadMessages(selectedPhone, true)
-    } finally {
-      setSendingReply(false)
-    }
-  }
-
   // Simular mensaje de entrada con IA DeepSeek u OpenRouter
   const handleSimulateInbound = async (presetText?: string) => {
     const text = (presetText || simText).trim()
@@ -926,25 +860,6 @@ export default function WhatsAppAgentView() {
       if (selectedPhone) loadMessages(selectedPhone, true)
     } catch (e) {
       toast.error("Error al actualizar estado de pedido: " + (e as Error).message)
-    }
-  }
-
-  // Actualizar costo de envío / domicilio según barrio o zona
-  const handleQuickUpdateDeliveryFee = async (orderId: string, deliveryFee: number) => {
-    try {
-      await apiFetch(`/api/v1/orders/${orderId}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ deliveryFee }),
-      })
-      toast.success(
-        deliveryFee > 0
-          ? `Costo de envío actualizado a ${formatCurrency(deliveryFee)}`
-          : "Envío fijado como Gratis ($0)"
-      )
-      await loadConversations()
-      if (selectedPhone) loadMessages(selectedPhone, true)
-    } catch (e) {
-      toast.error("Error al actualizar costo de envío: " + (e as Error).message)
     }
   }
 
@@ -1573,63 +1488,6 @@ export default function WhatsAppAgentView() {
                   )}
                   <div ref={chatScrollRef} />
                 </div>
-
-                {/* BARRA DE INTERVENCIÓN HUMANA: ANEXAR VALOR DEL DOMICILIO SEGÚN LA ZONA ANTES DE CREAR LA ORDEN */}
-                {detectedCustomerAddress && (
-                  <div className="px-3 py-2 bg-amber-50/90 dark:bg-amber-950/40 border-t border-amber-200/80 dark:border-amber-900/60 flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <IconTruckDelivery className="h-4 w-4 text-amber-600 shrink-0" />
-                      <div className="truncate">
-                        <span className="font-bold text-amber-950 dark:text-amber-100">
-                          Ubicación detectada:
-                        </span>{" "}
-                        <span className="text-amber-900 dark:text-amber-200 underline font-medium">
-                          {detectedCustomerAddress}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1 shrink-0">
-                      <span className="text-[10px] text-amber-800 dark:text-amber-300 font-bold uppercase tracking-wider">
-                        Anexar Domicilio:
-                      </span>
-                      {[2000, 3000, 4000, 5000].map((fee) => (
-                        <button
-                          key={fee}
-                          type="button"
-                          onClick={() => handleSendDeliveryFeeToClient(fee, detectedCustomerAddress)}
-                          disabled={sendingReply}
-                          className="px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-white dark:bg-zinc-900 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/60 shadow-2xs transition-all cursor-pointer"
-                          title={`Anexar $${fee.toLocaleString()} de domicilio`}
-                        >
-                          ${(fee / 1000).toFixed(0)}k
-                        </button>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => handleSendDeliveryFeeToClient(0, detectedCustomerAddress)}
-                        disabled={sendingReply}
-                        className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white dark:bg-zinc-900 border border-amber-300 dark:border-amber-800 text-zinc-600 dark:text-zinc-300 hover:bg-amber-100 dark:hover:bg-amber-900/60 shadow-2xs transition-all cursor-pointer"
-                      >
-                        Gratis
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const custom = prompt("Ingresa el costo del domicilio para esta zona/barrio (ej: 6500):", "3000")
-                          if (custom) {
-                            const num = parseFloat(custom.replace(/[^\d.]/g, ""))
-                            if (!isNaN(num)) handleSendDeliveryFeeToClient(num, detectedCustomerAddress)
-                          }
-                        }}
-                        disabled={sendingReply}
-                        className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-2xs transition-all cursor-pointer"
-                      >
-                        ✏️ Otro
-                      </button>
-                    </div>
-                  </div>
-                )}
 
                 {/* Input de respuesta manual del agente */}
                 <div className="p-2.5 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0">
