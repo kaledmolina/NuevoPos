@@ -1,4 +1,5 @@
 import { db, ensureMySqlTextColumns } from "@/lib/db"
+import { getDeliveryConfig, resolveDeliveryFee, formatDeliveryPromptContext } from "@/lib/delivery-config"
 
 export interface BotProcessResult {
   reply: string
@@ -50,6 +51,9 @@ export async function processWhatsAppMessage(params: {
 
   const config = branch?.whatsappConfig
   const branchFilter = resolvedBranchId ? { branchId: resolvedBranchId } : {}
+
+  // 1.1 Obtener configuración oficial de tarifas de domicilio para esta sede
+  const deliveryConfig = await getDeliveryConfig(resolvedBranchId)
 
   // 2. Identificar o registrar cliente en el CRM de esta sede
   let client = await db.client.findFirst({
@@ -260,6 +264,9 @@ export async function processWhatsAppMessage(params: {
         if (addrMatch) address = addrMatch[0].trim()
 
         const subtotal = detectedItems.reduce((acc, it) => acc + it.subtotal, 0)
+        const feeResolution = resolveDeliveryFee(`${address} ${message}`, deliveryConfig)
+        const deliveryFee = feeResolution.fee
+        const total = subtotal + deliveryFee
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "")
         const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString()
         const orderNumber = `PED-${dateStr}-${randomSuffix}`
@@ -272,11 +279,11 @@ export async function processWhatsAppMessage(params: {
             customerName: client.name,
             customerPhone: cleanPhone,
             deliveryAddress: address,
-            deliveryNotes: `Generado por WhatsApp (${branch?.name || "Sede"}).`,
+            deliveryNotes: `Generado por WhatsApp (${branch?.name || "Sede"}). ${feeResolution.appliedRule}.`,
             subtotal,
             tax: 0,
-            deliveryFee: 0,
-            total: subtotal,
+            deliveryFee,
+            total,
             paymentMethod: "efectivo",
             paymentStatus: "pendiente",
             status: "pendiente",
@@ -298,8 +305,10 @@ export async function processWhatsAppMessage(params: {
           .map((it) => `• ${it.quantity} × *${it.product.name}* ($${it.subtotal.toLocaleString("es-CO")})`)
           .join("\n")
 
+        const feeLine = deliveryFee > 0 ? `\n🛵 *Costo Domicilio:* $${deliveryFee.toLocaleString("es-CO")} (${feeResolution.matchedNeighborhood ? `Barrio ${feeResolution.matchedNeighborhood}` : "Tarifa estándar"})` : ""
+
         result = {
-          reply: `🎉 *¡Pedido Recibido con Éxito!*\n🏬 *Sede:* ${branch?.name || "Principal"}\n📦 *Orden:* #${order.orderNumber}\n👤 *Cliente:* ${client.name}\n📍 *Entrega:* ${address}\n\n🛒 *Productos:*\n${itemsSummary}\n\n💵 *Total:* *$${subtotal.toLocaleString("es-CO")}* (Pago contraentrega)\n⏱️ *Estado:* En preparación en tienda.`,
+          reply: `🎉 *¡Pedido Recibido con Éxito!*\n🏬 *Sede:* ${branch?.name || "Principal"}\n📦 *Orden:* #${order.orderNumber}\n👤 *Cliente:* ${client.name}\n📍 *Entrega:* ${address}\n\n🛒 *Productos:*\n${itemsSummary}${feeLine}\n\n💵 *Total a Pagar:* *$${total.toLocaleString("es-CO")}* (Pago contraentrega)\n⏱️ *Estado:* En preparación en tienda.`,
           actionTaken: "order_created",
           orderNumber: order.orderNumber,
           total: order.total,
@@ -334,7 +343,7 @@ export async function processWhatsAppMessage(params: {
           .join("\n")
 
         result = {
-          reply: `🔍 *Catálogo Disponible (${branch?.name || "Esta Sede"})*\n\n${listText}\n\n¿Deseas que te enviemos algún producto a domicilio? Indícanos la cantidad y tu dirección de entrega.`,
+          reply: `🔍 *Catálogo Disponible (${branch?.name || "Esta Sede"})*\n\n${listText}\n\n¿Deseas que te enviemos algún producto a domicilio? Indícanos la cantidad, tu dirección y en qué barrio te encuentras.`,
           actionTaken: "stock_checked",
         }
       } else {
@@ -347,7 +356,7 @@ export async function processWhatsAppMessage(params: {
         result = {
           reply:
             (config?.welcomeMessage?.trim() ||
-              `👋 *¡Hola! Bienvenido a la atención por ${effectiveChannel === "telegram" ? "Telegram" : "WhatsApp"} de ${branch?.name || "OmniPOS"}.*\n\n¿En qué te podemos ayudar hoy?\n1️⃣ *Hacer un Pedido:* Envíanos tu lista y tu dirección de entrega.\n2️⃣ *Consultar Precios:* Escríbenos el nombre del producto que buscas.\n3️⃣ *Consultar Fiados / Deuda:* Pregúntanos _"¿Cuánto debo?"_.`) + topList,
+              `👋 *¡Hola! Bienvenido a la atención por ${effectiveChannel === "telegram" ? "Telegram" : "WhatsApp"} de ${branch?.name || "OmniPOS"}.*\n\n¿En qué te podemos ayudar hoy?\n1️⃣ *Hacer un Pedido:* Envíanos tu lista, tu dirección y tu barrio.\n2️⃣ *Consultar Precios:* Escríbenos el nombre del producto que buscas.\n3️⃣ *Consultar Fiados / Deuda:* Pregúntanos _"¿Cuánto debo?"_.`) + topList,
           actionTaken: "menu_shown",
         }
       }
@@ -357,7 +366,7 @@ export async function processWhatsAppMessage(params: {
   // Garantizar que la respuesta nunca sea nula o vacía
   if (!result || !result.reply || !result.reply.trim()) {
     result = {
-      reply: `👋 *¡Hola! Bienvenido a ${branch?.name || "nuestra tienda"}.*\n\n¿En qué te podemos ayudar hoy?\n• Escríbenos los productos que necesitas y te los despachamos a domicilio.\n• Pregúntanos precios o disponibilidad de cualquier artículo.\n\n¡Estamos a tu servicio!`,
+      reply: `👋 *¡Hola! Bienvenido a ${branch?.name || "nuestra tienda"}.*\n\n¿En qué te podemos ayudar hoy?\n• Escríbenos los productos que necesitas, tu dirección y tu barrio, y te los despachamos a domicilio.\n• Pregúntanos precios o disponibilidad de cualquier artículo.\n\n¡Estamos a tu servicio!`,
       actionTaken: "menu_shown",
     }
   }
@@ -569,6 +578,10 @@ async function processWithLLMAI(params: {
     content: m.text.slice(0, 200), // Máximo 200 caracteres por mensaje para ahorrar tokens
   }))
 
+  // 2.1 Cargar configuración oficial de tarifas de domicilio para esta sede
+  const deliveryConfig = await getDeliveryConfig(branchId)
+  const deliveryPromptContext = formatDeliveryPromptContext(deliveryConfig)
+
   // 3. Prompt de sistema ultra-conciso y optimizado
   const systemPrompt = `Eres el asistente virtual comercial de "${branchName}" por ${channelLabel}.
 Tu misión: Atender con calidez, consultar precios, sugerir productos, dar estado de pedidos en tiempo real y tomar órdenes a domicilio.
@@ -579,18 +592,27 @@ REGLAS DE ORO (Ahorro de tokens y precisión):
 3. Si el cliente saluda, envía "/start" o pregunta qué productos hay o qué venden, dale la bienvenida a "${branchName}" y lista los productos disponibles indicando su precio exacto y disponibilidad.
 4. Si el cliente pide o menciona un producto que NO está en el catálogo, indícale amablemente que no lo manejas en esta sede y recomiéndale los que sí tienes disponibles.
 5. Datos del cliente: Nombre "${client.name}". Fiado / saldo pendiente: $${clientBalance.toLocaleString("es-CO")}. Dirección registrada: ${client.address ? `"${client.address}"` : "Ninguna"}.
-6. PROTOCOLO OBLIGATORIO DE TOMA DE PEDIDOS (UN PASO A LA VEZ):
-Para poder crear un pedido se requieren: Productos válidos, Dirección de entrega, Costo del domicilio informado y Forma de pago.
-- SI EL CLIENTE TIENE DIRECCIÓN REGISTRADA (${client.address ? `"${client.address}"` : "ninguna"}):
-  * ANTES de generar el pedido, debes preguntarle: "¿Te lo enviamos a tu dirección registrada ${client.address || "..."} o a otra dirección?".
-- SI EL CLIENTE DA O CONFIRMA SU DIRECCIÓN POR PRIMERA VEZ (ej: "Barrio El Dorado, Manzana 12"):
-  * Anota la dirección amablemente.
-  * Si en el chat aún no se ha indicado el costo del domicilio, dile: "Perfecto, anotada tu dirección: [Dirección]. Estamos calculando el valor del envío según tu zona para darte el total exacto. ¿Cómo prefieres pagar: en efectivo o transferencia?".
-  * ⚠️ NUNCA agregues [ORDEN_AUTO] si aún no se ha fijado el costo del domicilio en la conversación.
+6. PROTOCOLO OBLIGATORIO DE TOMA DE PEDIDOS Y COSTO DE DOMICILIO:
+${deliveryPromptContext}
+
+- EL AGENTE ES QUIEN DEBE PREGUNTAR LA DIRECCIÓN INCLUYENDO EL BARRIO:
+  * Cuando el cliente quiera pedir productos a domicilio pero no haya indicado su dirección completa o su barrio:
+    TÚ debes preguntarle directamente: "¿A qué dirección te lo enviamos y en qué barrio te encuentras?".
+  * Si el cliente ya tiene dirección registrada (${client.address ? `"${client.address}"` : "ninguna"}):
+    Pregúntale: "¿Te lo enviamos a tu dirección registrada ${client.address || "..."} o a otra dirección? Por favor confírmanos también en qué barrio te encuentras".
+
+- EL AGENTE ES QUIEN DEFINE Y VALIDA LA TARIFA (NUNCA EL CLIENTE):
+  * TÚ analizas lo que respondió el cliente y verificas si el barrio coincide con la tabla de tarifas guardadas:
+    1. Si el barrio coincide con la lista guardada (ejemplo: Barrio El Dorado): TÚ tomas y aplicas la tarifa guardada para ese barrio.
+    2. Si el barrio NO coincide con la lista guardada, si es un barrio diferente, o si el cliente solo dio una dirección general: TÚ aplicas automáticamente la TARIFA GLOBAL OBLIGATORIA ($${deliveryConfig.globalFee.toLocaleString("es-CO")}).
+  * En cualquiera de los dos casos, suma INMEDIATAMENTE: Subtotal productos + Costo de envío definido por ti = Total a pagar.
+    Infórmale de una vez al cliente el total exacto con envío:
+    "Tus productos suman $[Subtotal] + envío ($[Tarifa]) = Total a pagar: $[Total]. ¿Cómo prefieres pagar: en efectivo contraentrega o por transferencia?".
+
 - ⚠️ PROHIBICIÓN ESTRICTA DE ORDEN PREMATURA:
-  * Si en tu mensaje estás PREGUNTANDO o CONFIRMANDO la dirección o la forma de pago: NUNCA agregues el bloque [ORDEN_AUTO].
-  * ÚNICAMENTE debes agregar el bloque [ORDEN_AUTO] cuando en el chat ya se haya indicado o fijado el costo del envío (o el operador lo haya anexado) Y el cliente ya haya elegido forma de pago.
-[ORDEN_AUTO: {"items": [{"name": "nombre del producto del catalogo", "qty": 1}], "address": "dirección confirmada por el cliente", "deliveryFee": 3000, "paymentMethod": "efectivo" | "transferencia", "cashPaid": 50000}]
+  * Si en tu mensaje estás PREGUNTANDO la dirección/barrio o el método de pago: NUNCA agregues el bloque [ORDEN_AUTO].
+  * ÚNICAMENTE debes agregar el bloque [ORDEN_AUTO] cuando en el chat el cliente ya haya elegido o indicado su forma de pago.
+[ORDEN_AUTO: {"items": [{"name": "nombre del producto del catalogo", "qty": 1}], "address": "dirección y barrio confirmados", "deliveryFee": 5000, "paymentMethod": "efectivo" | "transferencia", "cashPaid": 50000}]
 7. CONSULTAS Y ESTADO DE PEDIDOS (TRAZABILIDAD EN TIEMPO REAL):
 Si el cliente pregunta cómo va su pedido, dónde está, si ya salió o por el estado de su orden:
 - Consulta OBLIGATORIAMENTE la sección "ÚLTIMO PEDIDO DEL CLIENTE" abajo.
@@ -787,7 +809,11 @@ ${catalogContext}`
         // Ambos inician como 'pendiente' hasta que el admin verifique el comprobante o el domiciliario cobre
         const paymentStatus = "pendiente"
 
-        const deliveryFee = Number(orderPayload.deliveryFee) || 0
+        let deliveryFee = Number(orderPayload.deliveryFee)
+        const resolvedDelivery = resolveDeliveryFee(`${finalAddress} ${message} ${rawReply}`, deliveryConfig)
+        if (isNaN(deliveryFee) || deliveryFee <= 0) {
+          deliveryFee = resolvedDelivery.fee
+        }
         const total = subtotal + deliveryFee
 
         const cashPaid = Number(orderPayload.cashPaid) || 0
@@ -813,7 +839,7 @@ ${catalogContext}`
             customerPhone: cleanPhone,
             deliveryAddress: finalAddress,
             deliveryNotes: paymentNote,
-            notes: `Generado automáticamente por ${isTelegram ? `Telegram (@${config?.telegramBotUsername || "Bot"})` : "WhatsApp"} & ${providerName} IA (${branchName}).`,
+            notes: `Generado automáticamente por ${isTelegram ? `Telegram (@${config?.telegramBotUsername || "Bot"})` : "WhatsApp"} & ${providerName} IA (${branchName}). ${resolvedDelivery.appliedRule}.`,
             subtotal,
             tax: 0,
             deliveryFee,

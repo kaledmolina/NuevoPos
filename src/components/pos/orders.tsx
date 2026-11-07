@@ -67,6 +67,9 @@ import {
   IconBrandGoogleMaps,
   IconDotsVertical,
   IconBoxSeam,
+  IconTrash,
+  IconSettings,
+  IconSparkles,
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -130,6 +133,12 @@ interface ProductItem {
   name: string
   price: number
   stock: number
+}
+
+interface NeighborhoodRate {
+  id: string
+  neighborhood: string
+  fee: number
 }
 
 const STATUS_CONFIG: Record<
@@ -220,12 +229,133 @@ export default function OrdersView() {
   const [customerPhone, setCustomerPhone] = useState("")
   const [deliveryAddress, setDeliveryAddress] = useState("")
   const [deliveryNotes, setDeliveryNotes] = useState("")
-  const [deliveryFee, setDeliveryFee] = useState<number>(3000)
+  const [deliveryFee, setDeliveryFee] = useState<number>(5000)
   const [paymentMethod, setPaymentMethod] = useState("contraentrega")
   const [orderNotes, setOrderNotes] = useState("")
   const [catalogProducts, setCatalogProducts] = useState<ProductItem[]>([])
   const [cartItems, setCartItems] = useState<{ productId: string; name: string; price: number; quantity: number }[]>([])
   const [savingOrder, setSavingOrder] = useState(false)
+
+  // Modal de Ajustes de Tarifas de Domicilio & Tarifas por Barrio
+  const [deliverySettingsModalOpen, setDeliverySettingsModalOpen] = useState(false)
+  const [loadingDeliverySettings, setLoadingDeliverySettings] = useState(false)
+  const [savingDeliverySettings, setSavingDeliverySettings] = useState(false)
+  const [globalDeliveryFee, setGlobalDeliveryFee] = useState<number>(5000)
+  const [neighborhoodRates, setNeighborhoodRates] = useState<NeighborhoodRate[]>([])
+  const [newNeighborhood, setNewNeighborhood] = useState("")
+  const [newNeighborhoodFee, setNewNeighborhoodFee] = useState("")
+  const [neighborhoodSearch, setNeighborhoodSearch] = useState("")
+
+  const detectDeliveryFee = useCallback(
+    (address: string, fallbackFee = globalDeliveryFee) => {
+      if (!address || !address.trim()) return fallbackFee
+      const normalized = address.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      for (const rate of neighborhoodRates) {
+        const normNeighborhood = rate.neighborhood.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        if (normNeighborhood && normalized.includes(normNeighborhood)) {
+          return rate.fee
+        }
+      }
+      return fallbackFee
+    },
+    [neighborhoodRates, globalDeliveryFee]
+  )
+
+  const fetchDeliverySettings = useCallback(async () => {
+    try {
+      setLoadingDeliverySettings(true)
+      const res = await apiFetch<{
+        ok: boolean
+        config: { globalFee: number; neighborhoodRates: NeighborhoodRate[] }
+      }>("/api/delivery-settings")
+      if (res?.ok && res.config) {
+        setGlobalDeliveryFee(res.config.globalFee ?? 5000)
+        setNeighborhoodRates(res.config.neighborhoodRates ?? [])
+      }
+    } catch (e) {
+      console.warn("No se pudo cargar configuración de domicilios:", e)
+    } finally {
+      setLoadingDeliverySettings(false)
+    }
+  }, [])
+
+  const handleOpenDeliverySettings = async () => {
+    setDeliverySettingsModalOpen(true)
+    await fetchDeliverySettings()
+  }
+
+  const handleAddNeighborhood = () => {
+    const name = newNeighborhood.trim()
+    const feeNum = Number(newNeighborhoodFee)
+    if (!name) {
+      toast.error("Por favor escribe el nombre del barrio")
+      return
+    }
+    if (isNaN(feeNum) || feeNum < 0) {
+      toast.error("Ingresa un costo de envío válido (mayor o igual a 0)")
+      return
+    }
+    const exists = neighborhoodRates.some(
+      (r) => r.neighborhood.toLowerCase().trim() === name.toLowerCase()
+    )
+    if (exists) {
+      toast.error(`El barrio "${name}" ya está configurado en la lista.`)
+      return
+    }
+    setNeighborhoodRates((prev) => [
+      ...prev,
+      {
+        id: `nr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        neighborhood: name,
+        fee: feeNum,
+      },
+    ])
+    setNewNeighborhood("")
+    setNewNeighborhoodFee("")
+    toast.success(`Barrio "${name}" agregado a la lista`)
+  }
+
+  const handleRemoveNeighborhood = (id: string) => {
+    setNeighborhoodRates((prev) => prev.filter((r) => r.id !== id))
+  }
+
+  const handleSaveDeliverySettings = async () => {
+    if (isNaN(globalDeliveryFee) || globalDeliveryFee < 0) {
+      toast.error("La tarifa global es obligatoria y debe ser mayor o igual a 0.")
+      return
+    }
+    try {
+      setSavingDeliverySettings(true)
+      const res = await apiFetch<{
+        ok: boolean
+        message?: string
+        config: { globalFee: number; neighborhoodRates: NeighborhoodRate[] }
+      }>("/api/delivery-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          globalFee: Number(globalDeliveryFee),
+          neighborhoodRates,
+        }),
+      })
+
+      if (res?.ok) {
+        toast.success("¡Tarifas de domicilio guardadas con éxito! El agente de IA ya las tiene sincronizadas.")
+        if (res.config) {
+          setGlobalDeliveryFee(res.config.globalFee)
+          setNeighborhoodRates(res.config.neighborhoodRates)
+        }
+        setDeliverySettingsModalOpen(false)
+      } else {
+        toast.error("No se pudo guardar la configuración de domicilios")
+      }
+    } catch (e: any) {
+      console.error(e)
+      toast.error(e.message || "Error al guardar las tarifas de domicilio")
+    } finally {
+      setSavingDeliverySettings(false)
+    }
+  }
 
   // Cargar pedidos y conductores
   const fetchOrders = useCallback(async () => {
@@ -270,7 +400,8 @@ export default function OrdersView() {
     fetchOrders()
     fetchStaff()
     fetchProducts()
-  }, [fetchOrders, fetchStaff, fetchProducts])
+    fetchDeliverySettings()
+  }, [fetchOrders, fetchStaff, fetchProducts, fetchDeliverySettings])
 
   // Filtrado
   const filteredOrders = useMemo(() => {
@@ -656,9 +787,22 @@ export default function OrdersView() {
           </Button>
 
           <Button
+            variant="outline"
+            size="sm"
+            onClick={handleOpenDeliverySettings}
+            className="rounded-xl h-9 text-xs gap-1.5 border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-foreground shadow-2xs"
+          >
+            <IconMotorbike className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            Tarifas de Domicilio
+          </Button>
+
+          <Button
             size="sm"
             data-tour="orders-new-btn"
-            onClick={() => setNewOrderModalOpen(true)}
+            onClick={() => {
+              setDeliveryFee(globalDeliveryFee)
+              setNewOrderModalOpen(true)
+            }}
             className="rounded-xl h-9 text-xs gap-1.5 bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 shadow-xs"
           >
             <IconPlus className="h-4 w-4" />
@@ -1923,11 +2067,24 @@ export default function OrdersView() {
               </div>
 
               <div className="space-y-1 sm:col-span-2">
-                <Label className="text-xs font-semibold">Dirección de Entrega *</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold">Dirección de Entrega *</Label>
+                  {deliveryAddress && (
+                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                      <IconMapPin className="h-3 w-3" />
+                      Tarifa sugerida: ${formatCurrency(detectDeliveryFee(deliveryAddress, globalDeliveryFee))}
+                    </span>
+                  )}
+                </div>
                 <Input
                   value={deliveryAddress}
-                  onChange={(e) => setDeliveryAddress(e.target.value)}
-                  placeholder="Ej. Calle 100 # 15-20, Apto 502 Torre A"
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setDeliveryAddress(val)
+                    const autoFee = detectDeliveryFee(val, globalDeliveryFee)
+                    setDeliveryFee(autoFee)
+                  }}
+                  placeholder="Ej. Calle 100 # 15-20, Barrio El Dorado"
                   className="h-9 text-xs rounded-xl"
                 />
               </div>
@@ -2066,6 +2223,231 @@ export default function OrdersView() {
             >
               <IconCheck className="h-4 w-4" />
               {savingOrder ? "Creando..." : "Guardar y Despachar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL 4: AJUSTE DE TARIFAS DE DOMICILIO & ENVÍOS (AGENTE IA) */}
+      <Dialog open={deliverySettingsModalOpen} onOpenChange={setDeliverySettingsModalOpen}>
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-hidden flex flex-col p-6 rounded-2xl">
+          <DialogHeader className="shrink-0">
+            <div className="flex items-center gap-2.5">
+              <div className="h-10 w-10 rounded-xl bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-800 shrink-0">
+                <IconMotorbike className="h-5 w-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-base sm:text-lg font-bold">
+                  Tarifas de Domicilio & Envíos
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  Configura el costo estándar obligatorio y tarifas por barrio para que el Agente IA calcule de inmediato el total en el chat.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-5 pr-1 py-1">
+            {/* 1. Tarifa Global (Obligatoria) */}
+            <div className="p-4 rounded-xl border border-border/80 bg-muted/20 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <Label className="text-xs font-bold text-foreground">
+                      Tarifa Global del Costo de Domicilio
+                    </Label>
+                    <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-primary/90">
+                      Obligatorio
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Costo estándar que el agente de IA cobrará automáticamente si el barrio indicado por el cliente no está en la lista de barrios especiales.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-bold">
+                    $
+                  </span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="500"
+                    value={globalDeliveryFee}
+                    onChange={(e) => setGlobalDeliveryFee(Math.max(0, Number(e.target.value) || 0))}
+                    placeholder="5000"
+                    className="pl-7 h-10 text-sm font-semibold rounded-xl"
+                  />
+                </div>
+                <div className="text-xs text-muted-foreground font-mono font-medium">
+                  COP (${formatCurrency(globalDeliveryFee)})
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Tarifas Personalizadas por Barrio (Opcional) */}
+            <div className="p-4 rounded-xl border border-border/80 bg-muted/20 space-y-3">
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-xs font-bold text-foreground">
+                    Tarifas Personalizadas por Barrio
+                  </Label>
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
+                    Opcional
+                  </Badge>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Agrega barrios específicos donde apliques tarifas especiales (cercanos, lejanos o especiales). El agente de IA buscará el barrio en esta lista antes de aplicar la tarifa global.
+                </p>
+              </div>
+
+              {/* Formulario para agregar nuevo barrio */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-1">
+                <div className="sm:col-span-6">
+                  <Input
+                    placeholder="Nombre del barrio (ej: El Dorado, Centro...)"
+                    value={newNeighborhood}
+                    onChange={(e) => setNewNeighborhood(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        handleAddNeighborhood()
+                      }
+                    }}
+                    className="h-9 text-xs rounded-xl"
+                  />
+                </div>
+                <div className="sm:col-span-4 relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-bold">
+                    $
+                  </span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="500"
+                    placeholder="Costo (ej: 4000)"
+                    value={newNeighborhoodFee}
+                    onChange={(e) => setNewNeighborhoodFee(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        handleAddNeighborhood()
+                      }
+                    }}
+                    className="pl-7 h-9 text-xs rounded-xl"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleAddNeighborhood}
+                    className="w-full h-9 text-xs rounded-xl gap-1 bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-zinc-200"
+                  >
+                    <IconPlus className="h-3.5 w-3.5" />
+                    Agregar
+                  </Button>
+                </div>
+              </div>
+
+              {/* Buscador de barrios si hay más de 3 */}
+              {neighborhoodRates.length > 3 && (
+                <div className="relative pt-1">
+                  <IconSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar barrio configurado..."
+                    value={neighborhoodSearch}
+                    onChange={(e) => setNeighborhoodSearch(e.target.value)}
+                    className="h-8 pl-8 text-xs rounded-lg bg-background"
+                  />
+                </div>
+              )}
+
+              {/* Lista de Barrios Configurados */}
+              <div className="mt-2 space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                {neighborhoodRates.length === 0 ? (
+                  <div className="p-4 rounded-xl border border-dashed border-border/70 text-center space-y-1">
+                    <IconMapPin className="h-6 w-6 text-muted-foreground/60 mx-auto" />
+                    <p className="text-xs font-medium text-foreground">
+                      No hay barrios especiales registrados
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      El agente de IA usará la tarifa global obligatoria (${formatCurrency(globalDeliveryFee)}) para todos los clientes y pedidos.
+                    </p>
+                  </div>
+                ) : (
+                  neighborhoodRates
+                    .filter((r) =>
+                      !neighborhoodSearch.trim() ||
+                      r.neighborhood.toLowerCase().includes(neighborhoodSearch.toLowerCase().trim())
+                    )
+                    .map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between p-2.5 rounded-xl bg-background border border-border/60 text-xs hover:border-border transition-colors"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <IconMapPin className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <span className="font-semibold text-foreground truncate">
+                            {item.neighborhood}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2.5 shrink-0">
+                          <Badge variant="secondary" className="font-mono text-xs font-bold px-2 py-0.5">
+                            ${formatCurrency(item.fee)}
+                          </Badge>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleRemoveNeighborhood(item.id)}
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg"
+                            title="Eliminar tarifa de este barrio"
+                          >
+                            <IconTrash className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                )}
+              </div>
+
+              {neighborhoodRates.length > 0 && (
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1">
+                  <span>Total barrios configurados: <strong>{neighborhoodRates.length}</strong></span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">✓ Sincronizado con IA</span>
+                </div>
+              )}
+            </div>
+
+            {/* Tip explicativo del funcionamiento del Agente de IA */}
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
+              <IconSparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+              <div>
+                <strong>¿Cómo funciona en el chat?</strong> El agente le preguntará al cliente su dirección y barrio. Luego el agente validará si lo que respondió el cliente coincide con algún barrio de esta lista: si coincide aplicará esa tarifa especial; si no coincide o no está en la lista, aplicará automáticamente la tarifa global obligatoria y le dirá de inmediato el total exacto con envío.
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0 pt-3 border-t shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDeliverySettingsModalOpen(false)}
+              className="rounded-xl text-xs"
+              disabled={savingDeliverySettings}
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSaveDeliverySettings}
+              disabled={savingDeliverySettings || loadingDeliverySettings}
+              className="rounded-xl text-xs font-bold bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 gap-1.5"
+            >
+              <IconCheck className="h-4 w-4" />
+              {savingDeliverySettings ? "Guardando tarifas..." : "Guardar Tarifas"}
             </Button>
           </DialogFooter>
         </DialogContent>

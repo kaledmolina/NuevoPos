@@ -57,6 +57,8 @@ export async function POST(req: NextRequest) {
       "tax_name",
       "enable_expiration",
       "receipt_message",
+      "delivery_global_fee",
+      "delivery_neighborhood_rates",
     ]
 
     const updates: { key: string; value: string }[] = []
