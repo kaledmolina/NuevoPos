@@ -18,7 +18,7 @@ model User {
   role             String   // superadmin | admin | vendedor
   pinHash          String   // HMAC del PIN con AUTH_SECRET
   isPrimary        Boolean  @default(false) // Admin principal inmutable
-  allowedBranchIds String   @default("[]") @db.Text // IDs de sedes permitidas en formato JSON string
+  allowedBranchIds String   @default("[]") @db.VarChar(1000) // IDs de sedes permitidas en formato JSON string
   tenantId         String?  // Relación con su Tenant / Negocio (null para Superadmin global)
   tenant           Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   active           Boolean  @default(true)

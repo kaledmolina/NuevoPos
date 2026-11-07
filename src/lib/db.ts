@@ -39,7 +39,7 @@ export async function ensureMySqlTextColumns(): Promise<void> {
     await db.$executeRawUnsafe(`ALTER TABLE Product MODIFY COLUMN description TEXT;`).catch(() => {})
     await db.$executeRawUnsafe(`ALTER TABLE Client MODIFY COLUMN notes TEXT;`).catch(() => {})
     await db.$executeRawUnsafe(`ALTER TABLE Client MODIFY COLUMN address TEXT;`).catch(() => {})
-    await db.$executeRawUnsafe(`ALTER TABLE User MODIFY COLUMN allowedBranchIds TEXT;`).catch(() => {})
+    await db.$executeRawUnsafe(`ALTER TABLE User MODIFY COLUMN allowedBranchIds VARCHAR(1000) NOT NULL DEFAULT '[]';`).catch(() => {})
     await db.$executeRawUnsafe(`ALTER TABLE AuditLog MODIFY COLUMN detail TEXT;`).catch(() => {})
     await db.$executeRawUnsafe(`ALTER TABLE AuditLog MODIFY COLUMN meta TEXT;`).catch(() => {})
     await db.$executeRawUnsafe(`ALTER TABLE Setting MODIFY COLUMN value TEXT;`).catch(() => {})
