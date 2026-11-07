@@ -73,6 +73,8 @@ import {
   IconBolt,
   IconChecklist,
   IconExternalLink,
+  IconAlertTriangle,
+  IconAlertCircle,
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -171,6 +173,29 @@ export const CURATED_OPENROUTER_MODELS = [
   { id: "mistralai/mistral-large-2411", name: "Mistral Large", provider: "Mistral", badge: "🇪🇺 Fluido en Español", isFree: false },
   { id: "qwen/qwen-2.5-72b-instruct", name: "Qwen 2.5 72B", provider: "Alibaba", badge: "📊 Alta Precisión", isFree: false },
 ]
+
+export interface OpenRouterQuotaInfo {
+  ok: boolean
+  configured: boolean
+  isFreeModel: boolean
+  model: string
+  isExhausted: boolean
+  exhaustedReason: string | null
+  lastExhaustedAt: string | null
+  probeSuccess?: boolean | null
+  probeLatency?: number | null
+  keyInfo?: {
+    label?: string
+    usageUsd?: number
+    limitUsd?: number | null
+    isFreeTier?: boolean
+    rateLimit?: {
+      requests: number
+      interval: string
+    } | null
+  } | null
+  message: string
+}
 
 interface BranchConfig {
   id?: string
@@ -308,6 +333,10 @@ export default function WhatsAppAgentView() {
   const [copiedToken, setCopiedToken] = useState(false)
   const [copiedTgWebhook, setCopiedTgWebhook] = useState(false)
 
+  // Estado del monitor de cuota y peticiones gratis en OpenRouter
+  const [openrouterQuota, setOpenrouterQuota] = useState<OpenRouterQuotaInfo | null>(null)
+  const [loadingQuota, setLoadingQuota] = useState(false)
+
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
   const prevMsgCountRef = useRef(0)
@@ -324,6 +353,34 @@ export default function WhatsAppAgentView() {
       chatScrollRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "auto" })
     }
   }, [])
+
+  // 1.1 Verificar estado y cuota de peticiones gratuitas en OpenRouter
+  const checkOpenRouterQuota = useCallback(
+    async (probe = false) => {
+      try {
+        setLoadingQuota(true)
+        const url = `/api/whatsapp/openrouter-quota?branchId=${encodeURIComponent(currentBranchId)}${probe ? "&probe=true" : ""}`
+        const res = await apiFetch<OpenRouterQuotaInfo>(url)
+        if (res && res.ok) {
+          setOpenrouterQuota(res)
+          if (probe) {
+            if (res.isExhausted) {
+              toast.error(res.exhaustedReason || "Cuota o límite de peticiones gratuitas alcanzado en OpenRouter (Error 429).")
+            } else {
+              toast.success("✅ Peticiones gratuitas de OpenRouter activas y respondiendo normalmente.")
+            }
+          }
+        }
+      } catch (err: any) {
+        if (probe) {
+          toast.error("Error al comprobar cuota: " + err.message)
+        }
+      } finally {
+        setLoadingQuota(false)
+      }
+    },
+    [currentBranchId]
+  )
 
   // 1. Cargar Configuración de la Sede
   const loadBranchConfig = useCallback(async (bId: string) => {
@@ -349,13 +406,30 @@ export default function WhatsAppAgentView() {
           telegramBotUsername: res.config.telegramBotUsername || "",
           telegramEnabled: Boolean(res.config.telegramEnabled),
         })
+        if (res.config.aiProvider === "openrouter" || res.config.hasOpenRouterKey) {
+          checkOpenRouterQuota(false)
+        }
       }
     } catch {
       // noop
     } finally {
       setLoadingConfig(false)
     }
-  }, [])
+  }, [checkOpenRouterQuota])
+
+  // Polling periódico de cuota OpenRouter si se usa un modelo gratuito (cada 30s)
+  useEffect(() => {
+    const isFree =
+      config.aiProvider === "openrouter" &&
+      (config.openrouterModel === "openrouter/free" || config.openrouterModel?.endsWith(":free"))
+    if (!isFree) return
+
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return
+      checkOpenRouterQuota(false)
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [config.aiProvider, config.openrouterModel, checkOpenRouterQuota])
 
   // 2. Cargar lista de conversaciones para la sede activa
   const loadConversations = useCallback(async (selectFirst = false) => {
@@ -536,8 +610,10 @@ export default function WhatsAppAgentView() {
 
       if (res && res.ok) {
         toast.success(`¡${isOpener ? "OpenRouter" : "DeepSeek"} Conectado! Modelo: ${res.model} (${res.latencyMs}ms)`)
+        if (isOpener) checkOpenRouterQuota(false)
       } else {
         toast.error(res.error || `No se pudo conectar con ${isOpener ? "OpenRouter" : "DeepSeek"}`)
+        if (isOpener) checkOpenRouterQuota(false)
       }
     } catch (e) {
       toast.error("Error de conexión: " + (e as Error).message)
@@ -972,9 +1048,31 @@ export default function WhatsAppAgentView() {
               </h1>
               {config.aiProvider === "openrouter" ? (
                 config.hasOpenRouterKey ? (
-                  <Badge variant="outline" className="text-[10px] font-mono tracking-wider bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30">
-                    ⚡ OpenRouter ({config.openrouterModel?.split("/")[1] || config.openrouterModel || "deepseek-chat"})
-                  </Badge>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Badge variant="outline" className="text-[10px] font-mono tracking-wider bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30">
+                      ⚡ OpenRouter ({config.openrouterModel?.split("/")[1] || config.openrouterModel || "deepseek-chat"})
+                    </Badge>
+                    {(config.openrouterModel === "openrouter/free" || config.openrouterModel?.endsWith(":free")) && (
+                      openrouterQuota?.isExhausted ? (
+                        <Badge
+                          variant="outline"
+                          onClick={() => setMainTab("config")}
+                          className="text-[10px] font-mono tracking-wider bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/40 flex items-center gap-1 animate-pulse cursor-pointer hover:bg-rose-500/25 transition"
+                          title={openrouterQuota.exhaustedReason || "Cuota gratuita agotada"}
+                        >
+                          <IconAlertTriangle className="h-3 w-3 text-rose-500" />
+                          ⚠️ Cuota Free Agotada
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] font-mono tracking-wider bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 flex items-center gap-1"
+                        >
+                          🎁 Free: Peticiones OK
+                        </Badge>
+                      )
+                    )}
+                  </div>
                 ) : (
                   <Badge variant="outline" className="text-[10px] font-mono text-amber-600 dark:text-amber-400 border-dashed border-amber-400">
                     OpenRouter Pendiente
@@ -1380,6 +1478,19 @@ export default function WhatsAppAgentView() {
                             : config.hasDeepSeekKey
                             ? `DeepSeek (${config.deepseekModel})`
                             : "Motor Local"}
+                          {config.aiProvider === "openrouter" &&
+                            (config.openrouterModel === "openrouter/free" || config.openrouterModel?.endsWith(":free")) && (
+                              <span
+                                className={cn(
+                                  "ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold",
+                                  openrouterQuota?.isExhausted
+                                    ? "bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/40"
+                                    : "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
+                                )}
+                              >
+                                {openrouterQuota?.isExhausted ? "⚠️ Cuota Free Agotada" : "🎁 Free OK"}
+                              </span>
+                            )}
                         </span>
                       )}
                     </span>
@@ -1396,6 +1507,53 @@ export default function WhatsAppAgentView() {
                     {aiActiveForChat[selectedPhone] === false ? "Reanudar IA" : "Pausar IA"}
                   </button>
                 </div>
+
+                {/* Alerta visible si la cuota gratuita de OpenRouter está agotada */}
+                {config.aiProvider === "openrouter" &&
+                  (config.openrouterModel === "openrouter/free" || config.openrouterModel?.endsWith(":free")) &&
+                  openrouterQuota?.isExhausted && (
+                    <div className="mx-3 my-2 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-950 dark:text-rose-200 flex items-start justify-between gap-3 text-xs shrink-0 shadow-xs">
+                      <div className="flex items-start gap-2">
+                        <IconAlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <p className="font-bold text-[11px] text-rose-950 dark:text-rose-100">
+                            Cuota o límite de peticiones gratuitas agotado en OpenRouter (Error 429)
+                          </p>
+                          <p className="text-[10px] text-rose-800/90 dark:text-rose-300/90 leading-tight">
+                            {openrouterQuota.exhaustedReason ||
+                              "La API no puede responder en este momento porque se ha alcanzado el límite gratuito. Espera unos minutos o cambia de modelo en Configuración."}
+                          </p>
+                          {openrouterQuota.lastExhaustedAt && (
+                            <p className="text-[9px] text-rose-700/80 dark:text-rose-400/80 font-mono">
+                              Detectado: {formatDateTime(openrouterQuota.lastExhaustedAt)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => checkOpenRouterQuota(true)}
+                          disabled={loadingQuota}
+                          className="h-6 px-2 text-[10px] font-bold rounded-lg bg-rose-600 text-white hover:bg-rose-700 border-transparent hover:text-white gap-1 cursor-pointer"
+                        >
+                          <IconRefresh className={cn("h-2.5 w-2.5", loadingQuota && "animate-spin")} />
+                          {loadingQuota ? "Probando..." : "Comprobar"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setMainTab("config")}
+                          className="h-6 px-2 text-[10px] font-bold rounded-lg border-rose-300 dark:border-rose-700 hover:bg-rose-500/10 cursor-pointer"
+                        >
+                          Cambiar Modelo
+                        </Button>
+                      </div>
+                    </div>
+                  )}
 
                 {/* Mensajes del chat scrollables */}
                 <div
@@ -2232,15 +2390,121 @@ export default function WhatsAppAgentView() {
                         </a>
                       </div>
 
-                      {/* Notificación informativa cuando un modelo gratuito está activo */}
+                      {/* Notificación y Monitor de Cuota cuando un modelo gratuito está activo */}
                       {(config.openrouterModel === "openrouter/free" || config.openrouterModel?.endsWith(":free")) && (
-                        <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
-                          <span className="text-base shrink-0">✨</span>
-                          <div className="space-y-0.5">
-                            <p className="font-bold">Modo 100% Gratuito Activado ({config.openrouterModel})</p>
-                            <p className="text-[10px] text-emerald-800/80 dark:text-emerald-300/80">
-                              OpenRouter procesará los mensajes sin consumir saldo ($0 USD). Ideal para ahorrar tokens y reducir costos a cero.
-                            </p>
+                        <div className="space-y-2 pt-1">
+                          {/* Banner informativo modo free */}
+                          <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
+                            <span className="text-base shrink-0">✨</span>
+                            <div className="space-y-0.5">
+                              <p className="font-bold">Modo 100% Gratuito Activado ({config.openrouterModel})</p>
+                              <p className="text-[10px] text-emerald-800/80 dark:text-emerald-300/80">
+                                OpenRouter procesará los mensajes sin consumir saldo ($0 USD). Ideal para ahorrar tokens y reducir costos a cero.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Monitor en vivo de estado y cuota */}
+                          <div
+                            className={cn(
+                              "p-3 rounded-2xl border transition-all space-y-2.5",
+                              openrouterQuota?.isExhausted
+                                ? "bg-rose-500/10 border-rose-500/30 text-rose-950 dark:text-rose-200"
+                                : "bg-zinc-50/80 dark:bg-zinc-900/80 border-zinc-200 dark:border-zinc-800"
+                            )}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                {openrouterQuota?.isExhausted ? (
+                                  <IconAlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                                ) : (
+                                  <IconSparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                )}
+                                <div>
+                                  <h4 className="text-xs font-bold leading-tight">
+                                    {openrouterQuota?.isExhausted
+                                      ? "⚠️ Cuota Free Agotada / Límite Alcanzado (429)"
+                                      : "Monitor de Cuota & Peticiones Gratuitas"}
+                                  </h4>
+                                  <p className="text-[10px] text-muted-foreground">
+                                    Estado en tiempo real para OpenRouter Free Tier
+                                  </p>
+                                </div>
+                              </div>
+
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => checkOpenRouterQuota(true)}
+                                disabled={loadingQuota}
+                                className={cn(
+                                  "h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 cursor-pointer shadow-xs",
+                                  openrouterQuota?.isExhausted
+                                    ? "bg-rose-600 text-white hover:bg-rose-700 border-transparent hover:text-white"
+                                    : "bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100"
+                                )}
+                              >
+                                <IconRefresh className={cn("h-3 w-3", loadingQuota && "animate-spin")} />
+                                {loadingQuota ? "Probando..." : "Comprobar en Vivo"}
+                              </Button>
+                            </div>
+
+                            {/* Detalle si está agotado o disponible */}
+                            {openrouterQuota?.isExhausted ? (
+                              <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-[11px] space-y-1.5">
+                                <p className="font-bold text-rose-950 dark:text-rose-100">
+                                  La API de OpenRouter ha consumido el cupo o límite de peticiones gratuitas.
+                                </p>
+                                <p className="text-[10px] text-rose-900/90 dark:text-rose-300/90 leading-relaxed">
+                                  {openrouterQuota.exhaustedReason ||
+                                    "Error 429: Se ha superado el límite de llamadas gratuitas por minuto o por cuota diaria en OpenRouter."}
+                                </p>
+                                {openrouterQuota.lastExhaustedAt && (
+                                  <p className="text-[9px] text-rose-700/80 dark:text-rose-400/80 font-mono">
+                                    Último error registrado: {formatDateTime(openrouterQuota.lastExhaustedAt)}
+                                  </p>
+                                )}
+                                <div className="pt-1 border-t border-rose-500/20 text-[10px] text-rose-950 dark:text-rose-200">
+                                  💡 <strong>Sugerencia:</strong> Usa <strong>openrouter/free</strong> (router automático), el cual rota dinámicamente entre múltiples modelos gratuitos disponibles en la plataforma para evitar congestión en uno solo.
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 text-[11px]">
+                                <div className="p-2 rounded-xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800">
+                                  <span className="text-[10px] text-muted-foreground block">Estado Peticiones</span>
+                                  <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                                    <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                                    Gratis Disponibles
+                                  </span>
+                                </div>
+
+                                <div className="p-2 rounded-xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800">
+                                  <span className="text-[10px] text-muted-foreground block">Límite por Tasa</span>
+                                  <span className="font-mono font-bold text-foreground">
+                                    {openrouterQuota?.keyInfo?.rateLimit
+                                      ? `${openrouterQuota.keyInfo.rateLimit.requests} req / ${openrouterQuota.keyInfo.rateLimit.interval}`
+                                      : "20 req / min (Free)"}
+                                  </span>
+                                </div>
+
+                                <div className="p-2 rounded-xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 col-span-2 sm:col-span-1">
+                                  <span className="text-[10px] text-muted-foreground block">Consumo Cuenta</span>
+                                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                    {openrouterQuota?.keyInfo?.usageUsd !== undefined
+                                      ? `$${Number(openrouterQuota.keyInfo.usageUsd).toFixed(4)} USD`
+                                      : "$0.00 USD"}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            {openrouterQuota?.probeLatency && (
+                              <div className="text-[9px] text-muted-foreground font-mono flex items-center justify-between px-0.5">
+                                <span>Verificación en vivo: Exitoso ({openrouterQuota.probeLatency}ms)</span>
+                                <span>OpenRouter Free Router</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}

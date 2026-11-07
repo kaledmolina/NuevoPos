@@ -670,7 +670,37 @@ ${catalogContext}`
       clearTimeout(timer)
       if (!res.ok) {
         const errBody = await res.text()
+        if (currIsOpener && (res.status === 429 || /rate limit|quota|credits|exceeded|free/i.test(errBody))) {
+          try {
+            await db.setting.upsert({
+              where: { key: "openrouter_free_exhausted" },
+              update: {
+                value: JSON.stringify({
+                  exhausted: true,
+                  at: new Date().toISOString(),
+                  status: res.status,
+                  message: `Cuota de peticiones gratuitas agotada en OpenRouter (Error ${res.status}): ${errBody.slice(0, 160)}`,
+                }),
+              },
+              create: {
+                key: "openrouter_free_exhausted",
+                value: JSON.stringify({
+                  exhausted: true,
+                  at: new Date().toISOString(),
+                  status: res.status,
+                  message: `Cuota de peticiones gratuitas agotada en OpenRouter (Error ${res.status}): ${errBody.slice(0, 160)}`,
+                }),
+              },
+            })
+          } catch {
+            /* noop */
+          }
+        }
         throw new Error(`${currProvider} API (${res.status}): ${errBody.slice(0, 180)}`)
+      } else {
+        if (currIsOpener) {
+          await db.setting.delete({ where: { key: "openrouter_free_exhausted" } }).catch(() => {})
+        }
       }
       return await res.json()
     } catch (e: any) {
