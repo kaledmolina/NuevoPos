@@ -56,7 +56,7 @@ import {
   RETURN_REASONS_LABELS,
   REFUND_METHODS_LABELS,
   buildReturnReceiptHTML,
-} from "@/lib/returns"
+} from "@/lib/returns-types"
 import { cn } from "@/lib/utils"
 
 interface SaleItem {

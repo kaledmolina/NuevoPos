@@ -27,6 +27,8 @@ RUN npx prisma generate
 # Build Next.js
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+ENV DATABASE_URL="mysql://dummy:dummy@localhost:3306/dummy"
+ENV AUTH_SECRET="dummy_secret_for_docker_build_only_12345"
 RUN npm run build
 
 # ==========================================
