@@ -456,7 +456,7 @@ async function processWithLLMAI(params: {
   let providerName = isOpener ? "OpenRouter" : "DeepSeek"
   let apiKey = isOpener ? openerKey : dsKey
   let model = isOpener
-    ? (config.openrouterModel || "deepseek/deepseek-chat").trim()
+    ? (config.openrouterModel || "openrouter/free").trim()
     : (config.deepseekModel || "deepseek-chat").trim()
   let endpoint = isOpener
     ? "https://openrouter.ai/api/v1/chat/completions"
@@ -697,7 +697,7 @@ ${catalogContext}`
       console.log("[AI Failover] Intentando con OpenRouter...")
       try {
         actualProvider = "OpenRouter"
-        actualModel = (config.openrouterModel || "deepseek/deepseek-chat").trim()
+        actualModel = (config.openrouterModel || "openrouter/free").trim()
         aiData = await sendAiRequest(
           "https://openrouter.ai/api/v1/chat/completions",
           openerKey,
@@ -892,6 +892,6 @@ ${catalogContext}`
     orderNumber,
     total: orderTotal,
     tokensUsed,
-    modelUsed: `${actualProvider}: ${actualModel}`,
+    modelUsed: `${actualProvider}: ${aiData?.model || actualModel}`,
   }
 }

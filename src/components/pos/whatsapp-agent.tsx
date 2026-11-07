@@ -23,7 +23,10 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
@@ -148,16 +151,25 @@ interface Template {
 }
 
 export const CURATED_OPENROUTER_MODELS = [
-  { id: "deepseek/deepseek-chat", name: "DeepSeek V3 (Chat)", provider: "DeepSeek", badge: "🔥 Recomendado / Económico" },
-  { id: "deepseek/deepseek-r1", name: "DeepSeek R1", provider: "DeepSeek", badge: "🧠 Razonamiento Profundo" },
-  { id: "google/gemini-2.0-flash-exp:free", name: "Google Gemini 2.0 Flash", provider: "Google", badge: "✨ Gratis / Ultra Rápido" },
-  { id: "meta-llama/llama-3.3-70b-instruct", name: "Meta Llama 3.3 70B", provider: "Meta", badge: "⚡ Inteligente & Veloz" },
-  { id: "anthropic/claude-3.5-haiku", name: "Claude 3.5 Haiku", provider: "Anthropic", badge: "🚀 Máxima Velocidad" },
-  { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet", provider: "Anthropic", badge: "👑 Calidad Superior" },
-  { id: "openai/gpt-4o-mini", name: "OpenAI GPT-4o Mini", provider: "OpenAI", badge: "💡 Barato & Fiable" },
-  { id: "openai/gpt-4o", name: "OpenAI GPT-4o", provider: "OpenAI", badge: "🌟 Gama Alta" },
-  { id: "mistralai/mistral-large-2411", name: "Mistral Large", provider: "Mistral", badge: "🇪🇺 Fluido en Español" },
-  { id: "qwen/qwen-2.5-72b-instruct", name: "Qwen 2.5 72B", provider: "Alibaba", badge: "📊 Alta Precisión" },
+  // --- MODELOS GRATUITOS (0 COSTO / AHORRO DE TOKENS) ---
+  { id: "openrouter/free", name: "OpenRouter Free Models Router", provider: "OpenRouter", badge: "🎁 100% Gratis (Auto Router)", isFree: true },
+  { id: "deepseek/deepseek-r1:free", name: "DeepSeek R1 (Gratis)", provider: "DeepSeek", badge: "🧠 Razonamiento / Gratis", isFree: true },
+  { id: "deepseek/deepseek-chat:free", name: "DeepSeek V3 (Gratis)", provider: "DeepSeek", badge: "⚡ Rápido / Gratis", isFree: true },
+  { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Meta Llama 3.3 70B (Gratis)", provider: "Meta", badge: "✨ Potente 70B / Gratis", isFree: true },
+  { id: "google/gemini-2.0-flash-exp:free", name: "Google Gemini 2.0 Flash (Gratis)", provider: "Google", badge: "🚀 Ultra Veloz / Gratis", isFree: true },
+  { id: "qwen/qwen-2.5-72b-instruct:free", name: "Qwen 2.5 72B (Gratis)", provider: "Alibaba", badge: "📊 Preciso / Gratis", isFree: true },
+  { id: "meta-llama/llama-3.2-3b-instruct:free", name: "Meta Llama 3.2 3B (Gratis)", provider: "Meta", badge: "🍃 Liviano / Gratis", isFree: true },
+
+  // --- MODELOS ESTÁNDAR / PAGO ---
+  { id: "deepseek/deepseek-chat", name: "DeepSeek V3 (Chat Pago)", provider: "DeepSeek", badge: "🔥 Muy Económico", isFree: false },
+  { id: "deepseek/deepseek-r1", name: "DeepSeek R1 (Pago)", provider: "DeepSeek", badge: "🧠 Razonamiento Máximo", isFree: false },
+  { id: "meta-llama/llama-3.3-70b-instruct", name: "Meta Llama 3.3 70B (Pago)", provider: "Meta", badge: "⚡ Inteligente & Veloz", isFree: false },
+  { id: "anthropic/claude-3.5-haiku", name: "Claude 3.5 Haiku", provider: "Anthropic", badge: "🚀 Máxima Velocidad", isFree: false },
+  { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet", provider: "Anthropic", badge: "👑 Calidad Superior", isFree: false },
+  { id: "openai/gpt-4o-mini", name: "OpenAI GPT-4o Mini", provider: "OpenAI", badge: "💡 Barato & Fiable", isFree: false },
+  { id: "openai/gpt-4o", name: "OpenAI GPT-4o", provider: "OpenAI", badge: "🌟 Gama Alta", isFree: false },
+  { id: "mistralai/mistral-large-2411", name: "Mistral Large", provider: "Mistral", badge: "🇪🇺 Fluido en Español", isFree: false },
+  { id: "qwen/qwen-2.5-72b-instruct", name: "Qwen 2.5 72B", provider: "Alibaba", badge: "📊 Alta Precisión", isFree: false },
 ]
 
 interface BranchConfig {
@@ -2288,20 +2300,28 @@ export default function WhatsAppAgentView() {
                     </div>
 
                     {/* Selector de Modelo OpenRouter */}
-                    <div className="space-y-1">
+                    <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <Label className="text-xs font-bold">Modelo de Inteligencia Artificial (OpenRouter)</Label>
+                        <Label className="text-xs font-bold flex items-center gap-1.5">
+                          <span>Modelo de IA en OpenRouter</span>
+                          {(config.openrouterModel === "openrouter/free" || config.openrouterModel?.endsWith(":free")) && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
+                              100% Gratis
+                            </Badge>
+                          )}
+                        </Label>
                         <a
-                          href="https://openrouter.ai/models"
+                          href="https://openrouter.ai/models?pricing=free"
                           target="_blank"
                           rel="noreferrer"
                           className="text-[10px] text-zinc-500 hover:text-zinc-950 dark:hover:text-white underline flex items-center gap-0.5"
                         >
-                          Ver 200+ modelos <IconExternalLink className="h-2.5 w-2.5" />
+                          Ver catálogo completo <IconExternalLink className="h-2.5 w-2.5" />
                         </a>
                       </div>
+
                       <Select
-                        value={isCustomModel ? "__custom__" : (config.openrouterModel || "deepseek/deepseek-chat")}
+                        value={isCustomModel ? "__custom__" : (config.openrouterModel || "openrouter/free")}
                         onValueChange={(val) => {
                           if (val === "__custom__") {
                             setIsCustomModel(true)
@@ -2314,22 +2334,93 @@ export default function WhatsAppAgentView() {
                         <SelectTrigger className="h-9 text-xs rounded-xl bg-zinc-50 dark:bg-zinc-950">
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent className="text-xs rounded-xl max-h-72">
-                          {CURATED_OPENROUTER_MODELS.map((m) => (
-                            <SelectItem key={m.id} value={m.id} className="py-1.5">
-                              <div className="flex items-center justify-between gap-2 w-full">
-                                <span className="font-semibold">{m.name}</span>
-                                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">
-                                  {m.badge}
-                                </span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                          <SelectItem value="__custom__" className="py-1.5 font-bold text-purple-600 dark:text-purple-400">
+                        <SelectContent className="text-xs rounded-xl max-h-80">
+                          {/* GRUPO MODELOS 100% GRATIS */}
+                          <SelectGroup>
+                            <SelectLabel className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 px-2 py-1">
+                              🎁 Modelos 100% Gratuitos (0 Costo / Ahorro Tokens)
+                            </SelectLabel>
+                            {CURATED_OPENROUTER_MODELS.filter((m) => m.isFree).map((m) => (
+                              <SelectItem key={m.id} value={m.id} className="py-1.5 cursor-pointer">
+                                <div className="flex items-center justify-between gap-2 w-full">
+                                  <span className="font-semibold text-emerald-950 dark:text-emerald-200">
+                                    {m.name}
+                                  </span>
+                                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-bold">
+                                    {m.badge}
+                                  </span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+
+                          <SelectSeparator />
+
+                          {/* GRUPO MODELOS DE PAGO */}
+                          <SelectGroup>
+                            <SelectLabel className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground px-2 py-1">
+                              ⚡ Modelos Estándar / Pago
+                            </SelectLabel>
+                            {CURATED_OPENROUTER_MODELS.filter((m) => !m.isFree).map((m) => (
+                              <SelectItem key={m.id} value={m.id} className="py-1.5 cursor-pointer">
+                                <div className="flex items-center justify-between gap-2 w-full">
+                                  <span className="font-semibold">{m.name}</span>
+                                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">
+                                    {m.badge}
+                                  </span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+
+                          <SelectSeparator />
+
+                          <SelectItem value="__custom__" className="py-1.5 font-bold text-purple-600 dark:text-purple-400 cursor-pointer">
                             ✏️ Otro modelo (Escribir ID personalizado)
                           </SelectItem>
                         </SelectContent>
                       </Select>
+
+                      {/* Accesos rápidos a Modo Gratuito */}
+                      <div className="flex items-center justify-between gap-2 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsCustomModel(false)
+                            setConfig((c) => ({ ...c, openrouterModel: "openrouter/free" }))
+                          }}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer border",
+                            config.openrouterModel === "openrouter/free"
+                              ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-800 dark:text-emerald-200 ring-1 ring-emerald-500/40"
+                              : "bg-muted/40 hover:bg-muted border-border text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          🎁 Activar Router Free (openrouter/free)
+                        </button>
+
+                        <a
+                          href="https://openrouter.ai/openrouter/free"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[10px] text-zinc-500 hover:text-foreground underline flex items-center gap-0.5"
+                        >
+                          Docs Free Router <IconExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      </div>
+
+                      {/* Notificación informativa cuando un modelo gratuito está activo */}
+                      {(config.openrouterModel === "openrouter/free" || config.openrouterModel?.endsWith(":free")) && (
+                        <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
+                          <span className="text-base shrink-0">✨</span>
+                          <div className="space-y-0.5">
+                            <p className="font-bold">Modo 100% Gratuito Activado ({config.openrouterModel})</p>
+                            <p className="text-[10px] text-emerald-800/80 dark:text-emerald-300/80">
+                              OpenRouter procesará los mensajes sin consumir saldo ($0 USD). Ideal para ahorrar tokens y reducir costos a cero.
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Campo de ID de modelo personalizado */}
@@ -2345,11 +2436,11 @@ export default function WhatsAppAgentView() {
                             setCustomOpenRouterModel(e.target.value)
                             setConfig((c) => ({ ...c, openrouterModel: e.target.value }))
                           }}
-                          placeholder="Ej: google/gemini-2.0-flash-exp:free o meta-llama/llama-3.2-3b-instruct"
+                          placeholder="Ej: openrouter/free o meta-llama/llama-3.2-3b-instruct:free"
                           className="h-8 text-xs font-mono bg-white dark:bg-zinc-950"
                         />
                         <span className="text-[10px] text-zinc-500">
-                          Puedes copiar cualquier ID disponible en el catálogo de openrouter.ai/models.
+                          Puedes usar el sufijo <code>:free</code> para cualquier modelo gratuito del catálogo.
                         </span>
                       </div>
                     )}
