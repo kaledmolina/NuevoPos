@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { getSession, logAudit } from "@/lib/auth"
 import { apiSuccess, apiError } from "@/lib/api-response"
 import { syncOrderToSale } from "@/lib/order-sale-sync"
+import { notifyCustomerOrderStatus } from "@/lib/order-notifications"
 
 export const dynamic = "force-dynamic"
 
@@ -21,6 +22,8 @@ export async function PATCH(
     const cancelReason = body.cancelReason ? String(body.cancelReason).trim() : null
     const paymentStatus = body.paymentStatus ? String(body.paymentStatus).trim().toLowerCase() : null
     const paymentMethod = body.paymentMethod ? String(body.paymentMethod).trim().toLowerCase() : null
+    const notifyClient = Boolean(body.notifyClient)
+    const rawDeliveryFee = body.deliveryFee !== undefined && body.deliveryFee !== null ? Number(body.deliveryFee) : null
 
     if (rawStatus && !VALID_STATUSES.includes(rawStatus)) {
       return apiError(`Estado inválido. Estados permitidos: ${VALID_STATUSES.join(", ")}`, 400)
@@ -103,6 +106,14 @@ export async function PATCH(
       updateData.paymentMethod = paymentMethod
     }
 
+    if (rawDeliveryFee !== null && !isNaN(rawDeliveryFee) && rawDeliveryFee >= 0) {
+      updateData.deliveryFee = rawDeliveryFee
+      const currentSubtotal = order.subtotal || order.total
+      const currentDiscount = order.discount || 0
+      const currentTax = order.tax || 0
+      updateData.total = Math.max(0, currentSubtotal + rawDeliveryFee - currentDiscount + currentTax)
+    }
+
     // Transacción: si se cancela, restaurar stock de los productos
     const updated = await db.$transaction(async (tx) => {
       if (newStatus === "cancelado") {
@@ -132,6 +143,26 @@ export async function PATCH(
       } catch (err) {
         console.error("Error sincronizando pedido a venta oficial:", err)
       }
+    }
+
+    // Notificación transaccional automática directa al cliente (WhatsApp o Telegram, sin costo de IA)
+    if (rawStatus && rawStatus !== order.status) {
+      notifyCustomerOrderStatus({
+        orderId: updated.id,
+        newStatus,
+        oldStatus: order.status,
+        cancelReason: cancelReason || undefined,
+      }).catch((notifErr) => {
+        console.error("Error en notificación automática de pedido al cliente:", notifErr)
+      })
+    } else if (rawDeliveryFee !== null && notifyClient && order.customerPhone) {
+      const feeFormatted = `$${rawDeliveryFee.toLocaleString("es-CO")}`
+      const newTotalFormatted = `$${Number(updated.total).toLocaleString("es-CO")}`
+      notifyCustomerOrderStatus({
+        orderId: updated.id,
+        newStatus: "tarifa_fijada",
+        customMessage: `🛵 *Costo de Envío Confirmado*\n\nHola ${order.customerName || "Cliente"}, para tu dirección en *${order.deliveryAddress || "tu ubicación"}* el costo de domicilio es de *${feeFormatted}*.\n\n💵 *Total actualizado del pedido #${order.orderNumber}:* ${newTotalFormatted}`,
+      }).catch(() => {})
     }
 
     await logAudit({

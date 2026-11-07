@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { apiFetch } from "@/lib/api"
 import { useAppStore, type BranchItem } from "@/lib/store"
 import { formatCurrency, formatDateTime } from "@/lib/format"
@@ -101,6 +101,8 @@ interface Conversation {
     orderNumber: string
     status: string
     total: number
+    subtotal?: number
+    deliveryFee?: number
     deliveryAddress: string | null
     createdAt: string
     itemsCount: number
@@ -132,6 +134,8 @@ interface Message {
     orderNumber: string
     status: string
     total: number
+    subtotal?: number
+    deliveryFee?: number
     deliveryAddress: string | null
   } | null
 }
@@ -645,6 +649,72 @@ export default function WhatsAppAgentView() {
     }
   }
 
+  // Detección de dirección pendiente para anexar valor del domicilio con intervención humana
+  const detectedCustomerAddress = useMemo(() => {
+    if (!selectedConv) return null
+    // Si ya hay un pedido activo pendiente/confirmado/en camino, ya tiene orden
+    const hasActiveOrder =
+      selectedConv.latestOrder &&
+      ["pendiente", "confirmado", "en_preparacion", "en_camino"].includes(selectedConv.latestOrder.status)
+    if (hasActiveOrder) return null
+
+    // 1. Revisar dirección registrada del cliente
+    if (selectedConv.client?.address && selectedConv.client.address !== "Sin dirección guardada") {
+      return selectedConv.client.address
+    }
+
+    // 2. Revisar mensajes recientes del cliente para detectar si dio su ubicación
+    const customerMsgs = [...chatMessages].filter((m) => m.sender === "customer")
+    for (let i = customerMsgs.length - 1; i >= 0; i--) {
+      const text = customerMsgs[i].text
+      const match = text.match(
+        /\b(barrio|calle|cra|carrera|cll|diagonal|diag|transversal|transv|avenida|av|manzana|manz|mz|vereda|valle|sector)[\s\S]{3,60}/i
+      )
+      if (match) return match[0].trim()
+    }
+    return null
+  }, [selectedConv, chatMessages])
+
+  // Intervención Humana: Anexar costo de domicilio a la conversación antes de crear la orden
+  const handleSendDeliveryFeeToClient = async (fee: number, address: string) => {
+    if (!selectedPhone || sendingReply) return
+    const feeText = fee > 0 ? formatCurrency(fee) : "GRATIS ($0)"
+    const msg =
+      fee > 0
+        ? `🛵 Para tu dirección en *${address}*, el costo del domicilio es de *${feeText}*.\n\nPor favor indícanos: ¿deseas pagar en efectivo o por transferencia (Nequi/Daviplata)?`
+        : `🛵 ¡Buenas noticias! El domicilio para tu dirección en *${address}* es *GRATIS ($0)*.\n\nPor favor indícanos: ¿deseas pagar en efectivo o por transferencia (Nequi/Daviplata)?`
+
+    setSendingReply(true)
+    const optimisticMessage: Message = {
+      id: "temp-" + Date.now(),
+      text: msg,
+      sender: "agent",
+      status: "sent",
+      createdAt: new Date().toISOString(),
+    }
+    setChatMessages((prev) => [...prev, optimisticMessage])
+    setTimeout(() => scrollToBottom(true), 50)
+
+    try {
+      await apiFetch("/api/whatsapp/conversations", {
+        method: "POST",
+        body: JSON.stringify({
+          phone: selectedPhone,
+          text: msg,
+          branchId: currentBranchId,
+        }),
+      })
+      toast.success(`Costo de domicilio (${feeText}) anexado y enviado al cliente`)
+      await loadMessages(selectedPhone, true)
+      loadConversations(false)
+    } catch (e) {
+      toast.error("Error al anexar costo de domicilio: " + (e as Error).message)
+      loadMessages(selectedPhone, true)
+    } finally {
+      setSendingReply(false)
+    }
+  }
+
   // Simular mensaje de entrada con IA DeepSeek u OpenRouter
   const handleSimulateInbound = async (presetText?: string) => {
     const text = (presetText || simText).trim()
@@ -844,6 +914,25 @@ export default function WhatsAppAgentView() {
       if (selectedPhone) loadMessages(selectedPhone, true)
     } catch (e) {
       toast.error("Error al actualizar estado de pedido: " + (e as Error).message)
+    }
+  }
+
+  // Actualizar costo de envío / domicilio según barrio o zona
+  const handleQuickUpdateDeliveryFee = async (orderId: string, deliveryFee: number) => {
+    try {
+      await apiFetch(`/api/v1/orders/${orderId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ deliveryFee }),
+      })
+      toast.success(
+        deliveryFee > 0
+          ? `Costo de envío actualizado a ${formatCurrency(deliveryFee)}`
+          : "Envío fijado como Gratis ($0)"
+      )
+      await loadConversations()
+      if (selectedPhone) loadMessages(selectedPhone, true)
+    } catch (e) {
+      toast.error("Error al actualizar costo de envío: " + (e as Error).message)
     }
   }
 
@@ -1473,6 +1562,63 @@ export default function WhatsAppAgentView() {
                   <div ref={chatScrollRef} />
                 </div>
 
+                {/* BARRA DE INTERVENCIÓN HUMANA: ANEXAR VALOR DEL DOMICILIO SEGÚN LA ZONA ANTES DE CREAR LA ORDEN */}
+                {detectedCustomerAddress && (
+                  <div className="px-3 py-2 bg-amber-50/90 dark:bg-amber-950/40 border-t border-amber-200/80 dark:border-amber-900/60 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <IconTruckDelivery className="h-4 w-4 text-amber-600 shrink-0" />
+                      <div className="truncate">
+                        <span className="font-bold text-amber-950 dark:text-amber-100">
+                          Ubicación detectada:
+                        </span>{" "}
+                        <span className="text-amber-900 dark:text-amber-200 underline font-medium">
+                          {detectedCustomerAddress}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-[10px] text-amber-800 dark:text-amber-300 font-bold uppercase tracking-wider">
+                        Anexar Domicilio:
+                      </span>
+                      {[2000, 3000, 4000, 5000].map((fee) => (
+                        <button
+                          key={fee}
+                          type="button"
+                          onClick={() => handleSendDeliveryFeeToClient(fee, detectedCustomerAddress)}
+                          disabled={sendingReply}
+                          className="px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-white dark:bg-zinc-900 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/60 shadow-2xs transition-all cursor-pointer"
+                          title={`Anexar $${fee.toLocaleString()} de domicilio`}
+                        >
+                          ${(fee / 1000).toFixed(0)}k
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => handleSendDeliveryFeeToClient(0, detectedCustomerAddress)}
+                        disabled={sendingReply}
+                        className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white dark:bg-zinc-900 border border-amber-300 dark:border-amber-800 text-zinc-600 dark:text-zinc-300 hover:bg-amber-100 dark:hover:bg-amber-900/60 shadow-2xs transition-all cursor-pointer"
+                      >
+                        Gratis
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const custom = prompt("Ingresa el costo del domicilio para esta zona/barrio (ej: 6500):", "3000")
+                          if (custom) {
+                            const num = parseFloat(custom.replace(/[^\d.]/g, ""))
+                            if (!isNaN(num)) handleSendDeliveryFeeToClient(num, detectedCustomerAddress)
+                          }
+                        }}
+                        disabled={sendingReply}
+                        className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-2xs transition-all cursor-pointer"
+                      >
+                        ✏️ Otro
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Input de respuesta manual del agente */}
                 <div className="p-2.5 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0">
                   <div className="flex items-center gap-2">
@@ -1522,327 +1668,416 @@ export default function WhatsAppAgentView() {
           {/* -------------------------------------------------------- */}
           <div className="lg:col-span-3 flex flex-col h-full min-h-0 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-white dark:bg-zinc-900 shadow-2xs overflow-hidden">
             {selectedConv ? (
-              <div className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-4">
-                {/* 1. Tarjeta de Cliente CRM */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                      Perfil del Cliente
+              <>
+                {/* Cabecera minimalista del Panel */}
+                <div className="p-3 border-b border-zinc-200/80 dark:border-zinc-800/80 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/50 shrink-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                      Ficha del Cliente
                     </span>
-                    <button
-                      onClick={openContactEditor}
-                      className="text-[11px] font-semibold text-zinc-900 dark:text-white underline cursor-pointer"
-                    >
-                      Editar
-                    </button>
+                    {selectedConv.channel === "telegram" || selectedConv.phone.startsWith("tg_") ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                        <IconBrandTelegram className="h-3 w-3" /> Telegram
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                        <IconBrandWhatsapp className="h-3 w-3" /> WhatsApp
+                      </span>
+                    )}
                   </div>
 
-                  <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-800 space-y-2">
-                    <div>
-                      <p className="font-bold text-xs text-zinc-950 dark:text-white">
-                        {selectedConv.client?.name || `Cliente (${selectedConv.phone.slice(-4)})`}
-                      </p>
-                      <p className="text-[11px] text-zinc-500 font-mono">{selectedConv.phone}</p>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={openContactEditor}
+                      className="h-7 px-2 text-[11px] rounded-lg text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white cursor-pointer"
+                    >
+                      <IconPencil className="h-3.5 w-3.5 mr-1" />
+                      Editar
+                    </Button>
+
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white cursor-pointer"
+                          title="Más opciones del contacto"
+                        >
+                          <IconDotsVertical className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-52 text-xs rounded-xl shadow-lg">
+                        <DropdownMenuItem onClick={() => setTemplateModalOpen(true)} className="cursor-pointer gap-2">
+                          <IconSpeakerphone className="h-3.5 w-3.5" />
+                          Enviar Plantilla
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleOpenCustomerOrders(selectedConv.phone)} className="cursor-pointer gap-2">
+                          <IconPackage className="h-3.5 w-3.5" />
+                          Historial de Pedidos
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={handleClearChat} className="cursor-pointer gap-2 text-amber-600 focus:text-amber-700">
+                          <IconTrash className="h-3.5 w-3.5" />
+                          Vaciar Historial del Chat
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={handleDeleteContact} className="cursor-pointer gap-2 text-rose-600 focus:text-rose-700">
+                          <IconUserX className="h-3.5 w-3.5" />
+                          Eliminar Contacto del CRM
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+
+                <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
+                  {/* 1. Tarjeta Resumen del Cliente (Unificada y elegante) */}
+                  <div className="p-3 rounded-xl bg-zinc-50/80 dark:bg-zinc-950/40 border border-zinc-200/80 dark:border-zinc-800 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-bold text-xs text-zinc-950 dark:text-white truncate">
+                          {selectedConv.client?.name || `Cliente (${selectedConv.phone.slice(-4)})`}
+                        </p>
+                        <p className="text-[11px] text-zinc-500 font-mono truncate">
+                          {selectedConv.phone.startsWith("tg_")
+                            ? `ID Telegram: ${selectedConv.phone.replace("tg_", "")}`
+                            : selectedConv.phone}
+                        </p>
+                      </div>
+
+                      {/* Chip de estado financiero */}
+                      {selectedConv.client?.creditBalance && selectedConv.client.creditBalance > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800 shrink-0">
+                          Debe {formatCurrency(selectedConv.client.creditBalance)}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center text-[10px] text-zinc-400 font-medium px-2 py-0.5 rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shrink-0">
+                          Al día ($0)
+                        </span>
+                      )}
                     </div>
 
-                    <div className="text-[11px] space-y-1 text-zinc-600 dark:text-zinc-400 pt-1 border-t border-zinc-200/60 dark:border-zinc-800/60">
+                    <div className="pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 text-[11px] text-zinc-600 dark:text-zinc-400 space-y-1">
                       <div className="flex items-start gap-1.5">
                         <IconMapPin className="h-3.5 w-3.5 text-zinc-400 shrink-0 mt-0.5" />
-                        <span className="line-clamp-2">
+                        <span className="line-clamp-2 leading-tight">
                           {selectedConv.client?.address || selectedConv.latestOrder?.deliveryAddress || "Sin dirección guardada"}
                         </span>
                       </div>
                       {selectedConv.client?.email && (
-                        <p className="text-[10px] text-zinc-400">{selectedConv.client.email}</p>
+                        <p className="text-[10px] text-zinc-400 pl-5 truncate">{selectedConv.client.email}</p>
                       )}
                     </div>
                   </div>
-                </div>
 
-                {/* 2. Tarjeta Financiera: Saldo Fiado y Cupo */}
-                <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-800 space-y-2">
-                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                    <span>Crédito & Fiados</span>
-                    <IconCreditCard className="h-3.5 w-3.5" />
-                  </div>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-xs text-zinc-500">Saldo Pendiente:</span>
-                    <span className="text-sm font-black font-mono text-zinc-950 dark:text-white">
-                      {formatCurrency(selectedConv.client?.creditBalance || 0)}
-                    </span>
-                  </div>
-                  <div className="flex items-baseline justify-between text-[11px] text-zinc-500">
-                    <span>Cupo Autorizado:</span>
-                    <span className="font-mono">{formatCurrency(selectedConv.client?.creditLimit || 0)}</span>
-                  </div>
-                </div>
+                  {/* 2. Seguimiento de Pedido Activo (Compacto y funcional) */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                        Último Pedido a Domicilio
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenCustomerOrders(selectedConv.phone)}
+                        className="text-[10px] font-mono px-2 py-0.5 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer flex items-center gap-1 text-zinc-600 dark:text-zinc-400"
+                        title="Ver todos los pedidos de este cliente"
+                      >
+                        <IconPackage className="h-3 w-3" />
+                        {selectedConv.totalOrders} {selectedConv.totalOrders === 1 ? "orden" : "órdenes"}
+                      </button>
+                    </div>
 
-                {/* 3. Seguimiento de Pedido Activo */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                      Último Pedido a Domicilio
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenCustomerOrders(selectedConv.phone)}
-                      className="text-[9px] font-mono px-2 py-0.5 rounded-md border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer flex items-center gap-1"
-                      title="Ver todos los pedidos de este cliente"
-                    >
-                      <IconPackage className="h-3 w-3" />
-                      {selectedConv.totalOrders} {selectedConv.totalOrders === 1 ? "orden" : "órdenes"}
-                    </button>
-                  </div>
-
-                  {selectedConv.latestOrder ? (
-                    <div className="p-2.5 rounded-xl bg-zinc-50/80 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-800 space-y-2">
-                      {/* Cabecera del pedido */}
-                      <div className="flex items-center justify-between gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setOrderDetailModalOpen(true)}
-                          className="font-mono font-bold text-[11px] text-zinc-950 dark:text-white hover:underline flex items-center gap-1 cursor-pointer bg-white dark:bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-800"
-                          title="Clic para ver detalle completo"
-                        >
-                          #{selectedConv.latestOrder.orderNumber}
-                          <IconExternalLink className="h-3 w-3 text-zinc-400" />
-                        </button>
-                        {/* Badge de Estado de Envío */}
-                        {(() => {
-                          const st = selectedConv.latestOrder.status
-                          if (st === "entregado") {
-                            return <Badge className="text-[9px] font-mono uppercase bg-emerald-600 text-white py-0.5 px-1.5">✅ Entregado</Badge>
-                          }
-                          if (st === "en_camino") {
-                            return <Badge className="text-[9px] font-mono uppercase bg-purple-600 text-white py-0.5 px-1.5">🛵 En Camino</Badge>
-                          }
-                          if (st === "en_preparacion") {
-                            return <Badge className="text-[9px] font-mono uppercase bg-indigo-600 text-white py-0.5 px-1.5">📦 Preparando</Badge>
-                          }
-                          if (st === "confirmado") {
-                            return <Badge className="text-[9px] font-mono uppercase bg-blue-600 text-white py-0.5 px-1.5">👍 Confirmado</Badge>
-                          }
-                          if (st === "cancelado") {
-                            return <Badge className="text-[9px] font-mono uppercase bg-rose-600 text-white py-0.5 px-1.5">❌ Cancelado</Badge>
-                          }
-                          return <Badge className="text-[9px] font-mono uppercase bg-amber-500 text-white py-0.5 px-1.5">🕒 Pendiente</Badge>
-                        })()}
-                      </div>
-
-                      {/* Fila Total y Estado de Pago */}
-                      <div className="flex items-center justify-between pt-0.5">
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-[10px] text-zinc-500 font-medium">Total:</span>
-                          <span className="font-black font-mono text-sm text-zinc-950 dark:text-white">
-                            {formatCurrency(selectedConv.latestOrder.total)}
-                          </span>
-                        </div>
-                        {selectedConv.latestOrder.paymentStatus === "pagado" ? (
-                          <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-600 text-white">
-                            <IconCheck className="h-2.5 w-2.5" /> Pagado
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500 text-white">
-                            ⏳ Pendiente
-                          </span>
-                        )}
-                      </div>
-
-                      {/* MICRO-PANEL DE PAGO */}
-                      <div className="p-2 rounded-lg border border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/90 space-y-1.5">
+                    {selectedConv.latestOrder ? (
+                      <div className="p-3 rounded-xl bg-zinc-50/80 dark:bg-zinc-950/40 border border-zinc-200/80 dark:border-zinc-800 space-y-2.5">
+                        {/* Cabecera del pedido */}
                         <div className="flex items-center justify-between gap-1">
-                          {/* Medio de pago toggle */}
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleQuickUpdatePaymentMethod(selectedConv.latestOrder!.id, "efectivo")}
-                              className={cn(
-                                "px-1.5 py-0.5 rounded text-[9px] font-semibold transition-all cursor-pointer",
-                                selectedConv.latestOrder.paymentMethod !== "transferencia"
-                                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 font-bold"
-                                  : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-                              )}
-                            >
-                              💵 Efectivo
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleQuickUpdatePaymentMethod(selectedConv.latestOrder!.id, "transferencia")}
-                              className={cn(
-                                "px-1.5 py-0.5 rounded text-[9px] font-semibold transition-all cursor-pointer",
-                                selectedConv.latestOrder.paymentMethod === "transferencia"
-                                  ? "bg-purple-600 text-white font-bold"
-                                  : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-                              )}
-                            >
-                              💳 Transf
-                            </button>
-                          </div>
-
-                          {/* Acción rápida de pago */}
-                          {selectedConv.latestOrder.paymentStatus !== "pagado" ? (
-                            <button
-                              type="button"
-                              onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pagado")}
-                              className="h-6 px-2 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-md shadow-2xs inline-flex items-center gap-1 cursor-pointer transition-all"
-                            >
-                              <IconCheck className="h-3 w-3" />
-                              Confirmar Pago
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pendiente")}
-                              className="text-[9px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 underline cursor-pointer"
-                            >
-                              Revertir pago
-                            </button>
-                          )}
-                        </div>
-
-                        {/* Hint de cobro ultra-compacto */}
-                        <div className="text-[10px] leading-tight text-zinc-600 dark:text-zinc-300">
-                          {selectedConv.latestOrder.paymentStatus === "pagado" ? (
-                            <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                              ✓ Liquidado en Ventas (Cobrar $0 al cliente)
-                            </span>
-                          ) : selectedConv.latestOrder.paymentMethod === "transferencia" ? (
-                            <span className="text-amber-600 dark:text-amber-400 font-medium">
-                              ⚠️ Verificar comprobante antes de despachar
-                            </span>
-                          ) : (
-                            <span className="text-blue-600 dark:text-blue-400 font-medium">
-                              💵 Cobrar {formatCurrency(selectedConv.latestOrder.total)} contraentrega
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* CAMBIO RÁPIDO DE ESTADO DE ENVÍO */}
-                      <div className="space-y-1 pt-0.5">
-                        <div className="grid grid-cols-3 gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "en_preparacion")}
-                            className={cn(
-                              "py-1 px-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer text-center",
-                              selectedConv.latestOrder.status === "en_preparacion"
-                                ? "bg-indigo-600 text-white font-bold shadow-2xs"
-                                : "bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800"
-                            )}
-                          >
-                            📦 Preparar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "en_camino")}
-                            className={cn(
-                              "py-1 px-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer text-center",
-                              selectedConv.latestOrder.status === "en_camino"
-                                ? "bg-purple-600 text-white font-bold shadow-2xs"
-                                : "bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800"
-                            )}
-                          >
-                            🛵 En Camino
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "entregado")}
-                            className={cn(
-                              "py-1 px-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer text-center",
-                              selectedConv.latestOrder.status === "entregado"
-                                ? "bg-emerald-600 text-white font-bold shadow-2xs"
-                                : "bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800"
-                            )}
-                          >
-                            ✅ Entregado
-                          </button>
-                        </div>
-
-                        {/* Fila secundaria: pendiente, cancelar y ver detalle */}
-                        <div className="flex items-center justify-between text-[10px] px-0.5 pt-0.5 text-zinc-500">
-                          <button
-                            type="button"
-                            onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "pendiente")}
-                            className="hover:text-zinc-900 dark:hover:text-white underline cursor-pointer"
-                          >
-                            🕒 Pendiente
-                          </button>
                           <button
                             type="button"
                             onClick={() => setOrderDetailModalOpen(true)}
-                            className="font-semibold text-zinc-700 dark:text-zinc-300 hover:underline cursor-pointer flex items-center gap-0.5"
+                            className="font-mono font-bold text-xs text-zinc-950 dark:text-white hover:underline flex items-center gap-1 cursor-pointer bg-white dark:bg-zinc-900 px-2 py-0.5 rounded-lg border border-zinc-200 dark:border-zinc-800"
+                            title="Clic para ver detalle completo"
                           >
-                            <IconFileText className="h-3 w-3" />
-                            {selectedConv.latestOrder.itemsCount} {selectedConv.latestOrder.itemsCount === 1 ? "prod" : "prods"}
+                            #{selectedConv.latestOrder.orderNumber}
+                            <IconExternalLink className="h-3 w-3 text-zinc-400" />
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (confirm("¿Estás seguro de cancelar este pedido? Se restaurará el inventario.")) {
-                                handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "cancelado")
-                              }
-                            }}
-                            className="text-rose-500 hover:text-rose-700 underline cursor-pointer"
-                          >
-                            ❌ Cancelar
-                          </button>
+                          {/* Badge de Estado de Envío */}
+                          {(() => {
+                            const st = selectedConv.latestOrder.status
+                            if (st === "entregado") {
+                              return <Badge className="text-[9px] font-mono uppercase bg-emerald-600 text-white py-0.5 px-1.5">✅ Entregado</Badge>
+                            }
+                            if (st === "en_camino") {
+                              return <Badge className="text-[9px] font-mono uppercase bg-purple-600 text-white py-0.5 px-1.5">🛵 En Camino</Badge>
+                            }
+                            if (st === "en_preparacion") {
+                              return <Badge className="text-[9px] font-mono uppercase bg-indigo-600 text-white py-0.5 px-1.5">📦 Preparando</Badge>
+                            }
+                            if (st === "confirmado") {
+                              return <Badge className="text-[9px] font-mono uppercase bg-blue-600 text-white py-0.5 px-1.5">👍 Confirmado</Badge>
+                            }
+                            if (st === "cancelado") {
+                              return <Badge className="text-[9px] font-mono uppercase bg-rose-600 text-white py-0.5 px-1.5">❌ Cancelado</Badge>
+                            }
+                            return <Badge className="text-[9px] font-mono uppercase bg-amber-500 text-white py-0.5 px-1.5">🕒 Pendiente</Badge>
+                          })()}
+                        </div>
+
+                        {/* Desglose de Productos y Domicilio según zona/barrio */}
+                        <div className="p-2 rounded-xl bg-zinc-100/70 dark:bg-zinc-900/80 border border-zinc-200/80 dark:border-zinc-800 space-y-1.5 text-[11px]">
+                          <div className="flex items-center justify-between text-zinc-500">
+                            <span>Productos ({selectedConv.latestOrder.itemsCount || 1}):</span>
+                            <span className="font-mono text-zinc-800 dark:text-zinc-200 font-medium">
+                              {formatCurrency(selectedConv.latestOrder.subtotal || (selectedConv.latestOrder.total - (selectedConv.latestOrder.deliveryFee || 0)))}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <span className="text-zinc-600 dark:text-zinc-300 font-medium flex items-center gap-1">
+                              <IconTruckDelivery className="h-3.5 w-3.5 text-zinc-400" />
+                              Envío (Zona / Barrio):
+                            </span>
+                            <span className="font-mono font-bold text-zinc-950 dark:text-white">
+                              {selectedConv.latestOrder.deliveryFee && selectedConv.latestOrder.deliveryFee > 0
+                                ? formatCurrency(selectedConv.latestOrder.deliveryFee)
+                                : "Sin costo ($0)"}
+                            </span>
+                          </div>
+
+                          {/* Chips rápidos de tarifas para intervención humana en 1 clic */}
+                          <div className="flex items-center gap-1 pt-1 overflow-x-auto no-scrollbar">
+                            <span className="text-[9px] text-zinc-400 shrink-0 font-medium">Fijar:</span>
+                            {[0, 2000, 3000, 4000, 5000, 8000].map((fee) => (
+                              <button
+                                key={fee}
+                                type="button"
+                                onClick={() => handleQuickUpdateDeliveryFee(selectedConv.latestOrder!.id, fee)}
+                                className={cn(
+                                  "px-1.5 py-0.5 rounded-md text-[9px] font-mono transition-all cursor-pointer shrink-0 border",
+                                  (selectedConv.latestOrder?.deliveryFee || 0) === fee
+                                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 font-bold border-zinc-900 dark:border-zinc-100 shadow-2xs"
+                                    : "bg-white dark:bg-zinc-800/80 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                                )}
+                              >
+                                {fee === 0 ? "Gratis" : `$${(fee / 1000).toFixed(0)}k`}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const currentFee = selectedConv.latestOrder?.deliveryFee || 0
+                                const val = prompt("Ingresa el costo del domicilio para esta zona/barrio (ej: 6500):", String(currentFee))
+                                if (val !== null) {
+                                  const num = parseFloat(val.replace(/[^\d.]/g, ""))
+                                  if (!isNaN(num)) handleQuickUpdateDeliveryFee(selectedConv.latestOrder!.id, num)
+                                }
+                              }}
+                              className="px-1.5 py-0.5 rounded-md text-[9px] font-medium transition-all cursor-pointer shrink-0 border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 hover:underline"
+                              title="Ingresar valor personalizado según el barrio"
+                            >
+                              ✏️ Otro
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Fila Total y Estado de Pago */}
+                        <div className="flex items-center justify-between text-xs pt-0.5 pb-1 border-b border-zinc-200/60 dark:border-zinc-800/60">
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-[10px] text-zinc-500 font-semibold">Total a Cobrar:</span>
+                            <span className="font-black font-mono text-base text-zinc-950 dark:text-white">
+                              {formatCurrency(selectedConv.latestOrder.total)}
+                            </span>
+                          </div>
+                          {selectedConv.latestOrder.paymentStatus === "pagado" ? (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                              <IconCheck className="h-2.5 w-2.5" /> Pagado
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                              ⏳ Pendiente
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Micro control de Pago */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-1.5">
+                            {/* Medio de pago toggle */}
+                            <div className="flex items-center bg-white dark:bg-zinc-900 rounded-lg p-0.5 border border-zinc-200 dark:border-zinc-800 text-[10px]">
+                              <button
+                                type="button"
+                                onClick={() => handleQuickUpdatePaymentMethod(selectedConv.latestOrder!.id, "efectivo")}
+                                className={cn(
+                                  "px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer",
+                                  selectedConv.latestOrder.paymentMethod !== "transferencia"
+                                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 font-bold shadow-2xs"
+                                    : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                                )}
+                              >
+                                💵 Efectivo
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleQuickUpdatePaymentMethod(selectedConv.latestOrder!.id, "transferencia")}
+                                className={cn(
+                                  "px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer",
+                                  selectedConv.latestOrder.paymentMethod === "transferencia"
+                                    ? "bg-purple-600 text-white font-bold shadow-2xs"
+                                    : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                                )}
+                              >
+                                💳 Transf
+                              </button>
+                            </div>
+
+                            {/* Acción rápida de pago */}
+                            {selectedConv.latestOrder.paymentStatus !== "pagado" ? (
+                              <button
+                                type="button"
+                                onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pagado")}
+                                className="h-6 px-2.5 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-2xs inline-flex items-center gap-1 cursor-pointer transition-all"
+                              >
+                                <IconCheck className="h-3 w-3" />
+                                Confirmar Pago
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pendiente")}
+                                className="text-[10px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 underline cursor-pointer"
+                              >
+                                Revertir pago
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Hint de cobro ultra-compacto */}
+                          <div className="text-[10px] leading-tight text-zinc-600 dark:text-zinc-400">
+                            {selectedConv.latestOrder.paymentStatus === "pagado" ? (
+                              <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                                ✓ Liquidado (Cobrar $0 al cliente)
+                              </span>
+                            ) : selectedConv.latestOrder.paymentMethod === "transferencia" ? (
+                              <span className="text-amber-600 dark:text-amber-400 font-medium">
+                                ⚠️ Verificar comprobante de transferencia
+                              </span>
+                            ) : (
+                              <span className="text-blue-600 dark:text-blue-400 font-medium">
+                                💵 Cobrar {formatCurrency(selectedConv.latestOrder.total)} contraentrega
+                                {(selectedConv.latestOrder.deliveryFee || 0) > 0 && (
+                                  <span className="text-[9px] text-zinc-500 block">
+                                    ({formatCurrency(selectedConv.latestOrder.subtotal || selectedConv.latestOrder.total - (selectedConv.latestOrder.deliveryFee || 0))} productos + {formatCurrency(selectedConv.latestOrder.deliveryFee || 0)} envío)
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Cambio de estado de envío */}
+                        <div className="space-y-1 pt-1">
+                          <div className="grid grid-cols-3 gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "en_preparacion")}
+                              className={cn(
+                                "py-1 px-1 rounded-lg text-[10px] font-semibold transition-all cursor-pointer text-center",
+                                selectedConv.latestOrder.status === "en_preparacion"
+                                  ? "bg-indigo-600 text-white font-bold shadow-2xs"
+                                  : "bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800"
+                              )}
+                            >
+                              📦 Preparar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "en_camino")}
+                              className={cn(
+                                "py-1 px-1 rounded-lg text-[10px] font-semibold transition-all cursor-pointer text-center",
+                                selectedConv.latestOrder.status === "en_camino"
+                                  ? "bg-purple-600 text-white font-bold shadow-2xs"
+                                  : "bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800"
+                              )}
+                            >
+                              🛵 En Camino
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "entregado")}
+                              className={cn(
+                                "py-1 px-1 rounded-lg text-[10px] font-semibold transition-all cursor-pointer text-center",
+                                selectedConv.latestOrder.status === "entregado"
+                                  ? "bg-emerald-600 text-white font-bold shadow-2xs"
+                                  : "bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800"
+                              )}
+                            >
+                              ✅ Entregado
+                            </button>
+                          </div>
+
+                          {/* Fila secundaria: pendiente, cancelar y ver detalle */}
+                          <div className="flex items-center justify-between text-[10px] px-0.5 pt-0.5 text-zinc-500">
+                            <button
+                              type="button"
+                              onClick={() => handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "pendiente")}
+                              className="hover:text-zinc-900 dark:hover:text-white underline cursor-pointer"
+                            >
+                              🕒 Pendiente
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setOrderDetailModalOpen(true)}
+                              className="font-semibold text-zinc-700 dark:text-zinc-300 hover:underline cursor-pointer flex items-center gap-0.5"
+                            >
+                              <IconFileText className="h-3 w-3" />
+                              {selectedConv.latestOrder.itemsCount} {selectedConv.latestOrder.itemsCount === 1 ? "prod" : "prods"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (confirm("¿Estás seguro de cancelar este pedido? Se restaurará el inventario.")) {
+                                  handleQuickUpdateOrderStatus(selectedConv.latestOrder!.id, "cancelado")
+                                }
+                              }}
+                              className="text-rose-500 hover:text-rose-700 underline cursor-pointer"
+                            >
+                              ❌ Cancelar
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Repartidor y dirección en 1 línea compacta */}
+                        <div className="pt-1.5 border-t border-zinc-200/60 dark:border-zinc-800/60 text-[10px] text-zinc-500 space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <IconTruckDelivery className="h-3 w-3 text-zinc-400 shrink-0" />
+                            <span className="truncate">{selectedConv.latestOrder.deliveryDriverName || "Sin repartidor asignado"}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-zinc-700 dark:text-zinc-300 truncate">
+                            <IconMapPin className="h-3 w-3 shrink-0 text-zinc-400" />
+                            <span className="truncate">{selectedConv.latestOrder.deliveryAddress || "Dirección según chat"}</span>
+                          </div>
                         </div>
                       </div>
-
-                      {/* Repartidor y dirección en 1 línea compacta */}
-                      <div className="pt-1 border-t border-zinc-200/60 dark:border-zinc-800/60 text-[10px] text-zinc-500 space-y-0.5">
-                        <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-1">
-                            <IconTruckDelivery className="h-3 w-3" />
-                            {selectedConv.latestOrder.deliveryDriverName || "Sin repartidor"}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1 text-zinc-700 dark:text-zinc-300 truncate">
-                          <IconMapPin className="h-3 w-3 shrink-0 text-zinc-400" />
-                          <span className="truncate">{selectedConv.latestOrder.deliveryAddress || "Dirección según chat"}</span>
-                        </div>
+                    ) : (
+                      <div className="p-3 text-center text-xs text-zinc-400 border border-dashed rounded-xl bg-zinc-50/50 dark:bg-zinc-950/20">
+                        Sin pedidos registrados para este contacto.
                       </div>
-                    </div>
-                  ) : (
-                    <div className="p-3 text-center text-xs text-zinc-400 border border-dashed rounded-xl">
-                      Sin pedidos registrados para este contacto.
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
 
-                {/* 4. Enviar Promoción rápida */}
-                <div className="pt-2">
-                  <Button
-                    onClick={() => setTemplateModalOpen(true)}
-                    variant="outline"
-                    className="w-full h-9 text-xs rounded-xl gap-1.5 border-zinc-300 dark:border-zinc-700"
-                  >
-                    <IconSpeakerphone className="h-4 w-4" />
-                    Enviar Plantilla Promocional
-                  </Button>
+                  {/* 3. Botón Elegante de Promoción */}
+                  <div className="pt-1">
+                    <Button
+                      onClick={() => setTemplateModalOpen(true)}
+                      variant="outline"
+                      className="w-full h-8 text-xs rounded-xl gap-1.5 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                    >
+                      <IconSpeakerphone className="h-3.5 w-3.5" />
+                      Enviar Plantilla Promocional
+                    </Button>
+                  </div>
                 </div>
-
-                {/* 5. Acciones de Gestión de Chat y Contacto */}
-                <div className="pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 space-y-1.5">
-                  <Button
-                    onClick={handleClearChat}
-                    variant="outline"
-                    className="w-full h-8 text-[11px] rounded-xl gap-1.5 border-zinc-200 dark:border-zinc-800 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/20"
-                  >
-                    <IconTrash className="h-3.5 w-3.5" />
-                    Vaciar Mensajes del Chat
-                  </Button>
-                  <Button
-                    onClick={handleDeleteContact}
-                    variant="outline"
-                    className="w-full h-8 text-[11px] rounded-xl gap-1.5 border-zinc-200 dark:border-zinc-800 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20"
-                  >
-                    <IconUserX className="h-3.5 w-3.5" />
-                    Eliminar Contacto del CRM
-                  </Button>
-                </div>
-              </div>
+              </>
             ) : (
               <div className="flex-1 flex items-center justify-center p-6 text-center text-xs text-zinc-400">
                 Selecciona un contacto para ver su ficha CRM y órdenes activas.

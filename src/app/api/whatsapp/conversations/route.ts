@@ -31,6 +31,8 @@ export interface ConversationItem {
     orderNumber: string
     status: string
     total: number
+    subtotal?: number
+    deliveryFee?: number
     deliveryAddress: string | null
     createdAt: string
     itemsCount: number
@@ -199,6 +201,8 @@ export async function GET(req: NextRequest) {
             orderNumber: latestOrderObj.orderNumber,
             status: latestOrderObj.status,
             total: latestOrderObj.total,
+            subtotal: latestOrderObj.subtotal || latestOrderObj.total,
+            deliveryFee: latestOrderObj.deliveryFee || 0,
             deliveryAddress: latestOrderObj.deliveryAddress,
             createdAt: latestOrderObj.createdAt.toISOString(),
             itemsCount: latestOrderObj._count.items,

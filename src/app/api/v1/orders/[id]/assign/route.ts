@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getSession, logAudit } from "@/lib/auth"
 import { apiSuccess, apiError } from "@/lib/api-response"
+import { notifyCustomerOrderStatus } from "@/lib/order-notifications"
 
 export const dynamic = "force-dynamic"
 
@@ -85,6 +86,13 @@ export async function POST(
       role: session?.role || "domiciliario",
       detail: `Repartidor ${driverName} asignado al pedido ${order.orderNumber}`,
     })
+
+    // Notificar al cliente que ya tiene repartidor asignado (Telegram o WhatsApp, sin IA)
+    notifyCustomerOrderStatus({
+      orderId: updated.id,
+      newStatus: "asignado",
+      customMessage: `🛵 *¡Repartidor asignado!*\n\nHola ${updated.customerName || "Cliente"}, tu pedido *#${updated.orderNumber}* fue asignado al repartidor *${driverName}*. Pronto saldrá en camino.`,
+    }).catch(() => {})
 
     return apiSuccess({
       order: updated,

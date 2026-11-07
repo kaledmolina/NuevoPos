@@ -580,18 +580,17 @@ REGLAS DE ORO (Ahorro de tokens y precisión):
 4. Si el cliente pide o menciona un producto que NO está en el catálogo, indícale amablemente que no lo manejas en esta sede y recomiéndale los que sí tienes disponibles.
 5. Datos del cliente: Nombre "${client.name}". Fiado / saldo pendiente: $${clientBalance.toLocaleString("es-CO")}. Dirección registrada: ${client.address ? `"${client.address}"` : "Ninguna"}.
 6. PROTOCOLO OBLIGATORIO DE TOMA DE PEDIDOS (UN PASO A LA VEZ):
-Para poder crear un pedido se requieren 3 datos: Productos válidos, Forma de pago y Dirección de entrega CONFIRMADA.
+Para poder crear un pedido se requieren: Productos válidos, Dirección de entrega, Costo del domicilio informado y Forma de pago.
 - SI EL CLIENTE TIENE DIRECCIÓN REGISTRADA (${client.address ? `"${client.address}"` : "ninguna"}):
   * ANTES de generar el pedido, debes preguntarle: "¿Te lo enviamos a tu dirección registrada ${client.address || "..."} o a otra dirección?".
-- SI EL CLIENTE NO TIENE DIRECCIÓN:
-  * Pregúntale a qué dirección desea el envío.
-- SI NO HA DICHO CÓMO PAGAR:
-  * Pregúntale si cancela en efectivo o por transferencia (Nequi/Daviplata).
+- SI EL CLIENTE DA O CONFIRMA SU DIRECCIÓN POR PRIMERA VEZ (ej: "Barrio El Dorado, Manzana 12"):
+  * Anota la dirección amablemente.
+  * Si en el chat aún no se ha indicado el costo del domicilio, dile: "Perfecto, anotada tu dirección: [Dirección]. Estamos calculando el valor del envío según tu zona para darte el total exacto. ¿Cómo prefieres pagar: en efectivo o transferencia?".
+  * ⚠️ NUNCA agregues [ORDEN_AUTO] si aún no se ha fijado el costo del domicilio en la conversación.
 - ⚠️ PROHIBICIÓN ESTRICTA DE ORDEN PREMATURA:
-  * Si en tu mensaje estás PREGUNTANDO o CONFIRMANDO la dirección (ej: "¿Confirmas la dirección...", "¿Te lo enviamos a...", etc.): NUNCA agregues el bloque [ORDEN_AUTO].
-  * Si estás preguntando la forma de pago: NUNCA agregues el bloque [ORDEN_AUTO].
-  * ÚNICAMENTE debes agregar el bloque [ORDEN_AUTO] cuando el cliente ya haya respondido confirmando explícitamente la dirección (diciendo "sí", "a esa", "correcto" o dando una dirección nueva) Y ya haya elegido forma de pago.
-[ORDEN_AUTO: {"items": [{"name": "nombre del producto del catalogo", "qty": 1}], "address": "dirección confirmada por el cliente", "paymentMethod": "efectivo" | "transferencia", "cashPaid": 50000}]
+  * Si en tu mensaje estás PREGUNTANDO o CONFIRMANDO la dirección o la forma de pago: NUNCA agregues el bloque [ORDEN_AUTO].
+  * ÚNICAMENTE debes agregar el bloque [ORDEN_AUTO] cuando en el chat ya se haya indicado o fijado el costo del envío (o el operador lo haya anexado) Y el cliente ya haya elegido forma de pago.
+[ORDEN_AUTO: {"items": [{"name": "nombre del producto del catalogo", "qty": 1}], "address": "dirección confirmada por el cliente", "deliveryFee": 3000, "paymentMethod": "efectivo" | "transferencia", "cashPaid": 50000}]
 7. CONSULTAS Y ESTADO DE PEDIDOS (TRAZABILIDAD EN TIEMPO REAL):
 Si el cliente pregunta cómo va su pedido, dónde está, si ya salió o por el estado de su orden:
 - Consulta OBLIGATORIAMENTE la sección "ÚLTIMO PEDIDO DEL CLIENTE" abajo.
@@ -788,17 +787,20 @@ ${catalogContext}`
         // Ambos inician como 'pendiente' hasta que el admin verifique el comprobante o el domiciliario cobre
         const paymentStatus = "pendiente"
 
+        const deliveryFee = Number(orderPayload.deliveryFee) || 0
+        const total = subtotal + deliveryFee
+
         const cashPaid = Number(orderPayload.cashPaid) || 0
         let paymentNote = ""
         if (!isTransfer) {
-          if (cashPaid > subtotal) {
-            const change = cashPaid - subtotal
-            paymentNote = `💵 Pago en Efectivo: Paga con $${cashPaid.toLocaleString("es-CO")} (Llevar cambio de $${change.toLocaleString("es-CO")}). El domiciliario DEBE cobrar $${subtotal.toLocaleString("es-CO")} y entregarlos a la empresa.`
+          if (cashPaid > total) {
+            const change = cashPaid - total
+            paymentNote = `💵 Pago en Efectivo: Paga con $${cashPaid.toLocaleString("es-CO")} (Llevar cambio de $${change.toLocaleString("es-CO")}). El domiciliario DEBE cobrar $${total.toLocaleString("es-CO")} contraentrega ($${subtotal.toLocaleString("es-CO")} productos + $${deliveryFee.toLocaleString("es-CO")} envío).`
           } else {
-            paymentNote = `💵 Pago en Efectivo: Cobrar $${subtotal.toLocaleString("es-CO")} contraentrega. El domiciliario DEBE entregar $${subtotal.toLocaleString("es-CO")} a la empresa.`
+            paymentNote = `💵 Pago en Efectivo: Cobrar $${total.toLocaleString("es-CO")} contraentrega ($${subtotal.toLocaleString("es-CO")} productos + $${deliveryFee.toLocaleString("es-CO")} envío).`
           }
         } else {
-          paymentNote = `💳 Pago por Transferencia (Nequi/Daviplata): Pendiente por verificar comprobante. Una vez verificado por caja, el domiciliario NO debe cobrar dinero al cliente ($0).`
+          paymentNote = `💳 Pago por Transferencia (Nequi/Daviplata): Pendiente por verificar comprobante por $${total.toLocaleString("es-CO")}. Una vez verificado por caja, el domiciliario NO debe cobrar dinero al cliente ($0).`
         }
 
         const createdOrder = await db.order.create({
@@ -814,8 +816,8 @@ ${catalogContext}`
             notes: `Generado automáticamente por ${isTelegram ? `Telegram (@${config?.telegramBotUsername || "Bot"})` : "WhatsApp"} & ${providerName} IA (${branchName}).`,
             subtotal,
             tax: 0,
-            deliveryFee: 0,
-            total: subtotal,
+            deliveryFee,
+            total,
             paymentMethod,
             paymentStatus,
             status: "pendiente",
@@ -846,11 +848,12 @@ ${catalogContext}`
         }
 
         // Agregar pie de confirmación con el # de orden y recordatorio de pago
+        const feeLine = deliveryFee > 0 ? `\n🛵 *Costo Domicilio:* $${deliveryFee.toLocaleString("es-CO")}` : ""
         const paymentSummary = isTransfer
           ? "💳 *Método de Pago:* Transferencia previa (Por favor envía el comprobante por este chat para verificar y despachar tu pedido)"
-          : `💵 *Método de Pago:* Efectivo ($${subtotal.toLocaleString("es-CO")} a cobrar contraentrega)`
+          : `💵 *Método de Pago:* Efectivo ($${total.toLocaleString("es-CO")} a cobrar contraentrega)`
 
-        rawReply += `\n\n📦 *Pedido Generado:* #${createdOrder.orderNumber}\n${paymentSummary}\n📍 *Entrega:* ${finalAddress}`
+        rawReply += `\n\n📦 *Pedido Generado:* #${createdOrder.orderNumber}\n🧾 *Subtotal Productos:* $${subtotal.toLocaleString("es-CO")}${feeLine}\n💵 *Total:* $${total.toLocaleString("es-CO")}\n${paymentSummary}\n📍 *Entrega:* ${finalAddress}`
       }
     } catch (parseErr) {
       console.warn(`[${providerName} Order Parse Error]`, parseErr)
