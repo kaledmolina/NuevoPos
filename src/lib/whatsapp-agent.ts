@@ -851,9 +851,391 @@ async function executeWhatsAppMessage(params: {
 }
 
 /**
- * Módulo de Inteligencia Artificial con soporte Dual: OpenRouter & DeepSeek
- * Permite seleccionar cualquier modelo (Claude 3.5, GPT-4o, Llama 3.3, Gemini 2.0, DeepSeek V3/R1)
- * Optimizado para mínimo consumo de tokens con RAG ultraliviano
+ * Definiciones oficiales de Herramientas MCP / Function Calling para OpenRouter & DeepSeek
+ */
+export const WHATSAPP_MCP_TOOLS = [
+  {
+    type: "function" as const,
+    function: {
+      name: "consultar_catalogo",
+      description: "Consulta productos, medicamentos, existencias y precios en el catálogo oficial de la tienda/farmacia para la sede activa.",
+      parameters: {
+        type: "object",
+        properties: {
+          busqueda: {
+            type: "string",
+            description: "Nombre, término o principio activo a buscar (ej: 'jabón', 'acetaminofén', 'ibuprofeno', 'alcohol'). Si está vacío, lista productos destacados.",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "cotizar_domicilio",
+      description: "Calcula la tarifa oficial de entrega a domicilio para la dirección y barrio indicados por el cliente.",
+      parameters: {
+        type: "object",
+        properties: {
+          direccion: {
+            type: "string",
+            description: "Dirección de entrega (calle, carrera, manzana, lote, etc.)",
+          },
+          barrio: {
+            type: "string",
+            description: "Barrio de entrega (ej: 'El Dorado', 'Centro', etc.)",
+          },
+        },
+        required: ["direccion"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "crear_pedido",
+      description: "Registra oficialmente el pedido a domicilio en OmniPOS una vez confirmados los productos, la dirección y el método de pago.",
+      parameters: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                nombre: { type: "string", description: "Nombre del producto según el catálogo" },
+                cantidad: { type: "number", description: "Cantidad de unidades" },
+              },
+              required: ["nombre", "cantidad"],
+            },
+            description: "Lista de productos pedidos",
+          },
+          direccion: {
+            type: "string",
+            description: "Dirección completa de entrega",
+          },
+          barrio: {
+            type: "string",
+            description: "Barrio de entrega",
+          },
+          metodo_pago: {
+            type: "string",
+            enum: ["efectivo", "transferencia"],
+            description: "Método de pago ('efectivo' contraentrega o 'transferencia')",
+          },
+          paga_con_efectivo: {
+            type: "number",
+            description: "Monto en efectivo con el que paga el cliente para calcular y enviar el cambio exacto (ej: 50000). Opcional.",
+          },
+        },
+        required: ["items", "direccion", "metodo_pago"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "consultar_estado_pedido",
+      description: "Consulta el estado en tiempo real del último pedido del cliente o de un número de orden.",
+      parameters: {
+        type: "object",
+        properties: {
+          orden: {
+            type: "string",
+            description: "Número de orden opcional (ej: PED-20261109-1234)",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "consultar_saldo_fiado",
+      description: "Consulta el saldo fiado o deuda pendiente del cliente.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+]
+
+/**
+ * Ejecutor de Herramientas MCP contra la base de datos de OmniPOS
+ */
+async function executeMcpTool(
+  toolName: string,
+  args: any,
+  context: {
+    client: any
+    branch: any
+    cleanPhone: string
+    branchFilter: any
+    deliveryConfig: any
+    channelLabel: string
+  }
+): Promise<{ result: any; createdOrder?: any }> {
+  const { client, branch, cleanPhone, branchFilter, deliveryConfig, channelLabel } = context
+
+  if (toolName === "consultar_catalogo") {
+    const q = (args.busqueda || "").toLowerCase().trim()
+    const allProds = await db.product.findMany({
+      where: { active: true, stock: { gt: 0 }, ...branchFilter },
+      select: { id: true, name: true, price: true, stock: true, unit: true, category: true },
+      take: 80,
+    })
+
+    if (!q) {
+      return {
+        result: {
+          productos_destacados: allProds.slice(0, 10).map((p) => ({
+            nombre: p.name,
+            precio: p.price,
+            precio_formateado: `$${p.price.toLocaleString("es-CO")}`,
+            stock: p.stock,
+            unidad: p.unit,
+          })),
+        },
+      }
+    }
+
+    const qNorm = q.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    const words = qNorm.split(/\s+/).filter((w: string) => w.length >= 2)
+
+    const matched = allProds.filter((p) => {
+      const pNorm = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      if (pNorm.includes(qNorm) || qNorm.includes(pNorm)) return true
+      return words.some((w: string) => pNorm.includes(w))
+    })
+
+    if (matched.length === 0) {
+      return {
+        result: {
+          encontrado: false,
+          mensaje: `No se encontraron productos disponibles con '${q}' en esta sede.`,
+          otros_productos_disponibles: allProds.slice(0, 6).map((p) => p.name),
+        },
+      }
+    }
+
+    return {
+      result: {
+        encontrado: true,
+        cantidad_resultados: matched.length,
+        productos: matched.slice(0, 6).map((p) => ({
+          nombre: p.name,
+          precio: p.price,
+          precio_formateado: `$${p.price.toLocaleString("es-CO")}`,
+          stock: p.stock,
+          unidad: p.unit,
+        })),
+      },
+    }
+  }
+
+  if (toolName === "cotizar_domicilio") {
+    const fullLoc = `${args.barrio || ""} ${args.direccion || ""}`
+    const feeRes = resolveDeliveryFee(fullLoc, deliveryConfig)
+    return {
+      result: {
+        costo_domicilio: feeRes.fee,
+        costo_formateado: `$${feeRes.fee.toLocaleString("es-CO")}`,
+        barrio_detectado: feeRes.matchedNeighborhood || args.barrio || "Tarifa estándar",
+        regla_aplicada: feeRes.appliedRule,
+      },
+    }
+  }
+
+  if (toolName === "crear_pedido") {
+    const allProds = await db.product.findMany({
+      where: { active: true, ...branchFilter },
+      select: { id: true, name: true, price: true, stock: true, unit: true },
+    })
+
+    const itemsToCreate: { product: any; qty: number; subtotal: number }[] = []
+    const requestedItems = Array.isArray(args.items) ? args.items : []
+
+    for (const it of requestedItems) {
+      const rawName = (it.nombre || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
+      let match = allProds.find((p) => {
+        const pNorm = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        return pNorm.includes(rawName) || rawName.includes(pNorm)
+      })
+      if (!match) {
+        const words = rawName.split(/\s+/).filter((w: string) => w.length >= 3)
+        match = allProds.find((p) => {
+          const pNorm = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+          return words.some((w: string) => pNorm.includes(w))
+        })
+      }
+      if (match) {
+        const qty = Math.max(1, Number(it.cantidad) || 1)
+        itemsToCreate.push({
+          product: match,
+          qty,
+          subtotal: match.price * qty,
+        })
+      }
+    }
+
+    if (itemsToCreate.length === 0) {
+      return {
+        result: {
+          error: "No se pudieron identificar los productos solicitados en el catálogo de esta sede.",
+        },
+      }
+    }
+
+    const subtotal = itemsToCreate.reduce((acc, it) => acc + it.subtotal, 0)
+    const fullAddress = args.barrio && !args.direccion.toLowerCase().includes(args.barrio.toLowerCase())
+      ? `${args.direccion}, Barrio ${args.barrio}`
+      : args.direccion
+
+    const feeRes = resolveDeliveryFee(fullAddress, deliveryConfig)
+    const deliveryFee = feeRes.fee
+    const total = subtotal + deliveryFee
+    const isTransfer = args.metodo_pago === "transferencia"
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "")
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString()
+    const genOrderNum = `PED-${dateStr}-${randomSuffix}`
+
+    const cashPaid = Number(args.paga_con_efectivo) || 0
+    let paymentNote = ""
+    let cambio = 0
+    if (!isTransfer) {
+      if (cashPaid > total) {
+        cambio = cashPaid - total
+        paymentNote = `💵 Pago en Efectivo: Paga con $${cashPaid.toLocaleString("es-CO")} (Llevar cambio de $${cambio.toLocaleString("es-CO")}). Cobrar $${total.toLocaleString("es-CO")} contraentrega.`
+      } else {
+        paymentNote = `💵 Pago en Efectivo: Cobrar $${total.toLocaleString("es-CO")} contraentrega.`
+      }
+    } else {
+      paymentNote = `💳 Pago por Transferencia: Pendiente verificar comprobante por $${total.toLocaleString("es-CO")}. Una vez verificado por caja, el repartidor no cobra ($0).`
+    }
+
+    if (fullAddress && !client.address) {
+      await db.client.update({
+        where: { id: client.id },
+        data: { address: fullAddress },
+      }).catch(() => {})
+    }
+
+    const createdOrder = await db.order.create({
+      data: {
+        orderNumber: genOrderNum,
+        tenantId: branch?.tenantId || null,
+        branchId: branch?.id || null,
+        clientId: client.id,
+        customerName: client.name,
+        customerPhone: cleanPhone,
+        deliveryAddress: fullAddress,
+        deliveryNotes: paymentNote,
+        notes: `Generado automáticamente por Agente IA ${channelLabel} (${branch?.name || "Sede"}).`,
+        subtotal,
+        tax: 0,
+        deliveryFee,
+        total,
+        paymentMethod: args.metodo_pago,
+        paymentStatus: "pendiente",
+        status: "pendiente",
+        items: {
+          create: itemsToCreate.map((it) => ({
+            productId: it.product.id,
+            productName: it.product.name,
+            quantity: it.qty,
+            unitPrice: it.product.price,
+            subtotal: it.subtotal,
+          })),
+        },
+      },
+    })
+
+    const orderSummary = {
+      exito: true,
+      orden_id: createdOrder.id,
+      orderNumber: createdOrder.orderNumber,
+      subtotal,
+      deliveryFee,
+      total,
+      total_formateado: `$${total.toLocaleString("es-CO")}`,
+      cambio: cambio > 0 ? cambio : 0,
+      direccion_entrega: fullAddress,
+      metodo_pago: args.metodo_pago,
+      items: itemsToCreate.map((it) => ({
+        producto: it.product.name,
+        cantidad: it.qty,
+        subtotal: it.subtotal,
+      })),
+    }
+
+    return {
+      result: orderSummary,
+      createdOrder: orderSummary,
+    }
+  }
+
+  if (toolName === "consultar_estado_pedido") {
+    const lastOrder = await db.order.findFirst({
+      where: {
+        OR: [{ customerPhone: cleanPhone }, { clientId: client.id }],
+        ...(args.orden ? { orderNumber: { contains: args.orden } } : {}),
+        ...branchFilter,
+      },
+      orderBy: { createdAt: "desc" },
+      include: { items: true },
+    })
+
+    if (!lastOrder) {
+      return {
+        result: { existe: false, mensaje: "No hay pedidos registrados para este cliente en el sistema." },
+      }
+    }
+
+    const statusMap: Record<string, string> = {
+      pendiente: "🟡 Pendiente (Recibido en tienda, en fila de alistamiento)",
+      confirmado: "🟢 Confirmado (Confirmado por el comercio)",
+      en_preparacion: "🔵 En Preparación (Empacando en el local)",
+      en_camino: "🟣 En Camino (Despachado y en ruta)",
+      entregado: "✅ Entregado con éxito",
+      cancelado: "🔴 Cancelado",
+    }
+
+    return {
+      result: {
+        existe: true,
+        orderNumber: lastOrder.orderNumber,
+        estado: statusMap[lastOrder.status] || lastOrder.status,
+        direccion: lastOrder.deliveryAddress,
+        total_formateado: `$${lastOrder.total.toLocaleString("es-CO")}`,
+        repartidor: lastOrder.deliveryDriverName || null,
+        productos: lastOrder.items.map((i) => `${i.quantity}x ${i.productName}`),
+      },
+    }
+  }
+
+  if (toolName === "consultar_saldo_fiado") {
+    const acc = client.creditAccount
+    const balance = acc?.balance || 0
+    return {
+      result: {
+        cliente: client.name,
+        saldo_pendiente: balance,
+        saldo_formateado: `$${balance.toLocaleString("es-CO")}`,
+        cupo_disponible: `$${(acc?.creditLimit || 0).toLocaleString("es-CO")}`,
+        tiene_deuda: balance > 0,
+      },
+    }
+  }
+
+  return { result: { error: `Herramienta ${toolName} no reconocida` } }
+}
+
+/**
+ * Módulo de Inteligencia Artificial con soporte MCP Tools (Function Calling):
+ * OpenRouter & DeepSeek con libertad total de pensamiento, memoria conversacional continua
+ * y llamadas directas a herramientas para consultar catálogo, cotizar domicilios y crear órdenes.
  */
 async function processWithLLMAI(params: {
   message: string
@@ -874,7 +1256,6 @@ async function processWithLLMAI(params: {
   const openerKey = config.openrouterApiKey?.trim() || process.env.OPENROUTER_API_KEY?.trim() || ""
   const dsKey = config.deepseekApiKey?.trim() || process.env.DEEPSEEK_API_KEY?.trim() || ""
 
-  // Preferencia según configuración, pero con fallback inteligente si falta una clave
   let isOpener = config.aiProvider === "openrouter" ? !!openerKey : !dsKey && !!openerKey
   let providerName = isOpener ? "OpenRouter" : "DeepSeek"
   let apiKey = isOpener ? openerKey : dsKey
@@ -888,534 +1269,236 @@ async function processWithLLMAI(params: {
     ? "https://openrouter.ai/api/v1/chat/completions"
     : "https://api.deepseek.com/chat/completions"
 
-  // 1. Historial de conversación previo limitado a la sesión activa actual
-  // Esto GARANTIZA que nunca se tomen productos ni palabras de pedidos pasados ya concluidos
-  const session = await getConversationSession(cleanPhone)
-  const sessionStart = session.status !== "cerrada" && session.openedAt
-    ? new Date(session.openedAt)
-    : new Date(Date.now() - 3 * 60 * 60 * 1000)
-
-  const recentMsgs = await db.whatsAppMessage.findMany({
+  // 1. Historial de conversación real y continuo (últimos 20 mensajes sin truncar ni reiniciar arbitrariamente)
+  const rawRecentMsgs = await db.whatsAppMessage.findMany({
     where: {
       phone: cleanPhone,
-      createdAt: { gte: sessionStart },
     },
     orderBy: { createdAt: "desc" },
-    skip: 1, // Salta el mensaje actual recién guardado
-    take: 24, // Historial completo y fluido de la sesión activa
+    skip: 1, // Excluir el mensaje entrante recién guardado
+    take: 20,
     select: { sender: true, text: true },
   })
 
-  const conversationHistory = recentMsgs.reverse().map((m) => ({
-    role: m.sender === "customer" ? "user" : "assistant",
-    content: m.text, // Retener texto completo sin truncar para no perder direcciones ni detalles
+  const conversationHistory = rawRecentMsgs.reverse().map((m) => ({
+    role: m.sender === "customer" ? ("user" as const) : ("assistant" as const),
+    content: m.text,
   }))
 
-  // 1.1 Contexto Real del Catálogo de la Sede
-  // Extraer palabras clave combinando el mensaje entrante con los últimos mensajes de la conversación
-  const fullConversationSearchText = [
-    message,
-    ...recentMsgs.map((m) => m.text),
-  ].join(" ")
-
-  // Catálogo completo de la sede activa (hasta 150 productos en stock para no omitir ningún producto)
-  const products = await db.product.findMany({
-    where: {
-      active: true,
-      ...branchFilter,
-      stock: { gt: 0 },
-    },
-    select: { id: true, name: true, price: true, stock: true, unit: true },
-    orderBy: [{ stock: "desc" }, { name: "asc" }],
-    take: 150,
-  })
-
-  const catalogContext = products.length > 0
-    ? products
-        .map((p) => `- ${p.name} | Precio: $${p.price.toLocaleString("es-CO")} | Stock: ${p.stock} ${p.unit}s`)
-        .join("\n")
-    : "Catálogo vacío para esta sede. Informa que pronto se cargarán existencias."
-
-  // Verificar si el cliente consultó explícitamente por un artículo que realmente no existe en el catálogo
-  const isExplicitProductInquiry = /(?:tienen|tienes|venden|vende|busco|necesito|consiguen|hay|precio de|a c[oó]mo|a cu[aá]nto)\b/i.test(message)
-  const messageWords = fullConversationSearchText
-    .toLowerCase()
-    .replace(/[^a-záéíóúñ0-9\s]/gi, " ")
-    .split(/\s+/)
-    .filter((w) => w.length >= 3 && !GENERAL_QUERY_WORDS.has(w))
-
-  let specificNotFoundNote = ""
-  if (isExplicitProductInquiry && messageWords.length > 0 && products.length > 0) {
-    const hasAnyMatch = messageWords.some((w) => {
-      const norm = w.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-      return products.some((p) => {
-        const pNorm = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        return pNorm.includes(norm) || norm.includes(pNorm)
-      })
-    })
-
-    if (!hasAnyMatch && messageWords.length <= 3) {
-      specificNotFoundNote = `\n⚠️ ATENCIÓN: El cliente consultó por "${messageWords.join(", ")}", pero NO está en el catálogo de esta sede. Infórmale con amabilidad que no disponemos de ese artículo y ofrécele con naturalidad los productos que sí tenemos en la lista de abajo.`
-    }
-  }
-
-  const clientBalance = client.creditAccount?.balance || 0
-
-  // 1.1 Consultar el pedido más reciente del cliente para trazabilidad y estado en tiempo real
-  const activeOrder = await db.order.findFirst({
-    where: {
-      OR: [
-        { customerPhone: cleanPhone },
-        ...(client.id ? [{ clientId: client.id }] : []),
-      ],
-      ...(branchFilter || {}),
-    },
-    orderBy: { createdAt: "desc" },
-    include: {
-      items: true,
-    },
-  })
-
-  let orderTrackingContext = "El cliente no tiene pedidos registrados en el sistema."
-  if (activeOrder) {
-    const statusMap: Record<string, string> = {
-      pendiente: "🟡 Pendiente (Recibido en tienda, en fila de alistamiento)",
-      confirmado: "🟢 Confirmado (Confirmado por el comercio)",
-      en_preparacion: "🔵 En Preparación (Empacando y alistando en el local)",
-      en_camino: "🟣 En Camino (Despachado y en ruta hacia tu dirección)",
-      entregado: "✅ Entregado (Completado y entregado con éxito)",
-      cancelado: "🔴 Cancelado",
-    }
-    const currentStatusDesc = statusMap[activeOrder.status] || activeOrder.status.toUpperCase()
-    const driverText = activeOrder.deliveryDriverName ? ` | Repartidor asignado: ${activeOrder.deliveryDriverName}` : ""
-    const itemsText = activeOrder.items.map((i) => `${i.quantity}x ${i.productName}`).join(", ")
-
-    orderTrackingContext = `Orden #${activeOrder.orderNumber}:
-- Estado actual en tiempo real: ${currentStatusDesc}
-- Productos: ${itemsText}
-- Total: $${activeOrder.total.toLocaleString("es-CO")} (${activeOrder.paymentMethod})
-- Dirección de entrega: ${activeOrder.deliveryAddress || "N/A"}${driverText}`
-  }
-
-  // 2. Cargar configuración oficial de tarifas de domicilio para esta sede
+  // 2. Configuración oficial de tarifas de domicilio para esta sede
   const deliveryConfig = await getDeliveryConfig(branchId)
-  const deliveryPromptContext = formatDeliveryPromptContext(deliveryConfig)
 
-  // 3. Prompt de sistema cálido, humano y comercialmente efectivo
-  const systemPrompt = `Eres un asesor de atención al cliente y ventas humano de "${branchName}" por ${channelLabel}.
-Hablas exactamente como un vendedor o farmaceuta amable, empático, educado y profesional en el mostrador.
+  // 3. Prompt de sistema humano con MCP Tools
+  const systemPrompt = `Eres el asesor comercial y de atención al cliente humano de "${branchName}" atendiendo por ${channelLabel}.
+Atiendes con calidez, cercanía, profesionalismo y respeto a cada cliente (tono natural latinoamericano/colombiano).
 
-TONO Y PERSONALIDAD HUMANA:
-- Habla con calidez, cercanía y respeto (tono colombiano / latinoamericano natural).
-- NUNCA uses listas numeradas rígidas ni menús automáticos (PROHIBIDO hablar como un bot o conmutador tipo: "1️⃣ Hacer pedido, 2️⃣ Precios, 3️⃣ Saldo").
-- NUNCA expongas análisis internos, razonamiento paso a paso, ni etiquetas <think>. Escribe ÚNICAMENTE el mensaje conversacional final para el cliente.
+TIENES HERRAMIENTAS (MCP Tools) CONECTADAS AL SISTEMA DE LA TIENDA:
+1. "consultar_catalogo": Úsala para consultar existencias, precios y presentaciones de productos o medicamentos. NUNCA inventes productos ni precios.
+2. "cotizar_domicilio": Úsala para calcular el valor del domicilio según la dirección y barrio del cliente.
+3. "crear_pedido": Úsala para registrar oficialmente el pedido en el sistema una vez que el cliente haya confirmado qué desea, su dirección/barrio y su método de pago (efectivo o transferencia).
+4. "consultar_estado_pedido": Úsala si el cliente pregunta por el estado de su orden o entrega.
+5. "consultar_saldo_fiado": Úsala si el cliente pregunta por su deuda, fiado o saldo.
 
-MANEJO DE SALUDOS Y CONVERSACIÓN NATURAL:
-- Si el cliente te saluda ("Hola", "Buenas", "Buen día", "Hola buenas tardes"):
-  Saluda con calidez y alegría, dale la bienvenida a "${branchName}" y pregúntale amablemente en qué le puedes colaborar hoy.
-  ⚠️ REGLA CRÍTICA: NUNCA listes productos ni pongas el catálogo completo ante un simple saludo. Espera a que el cliente te diga qué medicina o producto busca.
-- Si el cliente te responde negativamente ("No", "No gracias", "Nada más", "Por ahora no"):
-  Agradécele con mucha amabilidad, dile que con el mayor gusto y que quedas a su entera disposición cuando lo necesite. ¡NUNCA le ofrezcas productos si te dijo que no!
-- Si el cliente agradece ("Gracias", "Muchas gracias"):
-  Responde con cortesía y calidez ("¡Con muchísimo gusto!", "¡Siempre a tu orden!").
+INSTRUCCIONES CLAVE DE ATENCIÓN:
+- Deja fluir la conversación naturalmente.
+- Si el cliente solo te saluda ("hola", "buenas"), salúdalo con calidez y pregúntale en qué le puedes colaborar. (No llames herramientas para un simple saludo).
+- Recuerda SIEMPRE el contexto de toda la conversación anterior: los productos solicitados, las direcciones y las notas que el cliente ya dio. NUNCA le vuelvas a preguntar lo que ya te dijo.
+- Si el cliente te pide un producto, consulta el catálogo ("consultar_catalogo"), dale el precio y pregúntale amablemente cuántas unidades desea y a qué dirección y barrio se lo envías.
+- Cuando el cliente te dé su dirección y barrio, cotiza el domicilio ("cotizar_domicilio"), infórmale el total (productos + envío) y pregúntale si prefiere pagar en efectivo contraentrega o por transferencia previa (Nequi / Daviplata / Bancolombia).
+- Una vez que confirme su forma de pago, llama a "crear_pedido" para registrar la orden en el sistema.
+- Cuando la orden esté creada, dale una confirmación alegre con el número de pedido y los detalles.
+- Habla siempre como un ser humano atento y servicial.
+${config.aiSystemPrompt ? `\nInstrucciones especiales de la sede: ${config.aiSystemPrompt}` : ""}`
 
-CONSULTA DE PRODUCTOS Y PRECIOS:
-- Revisa el "CATÁLOGO DE ESTA SEDE" provisto abajo.
-- Si el cliente pregunta por un medicamento o artículo:
-  Confírmale con agrado que sí lo tienes disponible, indícale el precio exacto y su presentación, y pregúntale amablemente cuántas unidades le gustaría pedir.
-- Si el producto NO está en el catálogo:
-  Explícaselo con amabilidad y educación ("En este momento no disponemos de ese artículo en esta sede..."), y si tienes una opción similar en el catálogo de abajo, sugiéresela amablemente.
-
-FLUJO COMPLETO DE TOMA DE PEDIDOS Y ENTREGA A DOMICILIO:
-1. DETECCIÓN DE PRODUCTOS:
-   - Cuando el cliente indique qué productos quiere y la cantidad:
-     * Si no ha indicado su dirección completa y barrio, pregúntale cordialmente: "¿A qué dirección te lo enviamos y en qué barrio te encuentras para coordinarte el domicilio?".
-     * Si el cliente ya tiene dirección registrada (${client.address ? `"${client.address}"` : "ninguna"}), pregúntale: "¿Te lo despachamos a tu dirección registrada (${client.address || "..."}) o a otra? Por favor confírmanos también en qué barrio te encuentras".
-
-2. VALIDACIÓN DE DIRECCIÓN Y CÁLCULO DE ENVÍO:
-   - Cuando el cliente indique o confirme su dirección y barrio:
-     * Valida la tarifa de envío según la tabla abajo (si el barrio está registrado en tarifas especiales, usa esa tarifa; si no, la tarifa global de $${deliveryConfig.globalFee.toLocaleString("es-CO")}).
-     * Suma de inmediato: Subtotal de productos + Domicilio = Total a pagar.
-     * Preséntale el valor claramente:
-       "¡Listo! Serían [Productos] ($[Subtotal]) + domicilio a [Barrio] ($[Tarifa]), para un total de $[Total]. ¿Cómo prefieres cancelar: en efectivo contraentrega o por transferencia (Nequi / Daviplata / Bancolombia)?".
-
-3. CONFIRMACIÓN Y CREACIÓN DE LA ORDEN:
-   - Cuando el cliente confirme o indique cómo va a pagar (efectivo / transferencia):
-     * Confirma la orden con entusiasmo: indícale que su pedido ya fue recibido y que lo estamos preparando de inmediato en tienda.
-     * Si paga en efectivo y menciona con cuánto dinero paga (ej. "pago con 50 mil"), tómalo en cashPaid para que el domiciliario lleve el cambio.
-     * Si paga por transferencia previa (Nequi / Daviplata / Bancolombia), pídele amablemente que te envíe el comprobante por este chat para verificarlo en caja y despachar de inmediato.
-     * AGREGA AL FINAL DE TU MENSAJE el tag técnico obligatorio para que el sistema cree la orden en OmniPOS:
-       [ORDEN_AUTO: {"items": [{"name": "nombre exacto según catálogo", "qty": 1}], "address": "dirección y barrio", "deliveryFee": 5000, "paymentMethod": "efectivo" | "transferencia", "cashPaid": 50000}]
-     * ⚠️ NUNCA agregues [ORDEN_AUTO] si todavía estás preguntando qué productos desea, la dirección o el método de pago. Solo agrégalo cuando los productos, la dirección y la forma de pago estén completamente definidos por el cliente.
-
-DATOS DEL CLIENTE:
-- Nombre: "${client.name}"
-- Saldo fiado pendiente: $${clientBalance.toLocaleString("es-CO")}
-- Dirección registrada: ${client.address ? `"${client.address}"` : "Ninguna"}
-
-ESTADO DE PEDIDOS (TRAZABILIDAD EN TIEMPO REAL):
-Si el cliente pregunta por su pedido ("cómo va mi pedido?", "ya salió?"):
-${orderTrackingContext}
-
-TARIFAS DE DOMICILIO DE ESTA SEDE:
-${deliveryPromptContext}
-
-CATÁLOGO DE ESTA SEDE (${branchName}):
-${catalogContext}
-${config.aiSystemPrompt ? `\nInstrucciones especiales de la sede: ${config.aiSystemPrompt}` : ""}${specificNotFoundNote}`
-
-  // 4. Invocación a la API oficial (OpenRouter o DeepSeek) con timeout de 30s
   const maxTokens = Math.max(config.maxTokensPerReply || 2048, 2048)
 
-  async function sendAiRequest(
-    currEndpoint: string,
-    currKey: string,
-    currModel: string,
-    currIsOpener: boolean,
-    currProvider: string
+  async function callAiWithTools(
+    messagesList: any[],
+    toolsList: any[]
   ) {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 30000) // 30 segundos
+    const timer = setTimeout(() => controller.abort(), 45000) // 45 segundos
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${currKey}`,
+      Authorization: `Bearer ${apiKey}`,
     }
-    if (currIsOpener) {
+    if (isOpener) {
       headers["HTTP-Referer"] = "https://omnipos.pro"
       headers["X-Title"] = "OmniPOS WhatsApp AI Agent"
     }
 
+    const payload: any = {
+      model,
+      messages: messagesList,
+      max_tokens: maxTokens,
+      temperature: 0.5,
+    }
+
+    if (toolsList && toolsList.length > 0) {
+      payload.tools = toolsList
+      payload.tool_choice = "auto"
+    }
+
     try {
-      const res = await fetch(currEndpoint, {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          model: currModel,
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...conversationHistory,
-            { role: "user", content: message },
-          ],
-          max_tokens: maxTokens,
-          temperature: 0.65,
-          include_reasoning: false,
-        }),
+        body: JSON.stringify(payload),
         signal: controller.signal,
       })
       clearTimeout(timer)
       if (!res.ok) {
         const errBody = await res.text()
-        if (currIsOpener && (res.status === 429 || /rate limit|quota|credits|exceeded|free/i.test(errBody))) {
-          try {
-            await db.setting.upsert({
-              where: { key: "openrouter_free_exhausted" },
-              update: {
-                value: JSON.stringify({
-                  exhausted: true,
-                  at: new Date().toISOString(),
-                  status: res.status,
-                  message: `Cuota de peticiones gratuitas agotada en OpenRouter (Error ${res.status}): ${errBody.slice(0, 160)}`,
-                }),
-              },
-              create: {
-                key: "openrouter_free_exhausted",
-                value: JSON.stringify({
-                  exhausted: true,
-                  at: new Date().toISOString(),
-                  status: res.status,
-                  message: `Cuota de peticiones gratuitas agotada en OpenRouter (Error ${res.status}): ${errBody.slice(0, 160)}`,
-                }),
-              },
-            })
-          } catch {
-            /* noop */
-          }
+        // Si el modelo no soporta el parámetro tools (error 400 de API), reintentar sin tools
+        if (res.status === 400 && /tool/i.test(errBody) && payload.tools) {
+          console.warn(`[AI Tools Warning]: Model ${model} doesn't support tools, retrying without tools parameter...`)
+          return await callAiWithTools(messagesList, [])
         }
-        throw new Error(`${currProvider} API (${res.status}): ${errBody.slice(0, 180)}`)
-      } else {
-        if (currIsOpener) {
-          await db.setting.delete({ where: { key: "openrouter_free_exhausted" } }).catch(() => {})
-        }
+        throw new Error(`${providerName} API (${res.status}): ${errBody.slice(0, 180)}`)
       }
       return await res.json()
     } catch (e: any) {
       clearTimeout(timer)
       const isAbort = e?.name === "AbortError"
-      throw new Error(isAbort ? `${currProvider} timeout (+8.5s)` : (e as Error).message)
+      throw new Error(isAbort ? `${providerName} timeout (45s)` : (e as Error).message)
     }
   }
 
-  let aiData: any = null
-  let actualProvider = providerName
+  // 4. Bucle de Ejecución MCP (Model -> Tools -> Model)
+  let conversationMessages: any[] = [
+    { role: "system", content: systemPrompt },
+    ...conversationHistory,
+    { role: "user", content: message },
+  ]
+
+  let loopCount = 0
+  const MAX_LOOPS = 4
+  let finalRawReply = ""
+  let capturedOrder: any = null
+  let totalTokensUsed = 0
   let actualModel = model
 
   try {
-    aiData = await sendAiRequest(endpoint, apiKey, model, isOpener, providerName)
-  } catch (primaryErr) {
-    console.warn(`[AI Primary ${providerName} Failed]`, (primaryErr as Error).message)
+    while (loopCount < MAX_LOOPS) {
+      loopCount++
+      const aiData = await callAiWithTools(conversationMessages, WHATSAPP_MCP_TOOLS)
+      totalTokensUsed += aiData?.usage?.total_tokens || 0
+      actualModel = aiData?.model || model
+      const choice = aiData?.choices?.[0]
+      const assistantMsg = choice?.message
 
-    // Intentar failover al proveedor alternativo si está disponible
+      if (!assistantMsg) break
+
+      // Si el modelo llamó a una o más herramientas MCP
+      if (assistantMsg.tool_calls && Array.isArray(assistantMsg.tool_calls) && assistantMsg.tool_calls.length > 0) {
+        conversationMessages.push(assistantMsg)
+
+        for (const tc of assistantMsg.tool_calls) {
+          const fnName = tc.function?.name
+          let fnArgs: any = {}
+          try {
+            fnArgs = JSON.parse(tc.function?.arguments || "{}")
+          } catch {
+            fnArgs = {}
+          }
+
+          const toolExec = await executeMcpTool(fnName, fnArgs, {
+            client,
+            branch,
+            cleanPhone,
+            branchFilter,
+            deliveryConfig,
+            channelLabel,
+          })
+
+          if (toolExec.createdOrder) {
+            capturedOrder = toolExec.createdOrder
+          }
+
+          conversationMessages.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify(toolExec.result),
+          })
+        }
+        // Siguiente iteración: el modelo procesa la respuesta de las herramientas y genera su mensaje final
+        continue
+      }
+
+      // Respuesta final directa sin herramientas (conversación natural, saludos, etc.)
+      finalRawReply = assistantMsg.content || ""
+      break
+    }
+  } catch (primaryErr) {
+    console.warn(`[AI Primary ${providerName} Error]:`, (primaryErr as Error).message)
+
+    // Intentar failover inteligente si la otra API está disponible
     const canFailoverToOpenRouter = !isOpener && !!openerKey
     const canFailoverToDeepSeek = isOpener && !!dsKey
 
     if (canFailoverToOpenRouter) {
-      console.log("[AI Failover] Intentando con OpenRouter...")
-      try {
-        actualProvider = "OpenRouter"
-        actualModel = (config.openrouterModel || "openrouter/free").trim()
-        aiData = await sendAiRequest(
-          "https://openrouter.ai/api/v1/chat/completions",
-          openerKey,
-          actualModel,
-          true,
-          "OpenRouter"
-        )
-      } catch (secErr) {
-        console.warn("[AI Failover OpenRouter Failed]", (secErr as Error).message)
-        throw primaryErr
-      }
+      isOpener = true
+      providerName = "OpenRouter"
+      apiKey = openerKey
+      model = (config.openrouterModel || "openrouter/free").trim()
+      endpoint = "https://openrouter.ai/api/v1/chat/completions"
+      const aiData = await callAiWithTools(conversationMessages, WHATSAPP_MCP_TOOLS)
+      finalRawReply = aiData?.choices?.[0]?.message?.content || ""
     } else if (canFailoverToDeepSeek) {
-      console.log("[AI Failover] Intentando con DeepSeek Directo...")
-      try {
-        actualProvider = "DeepSeek"
-        actualModel = (config.deepseekModel || "deepseek-chat").trim()
-        aiData = await sendAiRequest(
-          "https://api.deepseek.com/chat/completions",
-          dsKey,
-          actualModel,
-          false,
-          "DeepSeek"
-        )
-      } catch (secErr) {
-        console.warn("[AI Failover DeepSeek Failed]", (secErr as Error).message)
-        throw primaryErr
-      }
+      isOpener = false
+      providerName = "DeepSeek"
+      apiKey = dsKey
+      model = (config.deepseekModel || "deepseek-chat").trim()
+      endpoint = "https://api.deepseek.com/chat/completions"
+      const aiData = await callAiWithTools(conversationMessages, WHATSAPP_MCP_TOOLS)
+      finalRawReply = aiData?.choices?.[0]?.message?.content || ""
     } else {
       throw primaryErr
     }
   }
 
-  let rawReply = aiData?.choices?.[0]?.message?.content || ""
-  rawReply = sanitizeBotReply(rawReply, client?.name, activeOrder)
+  finalRawReply = sanitizeBotReply(finalRawReply, client?.name)
 
-  const isModelFree = isOpener && (actualModel === "openrouter/free" || actualModel.includes("free"))
-  const tokensUsed = aiData?.usage?.total_tokens || 0
-  const promptTokens = aiData?.usage?.prompt_tokens || 0
-  const completionTokens = aiData?.usage?.completion_tokens || 0
-  const resolvedModelName = `${actualProvider}: ${aiData?.model || actualModel}`
-
-  // Registrar y acumular consumo de tokens y costo para este cliente
+  // Registrar consumo de tokens para el cliente
   try {
     const { recordClientAiUsage } = await import("@/lib/ai-token-tracker")
     await recordClientAiUsage({
       phone: cleanPhone,
       clientId: client.id,
       clientName: client.name,
-      model: resolvedModelName,
-      promptTokens,
-      completionTokens,
-      totalTokens: tokensUsed,
-      isFree: isModelFree,
+      model: `${providerName}: ${actualModel}`,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: totalTokensUsed,
+      isFree: isOpener && (actualModel === "openrouter/free" || actualModel.includes("free")),
     })
-  } catch (trackErr: any) {
-    console.warn("[AI Token Tracker Warning]:", trackErr.message)
+  } catch {
+    /* noop */
   }
 
-  let orderNumber: string | undefined
-  let orderTotal: number | undefined
-  let actionTaken: BotProcessResult["actionTaken"] = "ai_answered"
+  let orderNumber: string | undefined = capturedOrder?.orderNumber
+  let orderTotal: number | undefined = capturedOrder?.total
+  let actionTaken: BotProcessResult["actionTaken"] = capturedOrder ? "order_created" : "ai_answered"
 
-  // 5. Detectar si la IA generó una orden automática
-  const orderTagMatch = rawReply.match(/\[ORDEN_AUTO:\s*(\{[\s\S]*?\})\s*\]/i)
-
-  // Limpiar SIEMPRE el tag técnico de la respuesta que ve el cliente en WhatsApp
-  rawReply = rawReply.replace(/\[ORDEN_AUTO:\s*\{[\s\S]*?\}\s*\]/gi, "").trim()
-
-  // Evitar creación prematura si el bot todavía le está preguntando al cliente si confirma su dirección o método de pago
-  const isAskingConfirmation =
-    rawReply.includes("?") &&
-    /\b(confirmas|confirma|a qu[eé] direcci[oó]n|cu[aá]l es tu direcci[oó]n|a d[oó]nde te lo enviamos|deseas pagar|con cu[aá]nto cancelas|a esa direcci[oó]n|a tu direcci[oó]n)\b/i.test(rawReply)
-
-  if (orderTagMatch && config.autoCreateOrders && !isAskingConfirmation) {
-    if (!rawReply) {
-      rawReply = "🎉 ¡Perfecto! Hemos registrado tu pedido a domicilio."
-    }
-    try {
-      let orderJsonStr = orderTagMatch[1].trim()
-      if (orderJsonStr.startsWith("```")) {
-        orderJsonStr = orderJsonStr.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()
-      }
-      const orderPayload = JSON.parse(orderJsonStr)
-      const itemsToCreate: { product: any; qty: number }[] = []
-
-      if (Array.isArray(orderPayload.items)) {
-        for (const it of orderPayload.items) {
-          const rawName = String(it.name || "").toLowerCase().trim()
-          if (!rawName) continue
-
-          // 1. Buscar en los productos cargados
-          let match: (typeof products)[0] | null | undefined = products.find((p) => {
-            const pNorm = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-            const rNorm = rawName.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-            return pNorm.includes(rNorm) || rNorm.includes(pNorm)
-          })
-
-          // 2. Si no estaba en el subconjunto, buscar en toda la BD de esta sede por nombre
-          if (!match) {
-            match = await db.product.findFirst({
-              where: {
-                active: true,
-                ...branchFilter,
-                name: { contains: rawName },
-              },
-              select: { id: true, name: true, price: true, stock: true, unit: true },
-            })
-          }
-
-          // 3. Si sigue sin encontrar, buscar por palabras clave
-          if (!match) {
-            const rWords = rawName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/).filter((w) => w.length >= 3 && !GENERAL_QUERY_WORDS.has(w))
-            if (rWords.length > 0) {
-              match = await db.product.findFirst({
-                where: {
-                  active: true,
-                  ...branchFilter,
-                  OR: rWords.map((w) => ({ name: { contains: w } })),
-                },
-                select: { id: true, name: true, price: true, stock: true, unit: true },
-              })
-            }
-          }
-
-          if (match) {
-            itemsToCreate.push({ product: match, qty: Math.max(1, Number(it.qty) || 1) })
-          }
-        }
-      }
-
-      if (itemsToCreate.length > 0) {
-        const subtotal = itemsToCreate.reduce((acc, it) => acc + it.product.price * it.qty, 0)
-        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "")
-        const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString()
-        const genOrderNum = `PED-${dateStr}-${randomSuffix}`
-        const finalAddress = orderPayload.address || client.address || (isTelegram ? "Dirección según Telegram" : "Dirección según WhatsApp")
-
-        // Actualizar dirección del cliente si no tenía
-        if (orderPayload.address && !client.address) {
-          await db.client.update({
-            where: { id: client.id },
-            data: { address: orderPayload.address },
-          }).catch(() => {})
-        }
-
-        // Determinar método de pago y calcular si el domiciliario debe cobrar
-        const methodRaw = (orderPayload.paymentMethod || "").toLowerCase()
-        const isTransfer =
-          methodRaw.includes("transf") ||
-          methodRaw.includes("nequi") ||
-          methodRaw.includes("davi") ||
-          methodRaw.includes("tarjeta") ||
-          methodRaw.includes("banc")
-
-        const paymentMethod = isTransfer ? "transferencia" : "efectivo"
-        // Ambos inician como 'pendiente' hasta que el admin verifique el comprobante o el domiciliario cobre
-        const paymentStatus = "pendiente"
-
-        let deliveryFee = Number(orderPayload.deliveryFee)
-        const resolvedDelivery = resolveDeliveryFee(`${finalAddress} ${message} ${rawReply}`, deliveryConfig)
-        if (isNaN(deliveryFee) || deliveryFee <= 0) {
-          deliveryFee = resolvedDelivery.fee
-        }
-        const total = subtotal + deliveryFee
-
-        const cashPaid = Number(orderPayload.cashPaid) || 0
-        let paymentNote = ""
-        if (!isTransfer) {
-          if (cashPaid > total) {
-            const change = cashPaid - total
-            paymentNote = `💵 Pago en Efectivo: Paga con $${cashPaid.toLocaleString("es-CO")} (Llevar cambio de $${change.toLocaleString("es-CO")}). El domiciliario DEBE cobrar $${total.toLocaleString("es-CO")} contraentrega ($${subtotal.toLocaleString("es-CO")} productos + $${deliveryFee.toLocaleString("es-CO")} envío).`
-          } else {
-            paymentNote = `💵 Pago en Efectivo: Cobrar $${total.toLocaleString("es-CO")} contraentrega ($${subtotal.toLocaleString("es-CO")} productos + $${deliveryFee.toLocaleString("es-CO")} envío).`
-          }
-        } else {
-          paymentNote = `💳 Pago por Transferencia (Nequi/Daviplata): Pendiente por verificar comprobante por $${total.toLocaleString("es-CO")}. Una vez verificado por caja, el domiciliario NO debe cobrar dinero al cliente ($0).`
-        }
-
-        const createdOrder = await db.order.create({
-          data: {
-            orderNumber: genOrderNum,
-            tenantId: branch?.tenantId || null,
-            branchId,
-            clientId: client.id,
-            customerName: client.name,
-            customerPhone: cleanPhone,
-            deliveryAddress: finalAddress,
-            deliveryNotes: paymentNote,
-            notes: `Generado automáticamente por ${isTelegram ? `Telegram (@${config?.telegramBotUsername || "Bot"})` : "WhatsApp"} & ${providerName} IA (${branchName}). ${resolvedDelivery.appliedRule}.`,
-            subtotal,
-            tax: 0,
-            deliveryFee,
-            total,
-            paymentMethod,
-            paymentStatus,
-            status: "pendiente",
-            items: {
-              create: itemsToCreate.map((it) => ({
-                productId: it.product.id,
-                productName: it.product.name,
-                quantity: it.qty,
-                unitPrice: it.product.price,
-                subtotal: it.product.price * it.qty,
-              })),
-            },
-          },
-        })
-
-        orderNumber = createdOrder.orderNumber
-        orderTotal = createdOrder.total
-        actionTaken = "order_created"
-
-        // Si el pedido ya quedó pagado (transferencia), pasar de inmediato a Ventas
-        if (createdOrder.paymentStatus === "pagado") {
-          try {
-            const { syncOrderToSale } = await import("@/lib/order-sale-sync")
-            await syncOrderToSale(createdOrder.id)
-          } catch (syncErr) {
-            console.warn("[Order -> Sale sync error]", syncErr)
-          }
-        }
-
-        // Agregar pie de confirmación con el # de orden y recordatorio de pago
-        const feeLine = deliveryFee > 0 ? `\n🛵 *Costo Domicilio:* $${deliveryFee.toLocaleString("es-CO")}` : ""
-        const paymentSummary = isTransfer
-          ? "💳 *Método de Pago:* Transferencia previa (Por favor envía el comprobante por este chat para verificar y despachar tu pedido)"
-          : `💵 *Método de Pago:* Efectivo ($${total.toLocaleString("es-CO")} a cobrar contraentrega)`
-
-        rawReply += `\n\n📦 *Pedido Generado:* #${createdOrder.orderNumber}\n🧾 *Subtotal Productos:* $${subtotal.toLocaleString("es-CO")}${feeLine}\n💵 *Total:* $${total.toLocaleString("es-CO")}\n${paymentSummary}\n📍 *Entrega:* ${finalAddress}`
-
-        // Cerrar la sesión de conversación para que futuras consultas arranquen desde cero sin arrastrar este pedido
-        await closeConversationSession(cleanPhone, "order_created", createdOrder.orderNumber)
-      }
-    } catch (parseErr) {
-      console.warn(`[${providerName} Order Parse Error]`, parseErr)
-    }
+  // Si la respuesta del modelo no incluyó la confirmación clara del pedido creado, agregar el ticket
+  if (capturedOrder && !finalRawReply.includes(capturedOrder.orderNumber)) {
+    finalRawReply += `\n\n📦 *Pedido Confirmado:* #${capturedOrder.orderNumber}\n💵 *Total a pagar:* ${capturedOrder.total_formateado}\n📍 *Entrega:* ${capturedOrder.direccion_entrega}`
   }
 
-  // Si la respuesta sigue vacía y no se generó orden, activar el motor local determinista
-  if (!rawReply || !rawReply.trim()) {
+  if (!finalRawReply || !finalRawReply.trim()) {
     if (orderNumber) {
-      rawReply = `🎉 *¡Pedido Recibido con Éxito!*\nTu orden #${orderNumber} ha sido registrada.`
+      finalRawReply = `🎉 *¡Pedido Recibido con Éxito!*\nTu orden #${orderNumber} ha sido registrada.`
     } else {
       throw new Error("AI returned empty content after processing")
     }
   }
 
   return {
-    reply: rawReply,
+    reply: finalRawReply,
     actionTaken,
     orderNumber,
     total: orderTotal,
-    tokensUsed,
-    modelUsed: `${actualProvider}: ${aiData?.model || actualModel}`,
+    tokensUsed: totalTokensUsed,
+    modelUsed: `${providerName}: ${actualModel}`,
   }
 }
