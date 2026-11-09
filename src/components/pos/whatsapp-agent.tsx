@@ -854,20 +854,32 @@ export default function WhatsAppAgentView() {
   }
 
   // Sincronizar plantillas con Meta Cloud API
-  const handleSyncTemplates = async () => {
+  const handleSyncTemplates = async (wabaIdParam?: string | React.MouseEvent) => {
     setSyncingTemplates(true)
+    const explicitWaba = typeof wabaIdParam === "string" ? wabaIdParam.trim() : undefined
     try {
       const res = await apiFetch<{
         ok: boolean
         message: string
         syncedCount: number
+        requiresWabaId?: boolean
         error?: string
       }>("/api/whatsapp/templates/sync", {
         method: "POST",
+        body: JSON.stringify({ wabaId: explicitWaba }),
       })
       if (res && res.ok) {
         toast.success(res.message || `Se sincronizaron ${res.syncedCount} plantillas oficiales desde Meta`)
         loadTemplates()
+      } else if (res?.requiresWabaId) {
+        const inputWaba = prompt(
+          "Meta requiere el Identificador de la cuenta de WhatsApp Business (WABA ID).\n\nLo encuentras en Meta Developers > WhatsApp > Configuración de la API (está justo al lado del Phone Number ID).\n\nIngrésalo aquí:"
+        )
+        if (inputWaba && inputWaba.trim()) {
+          handleSyncTemplates(inputWaba.trim())
+          return
+        }
+        toast.error(res?.error || "Se requiere el WABA ID para sincronizar")
       } else {
         toast.error(res?.error || "No se pudieron sincronizar las plantillas de Meta")
       }
