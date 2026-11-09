@@ -18,6 +18,30 @@ export interface BotProcessResult {
 }
 
 /**
+ * Palabras comunes y de control conversacional que NO deben ser interpretadas como nombres de productos
+ */
+export const GENERAL_QUERY_WORDS = new Set([
+  "hola", "buenas", "buenos", "dias", "dia", "tardes", "tarde", "noches", "noche",
+  "como", "estas", "esta", "estan", "va", "todo", "bien", "amigo", "amiga", "senor", "senora",
+  "vecino", "vecina", "cordial", "saludos", "por", "favor", "porfa", "gracias", "muchas",
+  "muchisimas", "para", "quiero", "tienen", "tiene", "venden", "vende", "vendes", "hay",
+  "que", "cual", "cuales", "productos", "producto", "catalogo", "disponible", "disponibles",
+  "lista", "precios", "precio", "costo", "cuanto", "cuantos", "cuantas", "vale", "valen",
+  "cuesta", "cuestan", "muestrame", "menu", "servicios", "articulos", "stock", "medicamentos",
+  "medicamento", "remedios", "remedio", "droga", "drogas", "farmacia", "drogueria", "tienda",
+  "consigues", "consigue", "pides", "pide", "das", "da", "regalas", "regala", "ofreces", "ofrece",
+  "manejan", "maneja", "llevas", "lleva", "traes", "trae", "haces", "hace", "enviar", "envias",
+  "envia", "mandas", "manda", "pedir", "pido", "comprar", "compro", "ordenar", "recomiendas",
+  "recomienda", "casa", "domicilio", "domicilios", "envio", "envios", "mi", "un", "una",
+  "unos", "unas", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez",
+  "vender", "saber", "conocer", "informacion", "ayuda", "colaborar", "colaboras", "atencion",
+  "si", "no", "nop", "sip", "ok", "dale", "listo", "claro", "bueno", "correcto",
+  "efectivo", "transferencia", "nequi", "daviplata", "bancolombia", "tarjeta", "cambio", "billete",
+  "direccion", "barrio", "calle", "carrera", "cra", "cll", "av", "apto", "casa", "lote", "manzana",
+  "saldo", "deuda", "debo", "cuenta", "fiado", "abono", "pagar", "pago", "cancelo", "cancelar"
+])
+
+/**
  * Sanitiza la respuesta del LLM para evitar fugas de razonamiento interno (Chain of Thought),
  * etiquetas <think>, o listas de pasos tipo "1. **Analyze the user's input:**"
  */
@@ -510,6 +534,28 @@ async function executeWhatsAppMessage(params: {
       }
     }
 
+    // Regla 0.5: Declinación o respuesta negativa natural ("No", "No gracias", "Nada más", "Por ahora no")
+    if (!result) {
+      const isNegative = /^(no|no gracias|nop|nada|nada mas|no por ahora|ninguno|ninguna|no senor|no senora|para nada|negativo|no no)$/i.test(cleanLowerText)
+      if (isNegative) {
+        result = {
+          reply: `¡Con muchísimo gusto! Si en algún momento necesitas cualquier medicina o producto, aquí estamos con el mayor agrado para atenderte en ${branch?.name || "nuestra tienda"}. ¡Que tengas un excelente día! 😊`,
+          actionTaken: "ai_answered",
+        }
+      }
+    }
+
+    // Regla 0.6: Saludo natural ("Hola", "Buenas", "Buen día")
+    if (!result) {
+      const isGreeting = /^(hola|buenas|buen dia|buenos dias|buenas tardes|buenas noches|que tal|como estas|alo|hey|hola buenas|hola buen dia|buenas como esta|saludos)$/i.test(cleanLowerText)
+      if (isGreeting) {
+        result = {
+          reply: `¡Hola! 👋 Qué gusto saludarte. Bienvenido a ${branch?.name || "nuestra tienda"}. Con mucho gusto te atiendo, ¿qué medicamento o producto estás buscando hoy?`,
+          actionTaken: "ai_answered",
+        }
+      }
+    }
+
     // Regla 1: Consulta de saldo / fiado
     if (
       !result && (
@@ -694,15 +740,16 @@ async function executeWhatsAppMessage(params: {
         select: { name: true, price: true, stock: true, unit: true },
       })
 
-      const clientKeywords = cleanLowerText.split(/\s+/).filter((w) => w.length >= 3)
-      const matchedProds = allProds.filter((p) => {
+      const clientKeywords = cleanLowerText
+        .split(/\s+/)
+        .filter((w) => w.length >= 3 && !GENERAL_QUERY_WORDS.has(w))
+
+      const matchedProds = clientKeywords.length === 0 ? [] : allProds.filter((p) => {
         const normName = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        if (cleanLowerText.includes(normName) || normName.includes(cleanLowerText)) return true
-        const pWords = normName.split(/\s+/).filter((w) => w.length >= 3)
-        return (
-          clientKeywords.some((k) => normName.includes(k)) ||
-          pWords.some((w) => cleanLowerText.includes(w))
-        )
+        // Coincidencia con palabras clave reales del cliente
+        if (clientKeywords.some((k) => normName.includes(k))) return true
+        const pWords = normName.split(/\s+/).filter((w) => w.length >= 3 && !GENERAL_QUERY_WORDS.has(w))
+        return pWords.some((w) => cleanLowerText.includes(w))
       })
 
       if (matchedProds.length > 0) {
@@ -715,20 +762,14 @@ async function executeWhatsAppMessage(params: {
           .join("\n")
 
         result = {
-          reply: `🔍 *Catálogo Disponible (${branch?.name || "Esta Sede"})*\n\n${listText}\n\n¿Deseas que te enviemos algún producto a domicilio? Indícanos la cantidad, tu dirección y en qué barrio te encuentras.`,
+          reply: `¡Hola! Con mucho gusto te confirmo la disponibilidad:\n\n${listText}\n\n¿Deseas que te enviemos algún producto a domicilio? Indícanos cuántas unidades necesitas, tu dirección y en qué barrio te encuentras para coordinarte el envío.`,
           actionTaken: "stock_checked",
         }
       } else {
-        const topProds = allProds.slice(0, 5)
-        const topList = topProds.length > 0
-          ? `\n\n🛒 *Algunos productos disponibles hoy:*\n` +
-            topProds.map((p) => `• *${p.name}*: $${p.price.toLocaleString("es-CO")}`).join("\n") +
-            `\n\n¿Deseas pedir alguno a domicilio?`
-          : ""
         result = {
           reply:
-            (config?.welcomeMessage?.trim() ||
-              `👋 *¡Hola! Bienvenido a la atención por ${effectiveChannel === "telegram" ? "Telegram" : "WhatsApp"} de ${branch?.name || "OmniPOS"}.*\n\n¿En qué te podemos ayudar hoy?\n1️⃣ *Hacer un Pedido:* Envíanos tu lista, tu dirección y tu barrio.\n2️⃣ *Consultar Precios:* Escríbenos el nombre del producto que buscas.\n3️⃣ *Consultar Fiados / Deuda:* Pregúntanos _"¿Cuánto debo?"_.`) + topList,
+            config?.welcomeMessage?.trim() ||
+            `¡Hola! 👋 Qué gusto saludarte. Bienvenido a ${branch?.name || "nuestra tienda"}. Con mucho gusto te atiendo, ¿qué medicamento o producto estás buscando hoy?`,
           actionTaken: "menu_shown",
         }
       }
@@ -738,7 +779,7 @@ async function executeWhatsAppMessage(params: {
   // Garantizar que la respuesta nunca sea nula o vacía
   if (!result || !result.reply || !result.reply.trim()) {
     result = {
-      reply: `👋 *¡Hola! Bienvenido a ${branch?.name || "nuestra tienda"}.*\n\n¿En qué te podemos ayudar hoy?\n• Escríbenos los productos que necesitas, tu dirección y tu barrio, y te los despachamos a domicilio.\n• Pregúntanos precios o disponibilidad de cualquier artículo.\n\n¡Estamos a tu servicio!`,
+      reply: `¡Hola! 👋 Bienvenido a ${branch?.name || "nuestra tienda"}. ¿Qué producto o medicamento necesitas hoy a domicilio? Con gusto te confirmo precio y disponibilidad.`,
       actionTaken: "menu_shown",
     }
   }
@@ -861,34 +902,21 @@ async function processWithLLMAI(params: {
     },
     orderBy: { createdAt: "desc" },
     skip: 1, // Salta el mensaje actual recién guardado
-    take: 8, // Últimos 8 mensajes de la sesión activa
+    take: 24, // Historial completo y fluido de la sesión activa
     select: { sender: true, text: true },
   })
 
   const conversationHistory = recentMsgs.reverse().map((m) => ({
     role: m.sender === "customer" ? "user" : "assistant",
-    content: m.text.slice(0, 300), // Ahorro de tokens
+    content: m.text, // Retener texto completo sin truncar para no perder direcciones ni detalles
   }))
 
-  // 1.1 Ahorro de Tokens & Contexto Real del Catálogo de la Sede
+  // 1.1 Contexto Real del Catálogo de la Sede
   // Extraer palabras clave combinando el mensaje entrante con los últimos mensajes de la conversación
-  // Así los productos mencionados antes (ej. "jabón", "gasa") siguen vigentes en el catálogo context
   const fullConversationSearchText = [
     message,
     ...recentMsgs.map((m) => m.text),
   ].join(" ")
-
-  const GENERAL_QUERY_WORDS = new Set([
-    "hola", "buenas", "buenos", "dias", "tardes", "noches", "por", "favor", "gracias",
-    "para", "quiero", "tienen", "tiene", "venden", "vende", "vendes", "hay", "que", "cual", "cuales",
-    "productos", "producto", "catalogo", "disponible", "disponibles", "lista", "precios",
-    "precio", "costo", "cuanto", "vale", "muestrame", "menu", "servicios", "articulos",
-    "stock", "medicamentos", "medicamento", "remedios", "remedio", "droga", "drogas", "farmacia",
-    "consigues", "consigue", "pides", "pide", "das", "da", "regalas", "regala", "ofreces", "ofrece",
-    "manejan", "maneja", "llevas", "lleva", "traes", "trae", "haces", "hace", "enviar", "envias",
-    "envia", "mandas", "manda", "pedir", "pido", "comprar", "compro", "ordenar", "recomiendas", "recomienda",
-    "casa", "domicilio", "mi", "un", "una", "unos", "unas", "dos", "tres", "cuatro", "cinco", "vender"
-  ])
 
   // Catálogo completo de la sede activa (hasta 150 productos en stock para no omitir ningún producto)
   const products = await db.product.findMany({
@@ -908,7 +936,8 @@ async function processWithLLMAI(params: {
         .join("\n")
     : "Catálogo vacío para esta sede. Informa que pronto se cargarán existencias."
 
-  // Verificar si el cliente consultó por un artículo que realmente no existe en el catálogo
+  // Verificar si el cliente consultó explícitamente por un artículo que realmente no existe en el catálogo
+  const isExplicitProductInquiry = /(?:tienen|tienes|venden|vende|busco|necesito|consiguen|hay|precio de|a c[oó]mo|a cu[aá]nto)\b/i.test(message)
   const messageWords = fullConversationSearchText
     .toLowerCase()
     .replace(/[^a-záéíóúñ0-9\s]/gi, " ")
@@ -916,7 +945,7 @@ async function processWithLLMAI(params: {
     .filter((w) => w.length >= 3 && !GENERAL_QUERY_WORDS.has(w))
 
   let specificNotFoundNote = ""
-  if (messageWords.length > 0 && products.length > 0) {
+  if (isExplicitProductInquiry && messageWords.length > 0 && products.length > 0) {
     const hasAnyMatch = messageWords.some((w) => {
       const norm = w.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
       return products.some((p) => {
@@ -926,7 +955,7 @@ async function processWithLLMAI(params: {
     })
 
     if (!hasAnyMatch && messageWords.length <= 3) {
-      specificNotFoundNote = `\n⚠️ ATENCIÓN: El cliente consultó por "${messageWords.join(", ")}", pero NO está en el catálogo de esta sede. Infórmale con amabilidad que no disponemos de ese artículo y ofrécele los que sí tenemos en la lista de abajo.`
+      specificNotFoundNote = `\n⚠️ ATENCIÓN: El cliente consultó por "${messageWords.join(", ")}", pero NO está en el catálogo de esta sede. Infórmale con amabilidad que no disponemos de ese artículo y ofrécele con naturalidad los productos que sí tenemos en la lista de abajo.`
     }
   }
 
@@ -972,64 +1001,71 @@ async function processWithLLMAI(params: {
   const deliveryConfig = await getDeliveryConfig(branchId)
   const deliveryPromptContext = formatDeliveryPromptContext(deliveryConfig)
 
-  // 3. Prompt de sistema ultra-conciso y optimizado
-  const systemPrompt = `Eres el asistente virtual comercial de "${branchName}" por ${channelLabel}.
-Tu misión: Atender con calidez, consultar precios, sugerir productos, dar estado de pedidos en tiempo real y tomar órdenes a domicilio.
+  // 3. Prompt de sistema cálido, humano y comercialmente efectivo
+  const systemPrompt = `Eres un asesor de atención al cliente y ventas humano de "${branchName}" por ${channelLabel}.
+Hablas exactamente como un vendedor o farmaceuta amable, empático, educado y profesional en el mostrador.
 
-REGLAS DE ORO (Ahorro de tokens y precisión):
-0. ⚠️ PROHIBIDO PENSAR EN VOZ ALTA: NUNCA expongas análisis, razonamiento interno, pasos de verificación ni listas tipo "1. **Analyze...", "2. Check...". Tu respuesta debe ser EXCLUSIVAMENTE el mensaje final en español directo para el cliente.
-1. Responde SIEMPRE en español de forma concisa (MÁXIMO 3 líneas o viñetas limpias).
-2. CATÁLOGO REAL: Cotiza y vende los productos listados en el "CATÁLOGO DE ESTA SEDE". Si un producto aparece en la lista de abajo (ej. Jabón, Gasa, Suero, etc.), NUNCA digas que no lo manejas; ofrécelo de inmediato con su precio exacto y disponibilidad.
-3. Si el cliente saluda, envía "/start" o pregunta qué productos hay o qué venden, dale la bienvenida a "${branchName}" y lista los productos disponibles indicando su precio exacto y disponibilidad.
-4. Si el cliente pide o menciona un producto que NO está en el catálogo, indícale amablemente que no lo manejas en esta sede y recomiéndale los que sí tienes disponibles.
-5. Datos del cliente: Nombre "${client.name}". Fiado / saldo pendiente: $${clientBalance.toLocaleString("es-CO")}. Dirección registrada: ${client.address ? `"${client.address}"` : "Ninguna"}.
-6. PROTOCOLO OBLIGATORIO DE TOMA DE PEDIDOS Y COSTO DE DOMICILIO:
-${deliveryPromptContext}
+TONO Y PERSONALIDAD HUMANA:
+- Habla con calidez, cercanía y respeto (tono colombiano / latinoamericano natural).
+- NUNCA uses listas numeradas rígidas ni menús automáticos (PROHIBIDO hablar como un bot o conmutador tipo: "1️⃣ Hacer pedido, 2️⃣ Precios, 3️⃣ Saldo").
+- NUNCA expongas análisis internos, razonamiento paso a paso, ni etiquetas <think>. Escribe ÚNICAMENTE el mensaje conversacional final para el cliente.
 
-- EL AGENTE ES QUIEN DEBE PREGUNTAR LA DIRECCIÓN INCLUYENDO EL BARRIO:
-  * Cuando el cliente quiera pedir productos a domicilio pero no haya indicado su dirección completa o su barrio:
-    TÚ debes preguntarle directamente: "¿A qué dirección te lo enviamos y en qué barrio te encuentras?".
-  * Si el cliente ya tiene dirección registrada (${client.address ? `"${client.address}"` : "ninguna"}):
-    Pregúntale: "¿Te lo enviamos a tu dirección registrada ${client.address || "..."} o a otra dirección? Por favor confírmanos también en qué barrio te encuentras".
+MANEJO DE SALUDOS Y CONVERSACIÓN NATURAL:
+- Si el cliente te saluda ("Hola", "Buenas", "Buen día", "Hola buenas tardes"):
+  Saluda con calidez y alegría, dale la bienvenida a "${branchName}" y pregúntale amablemente en qué le puedes colaborar hoy.
+  ⚠️ REGLA CRÍTICA: NUNCA listes productos ni pongas el catálogo completo ante un simple saludo. Espera a que el cliente te diga qué medicina o producto busca.
+- Si el cliente te responde negativamente ("No", "No gracias", "Nada más", "Por ahora no"):
+  Agradécele con mucha amabilidad, dile que con el mayor gusto y que quedas a su entera disposición cuando lo necesite. ¡NUNCA le ofrezcas productos si te dijo que no!
+- Si el cliente agradece ("Gracias", "Muchas gracias"):
+  Responde con cortesía y calidez ("¡Con muchísimo gusto!", "¡Siempre a tu orden!").
 
-- CONFIRMACIÓN DIRECTA DE DIRECCIÓN Y PEDIDO:
-  * Si tú preguntaste "¿Te lo enviamos a tu dirección registrada [Dirección]...?" y el cliente responde afirmativamente ("sí", "si", "a esa", "correcto", "a esa misma", "a mi dirección", "dale", "ok", "por favor"):
-    -> SIGNIFICA QUE CONFIRMA SU DIRECCIÓN REGISTRADA (${client.address || "..."}). NUNCA repitas el saludo de bienvenida.
-    -> Inmediatamente toma el barrio de su dirección registrada (${client.address || "..."}) y aplica la tarifa correspondiente de ese barrio (si el barrio no está en la tabla de tarifas guardadas, aplica la tarifa global obligatoria de $${deliveryConfig.globalFee.toLocaleString("es-CO")}).
-    -> Responde confirmando los productos y el total con envío:
-       "¡Perfecto! Te lo enviamos a ${client.address || "tu dirección registrada"}. Tus productos suman $[Subtotal] + envío ($[Tarifa]) = Total a pagar: $[Total]. ¿Cómo prefieres cancelar: en efectivo contraentrega o por transferencia?".
+CONSULTA DE PRODUCTOS Y PRECIOS:
+- Revisa el "CATÁLOGO DE ESTA SEDE" provisto abajo.
+- Si el cliente pregunta por un medicamento o artículo:
+  Confírmale con agrado que sí lo tienes disponible, indícale el precio exacto y su presentación, y pregúntale amablemente cuántas unidades le gustaría pedir.
+- Si el producto NO está en el catálogo:
+  Explícaselo con amabilidad y educación ("En este momento no disponemos de ese artículo en esta sede..."), y si tienes una opción similar en el catálogo de abajo, sugiéresela amablemente.
 
-- EL AGENTE ES QUIEN DEFINE Y VALIDA LA TARIFA (NUNCA EL CLIENTE):
-  * TÚ analizas lo que respondió el cliente y verificas si el barrio coincide con la tabla de tarifas guardadas:
-    1. Si el barrio coincide con la lista guardada (ejemplo: Barrio El Dorado): TÚ tomas y aplicas la tarifa guardada para ese barrio.
-    2. Si el barrio NO coincide con la lista guardada, si es un barrio diferente, o si el cliente solo dio una dirección general: TÚ aplicas automáticamente la TARIFA GLOBAL OBLIGATORIA ($${deliveryConfig.globalFee.toLocaleString("es-CO")}).
-  * En cualquiera de los dos casos, suma INMEDIATAMENTE: Subtotal productos + Costo de envío definido por ti = Total a pagar.
-    Infórmale de una vez al cliente el total exacto con envío:
-    "Tus productos suman $[Subtotal] + envío ($[Tarifa]) = Total a pagar: $[Total]. ¿Cómo prefieres pagar: en efectivo contraentrega o por transferencia?".
+FLUJO COMPLETO DE TOMA DE PEDIDOS Y ENTREGA A DOMICILIO:
+1. DETECCIÓN DE PRODUCTOS:
+   - Cuando el cliente indique qué productos quiere y la cantidad:
+     * Si no ha indicado su dirección completa y barrio, pregúntale cordialmente: "¿A qué dirección te lo enviamos y en qué barrio te encuentras para coordinarte el domicilio?".
+     * Si el cliente ya tiene dirección registrada (${client.address ? `"${client.address}"` : "ninguna"}), pregúntale: "¿Te lo despachamos a tu dirección registrada (${client.address || "..."}) o a otra? Por favor confírmanos también en qué barrio te encuentras".
 
-- ⚠️ PROHIBICIÓN ESTRICTA DE ORDEN PREMATURA:
-  * Si en tu mensaje estás PREGUNTANDO la dirección/barrio o el método de pago: NUNCA agregues el bloque [ORDEN_AUTO].
-  * ÚNICAMENTE debes agregar el bloque [ORDEN_AUTO] cuando en el chat el cliente ya haya elegido o indicado su forma de pago.
-[ORDEN_AUTO: {"items": [{"name": "nombre del producto del catalogo", "qty": 1}], "address": "dirección y barrio confirmados", "deliveryFee": 5000, "paymentMethod": "efectivo" | "transferencia", "cashPaid": 50000}]
-7. CONSULTAS Y ESTADO DE PEDIDOS (TRAZABILIDAD EN TIEMPO REAL):
-Si el cliente pregunta cómo va su pedido, dónde está, si ya salió o por el estado de su orden:
-- Consulta OBLIGATORIAMENTE la sección "ÚLTIMO PEDIDO DEL CLIENTE" abajo.
-- Si el estado es "En Camino": Infórmale con alegría que su pedido #${activeOrder?.orderNumber || ""} YA ESTÁ EN CAMINO a su dirección (${activeOrder?.deliveryAddress || ""})${activeOrder?.deliveryDriverName ? ` con el repartidor ${activeOrder.deliveryDriverName}` : ""} 🛵.
-- Si el estado es "En Preparación": Indícale que lo estamos alistando y empacando en la tienda y pronto saldrá a reparto.
-- Si el estado es "Pendiente" o "Confirmado": Indícale que fue recibido y está en fila de alistamiento.
-- Si el estado es "Entregado": Confírmale que figura entregado con éxito.
-- NUNCA inventes que está en proceso si ya está "En Camino".
+2. VALIDACIÓN DE DIRECCIÓN Y CÁLCULO DE ENVÍO:
+   - Cuando el cliente indique o confirme su dirección y barrio:
+     * Valida la tarifa de envío según la tabla abajo (si el barrio está registrado en tarifas especiales, usa esa tarifa; si no, la tarifa global de $${deliveryConfig.globalFee.toLocaleString("es-CO")}).
+     * Suma de inmediato: Subtotal de productos + Domicilio = Total a pagar.
+     * Preséntale el valor claramente:
+       "¡Listo! Serían [Productos] ($[Subtotal]) + domicilio a [Barrio] ($[Tarifa]), para un total de $[Total]. ¿Cómo prefieres cancelar: en efectivo contraentrega o por transferencia (Nequi / Daviplata / Bancolombia)?".
 
-${config.aiSystemPrompt ? `Instrucciones especiales de la sede: ${config.aiSystemPrompt}` : ""}${specificNotFoundNote}
+3. CONFIRMACIÓN Y CREACIÓN DE LA ORDEN:
+   - Cuando el cliente confirme o indique cómo va a pagar (efectivo / transferencia):
+     * Confirma la orden con entusiasmo: indícale que su pedido ya fue recibido y que lo estamos preparando de inmediato en tienda.
+     * Si paga en efectivo y menciona con cuánto dinero paga (ej. "pago con 50 mil"), tómalo en cashPaid para que el domiciliario lleve el cambio.
+     * Si paga por transferencia previa (Nequi / Daviplata / Bancolombia), pídele amablemente que te envíe el comprobante por este chat para verificarlo en caja y despachar de inmediato.
+     * AGREGA AL FINAL DE TU MENSAJE el tag técnico obligatorio para que el sistema cree la orden en OmniPOS:
+       [ORDEN_AUTO: {"items": [{"name": "nombre exacto según catálogo", "qty": 1}], "address": "dirección y barrio", "deliveryFee": 5000, "paymentMethod": "efectivo" | "transferencia", "cashPaid": 50000}]
+     * ⚠️ NUNCA agregues [ORDEN_AUTO] si todavía estás preguntando qué productos desea, la dirección o el método de pago. Solo agrégalo cuando los productos, la dirección y la forma de pago estén completamente definidos por el cliente.
 
-ÚLTIMO PEDIDO DEL CLIENTE:
+DATOS DEL CLIENTE:
+- Nombre: "${client.name}"
+- Saldo fiado pendiente: $${clientBalance.toLocaleString("es-CO")}
+- Dirección registrada: ${client.address ? `"${client.address}"` : "Ninguna"}
+
+ESTADO DE PEDIDOS (TRAZABILIDAD EN TIEMPO REAL):
+Si el cliente pregunta por su pedido ("cómo va mi pedido?", "ya salió?"):
 ${orderTrackingContext}
 
-CATÁLOGO DE ESTA SEDE (${branchName}):
-${catalogContext}`
+TARIFAS DE DOMICILIO DE ESTA SEDE:
+${deliveryPromptContext}
 
-  // 4. Invocación a la API oficial (OpenRouter o DeepSeek) con timeout de 20s y failover automático
-  const maxTokens = Math.max(config.maxTokensPerReply || 450, 450)
+CATÁLOGO DE ESTA SEDE (${branchName}):
+${catalogContext}
+${config.aiSystemPrompt ? `\nInstrucciones especiales de la sede: ${config.aiSystemPrompt}` : ""}${specificNotFoundNote}`
+
+  // 4. Invocación a la API oficial (OpenRouter o DeepSeek) con timeout de 30s
+  const maxTokens = Math.max(config.maxTokensPerReply || 2048, 2048)
 
   async function sendAiRequest(
     currEndpoint: string,
@@ -1039,7 +1075,7 @@ ${catalogContext}`
     currProvider: string
   ) {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 20000) // 20 segundos máximo para modelos OpenRouter Free
+    const timer = setTimeout(() => controller.abort(), 30000) // 30 segundos
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${currKey}`,
@@ -1061,7 +1097,7 @@ ${catalogContext}`
             { role: "user", content: message },
           ],
           max_tokens: maxTokens,
-          temperature: 0.3,
+          temperature: 0.65,
           include_reasoning: false,
         }),
         signal: controller.signal,
@@ -1190,10 +1226,10 @@ ${catalogContext}`
   let actionTaken: BotProcessResult["actionTaken"] = "ai_answered"
 
   // 5. Detectar si la IA generó una orden automática
-  const orderTagMatch = rawReply.match(/\[ORDEN_AUTO:\s*(\{[\s\S]*\})\s*\]/)
+  const orderTagMatch = rawReply.match(/\[ORDEN_AUTO:\s*(\{[\s\S]*?\})\s*\]/i)
 
   // Limpiar SIEMPRE el tag técnico de la respuesta que ve el cliente en WhatsApp
-  rawReply = rawReply.replace(/\[ORDEN_AUTO:\s*\{[\s\S]*\}\s*\]/g, "").trim()
+  rawReply = rawReply.replace(/\[ORDEN_AUTO:\s*\{[\s\S]*?\}\s*\]/gi, "").trim()
 
   // Evitar creación prematura si el bot todavía le está preguntando al cliente si confirma su dirección o método de pago
   const isAskingConfirmation =
@@ -1205,7 +1241,11 @@ ${catalogContext}`
       rawReply = "🎉 ¡Perfecto! Hemos registrado tu pedido a domicilio."
     }
     try {
-      const orderPayload = JSON.parse(orderTagMatch[1])
+      let orderJsonStr = orderTagMatch[1].trim()
+      if (orderJsonStr.startsWith("```")) {
+        orderJsonStr = orderJsonStr.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()
+      }
+      const orderPayload = JSON.parse(orderJsonStr)
       const itemsToCreate: { product: any; qty: number }[] = []
 
       if (Array.isArray(orderPayload.items)) {

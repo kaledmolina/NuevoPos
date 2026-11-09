@@ -453,7 +453,7 @@ export default function WhatsAppAgentView() {
     aiSystemPrompt: "",
     welcomeMessage: "",
     autoCreateOrders: true,
-    maxTokensPerReply: 250,
+    maxTokensPerReply: 2048,
   })
   const [loadingConfig, setLoadingConfig] = useState(false)
   const [savingConfig, setSavingConfig] = useState(false)
@@ -3196,11 +3196,11 @@ export default function WhatsAppAgentView() {
                 {/* Tokens Máximos & Botón de Prueba */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                   <div className="space-y-1">
-                    <Label className="text-xs font-bold">Tokens Máx. por Respuesta</Label>
+                    <Label className="text-xs font-bold">Tokens Máx. por Respuesta (Libre: 2048+)</Label>
                     <Input
                       type="number"
                       value={config.maxTokensPerReply}
-                      onChange={(e) => setConfig((c) => ({ ...c, maxTokensPerReply: parseInt(e.target.value, 10) || 250 }))}
+                      onChange={(e) => setConfig((c) => ({ ...c, maxTokensPerReply: parseInt(e.target.value, 10) || 2048 }))}
                       className="h-9 text-xs font-mono bg-zinc-50 dark:bg-zinc-950"
                     />
                   </div>

@@ -45,9 +45,9 @@ export async function GET(req: NextRequest) {
           openrouterModel: "deepseek/deepseek-chat",
           aiEnabled: true,
           autoCreateOrders: true,
-          maxTokensPerReply: 250,
-          welcomeMessage: "¡Hola! Bienvenido a nuestro servicio de atención automática por WhatsApp. ¿En qué te podemos colaborar hoy?",
-          aiSystemPrompt: "Atiende con amabilidad y concisión. Consulta disponibilidad en catálogo y toma pedidos a domicilio.",
+          maxTokensPerReply: 2048,
+          welcomeMessage: "¡Hola! Bienvenido a nuestro servicio de atención por WhatsApp. ¿En qué te podemos colaborar hoy?",
+          aiSystemPrompt: "Atiende con amabilidad y calidez humana. Consulta disponibilidad en catálogo y toma pedidos a domicilio.",
         },
       })
     }
@@ -141,7 +141,7 @@ export async function POST(req: NextRequest) {
       aiSystemPrompt: aiSystemPrompt ?? null,
       welcomeMessage: welcomeMessage ?? null,
       autoCreateOrders: Boolean(autoCreateOrders),
-      maxTokensPerReply: Number(maxTokensPerReply) || 250,
+      maxTokensPerReply: Number(maxTokensPerReply) || 2048,
     }
 
     // Solo actualizar tokens si se enviaron valores reales no enmascarados
