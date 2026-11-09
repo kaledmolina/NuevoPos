@@ -814,6 +814,7 @@ export async function handleDriverTelegramAction(params: {
     const candidate = await db.user.findFirst({
       where: {
         active: true,
+        role: "domiciliario",
         telegramUsername: { equals: formattedUsername },
       },
     })
@@ -832,10 +833,11 @@ export async function handleDriverTelegramAction(params: {
     const token = vincularMatch[1].trim()
     const hashed = hashPin(token)
 
-    // Buscar si coincide con el PIN o el teléfono de algún colaborador
+    // Buscar si coincide con el PIN o el teléfono de algún domiciliario registrado
     const matchedUser = await db.user.findFirst({
       where: {
         active: true,
+        role: "domiciliario",
         OR: [
           { pinHash: hashed },
           { phone: token },
