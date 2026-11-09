@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { processWhatsAppMessage } from "@/lib/whatsapp-agent"
 import { db } from "@/lib/db"
+import { handleIncomingCustomerLocation, extractCoordinates } from "@/lib/telegram-driver"
 
 export const dynamic = "force-dynamic"
 
@@ -44,12 +45,12 @@ export async function POST(req: NextRequest) {
     const message = value?.messages?.[0]
     const incomingPhoneId = value?.metadata?.phone_number_id
 
-    if (!message || message.type !== "text") {
-      return NextResponse.json({ status: "ignored_non_text" }, { status: 200 })
+    if (!message || (message.type !== "text" && message.type !== "location")) {
+      return NextResponse.json({ status: "ignored_non_supported" }, { status: 200 })
     }
 
-    const from = message.from // Teléfono del cliente
-    const text = message.text?.body || ""
+    const from = String(message.from || "").trim() // Teléfono del cliente
+    const text = (message.text?.body || "").trim()
     const customerName = value?.contacts?.[0]?.profile?.name || "Cliente WhatsApp"
 
     // 1. Identificar a qué Sede pertenece este número de WhatsApp
@@ -77,7 +78,57 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Procesar con el motor IA DeepSeek y catálogo exclusivo de la sede
+    const token = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
+    const phoneId = config?.metaPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
+
+    // 2. DETECCIÓN DE UBICACIÓN GPS (Pin de WhatsApp o enlace de Google Maps)
+    let coordinates: { latitude: number; longitude: number } | null = null
+    let locationAddressName = ""
+
+    if (message.type === "location" && message.location) {
+      const lat = parseFloat(message.location.latitude)
+      const lng = parseFloat(message.location.longitude)
+      if (!isNaN(lat) && !isNaN(lng)) {
+        coordinates = { latitude: lat, longitude: lng }
+        locationAddressName = [message.location.name, message.location.address].filter(Boolean).join(" - ")
+      }
+    } else if (message.type === "text" && text) {
+      coordinates = extractCoordinates(text)
+    }
+
+    if (coordinates) {
+      console.log(`[WhatsApp Webhook] Ubicación GPS detectada de ${from}: (${coordinates.latitude}, ${coordinates.longitude})`)
+      const locResult = await handleIncomingCustomerLocation({
+        phone: from,
+        customerName,
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        addressName: locationAddressName,
+        branchId,
+        channel: "whatsapp",
+      })
+
+      // Despachar respuesta de confirmación al cliente por WhatsApp
+      if (token && phoneId && locResult.replyText) {
+        await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token.trim()}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            to: from,
+            type: "text",
+            text: { body: locResult.replyText },
+          }),
+        }).catch((err) => console.error("[WhatsApp Location Reply Error]:", err))
+      }
+
+      return NextResponse.json({ status: "location_processed", orderId: locResult.order?.id })
+    }
+
+    // 3. Procesar con el motor IA DeepSeek y catálogo exclusivo de la sede (Consultas y Ventas)
     const result = await processWhatsAppMessage({
       phone: from,
       customerName,
@@ -85,13 +136,7 @@ export async function POST(req: NextRequest) {
       branchId,
     })
 
-    // 3. Despachar respuesta de vuelta por Meta Cloud API si la sede tiene credenciales
-    if (!config && branchId) {
-      config = await db.whatsAppConfig.findUnique({ where: { branchId } })
-    }
-    const token = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
-    const phoneId = config?.metaPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
-
+    // 4. Despachar respuesta de vuelta por Meta Cloud API si la sede tiene credenciales
     if (token && phoneId && result?.reply) {
       try {
         console.log(`[WhatsApp Webhook] Despachando respuesta a ${from} via Meta Cloud API...`)
@@ -118,22 +163,13 @@ export async function POST(req: NextRequest) {
           console.log(`[WhatsApp Webhook] Respuesta entregada con éxito a Meta Cloud API para ${from}`)
         }
       } catch (metaErr) {
-        console.error("[WhatsApp Send Network Error]:", metaErr)
+        console.error("[WhatsApp Meta Fetch Exception]:", metaErr)
       }
-    } else {
-      console.warn("[WhatsApp Webhook] Mensaje procesado en CRM pero no despachado a Meta Cloud API:", {
-        hasToken: !!token,
-        hasPhoneId: !!phoneId,
-        hasReply: !!result?.reply,
-      })
     }
 
-    return NextResponse.json({ ok: true, result, branchId })
+    return NextResponse.json({ status: "processed", response: result?.reply || null })
   } catch (error) {
-    console.error("[WhatsApp Webhook Error]:", error)
-    return NextResponse.json(
-      { error: (error as Error).message },
-      { status: 500 }
-    )
+    console.error("[WhatsApp Webhook General Error]:", error)
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 })
   }
 }

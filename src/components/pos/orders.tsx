@@ -95,6 +95,8 @@ export interface Order {
   customerEmail?: string | null
   deliveryAddress?: string | null
   deliveryNotes?: string | null
+  deliveryLatitude?: number | null
+  deliveryLongitude?: number | null
   subtotal: number
   tax: number
   deliveryFee: number
@@ -126,6 +128,9 @@ interface StaffUser {
   name: string
   role: string
   email?: string | null
+  phone?: string | null
+  telegramUsername?: string | null
+  telegramChatId?: string | null
 }
 
 interface ProductItem {
@@ -217,7 +222,7 @@ export const PAYMENT_METHOD_CONFIG: Record<
 }
 
 export default function OrdersView() {
-  const { role, userName } = useAppStore()
+  const { role, userName, activeBranch, refreshKey, tenantId } = useAppStore()
 
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
@@ -226,7 +231,6 @@ export default function OrdersView() {
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("all")
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>("all")
   const [driverFilter, setDriverFilter] = useState<string>("all")
-  const [viewMode, setViewMode] = useState<"cards" | "table">("cards")
 
   // Personal / Conductores registrados
   const [staffDrivers, setStaffDrivers] = useState<StaffUser[]>([])
@@ -245,6 +249,7 @@ export default function OrdersView() {
   const [showQuickAddDriver, setShowQuickAddDriver] = useState(false)
   const [quickDriverName, setQuickDriverName] = useState("")
   const [quickDriverPhone, setQuickDriverPhone] = useState("")
+  const [quickDriverTelegram, setQuickDriverTelegram] = useState("")
   const [quickDriverPin, setQuickDriverPin] = useState("1234")
   const [savingQuickDriver, setSavingQuickDriver] = useState(false)
 
@@ -293,10 +298,11 @@ export default function OrdersView() {
   const fetchDeliverySettings = useCallback(async () => {
     try {
       setLoadingDeliverySettings(true)
+      const branchParam = activeBranch?.id ? `?branchId=${encodeURIComponent(activeBranch.id)}` : ""
       const res = await apiFetch<{
         ok: boolean
         config: { globalFee: number; neighborhoodRates: NeighborhoodRate[] }
-      }>("/api/delivery-settings")
+      }>(`/api/delivery-settings${branchParam}`)
       if (res?.ok && res.config) {
         setGlobalDeliveryFee(res.config.globalFee ?? 5000)
         setNeighborhoodRates(res.config.neighborhoodRates ?? [])
@@ -306,7 +312,7 @@ export default function OrdersView() {
     } finally {
       setLoadingDeliverySettings(false)
     }
-  }, [])
+  }, [activeBranch?.id])
 
   const handleOpenDeliverySettings = async () => {
     setDeliverySettingsModalOpen(true)
@@ -355,11 +361,12 @@ export default function OrdersView() {
     }
     try {
       setSavingDeliverySettings(true)
+      const branchParam = activeBranch?.id ? `?branchId=${encodeURIComponent(activeBranch.id)}` : ""
       const res = await apiFetch<{
         ok: boolean
         message?: string
         config: { globalFee: number; neighborhoodRates: NeighborhoodRate[] }
-      }>("/api/delivery-settings", {
+      }>(`/api/delivery-settings${branchParam}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -386,11 +393,12 @@ export default function OrdersView() {
     }
   }
 
-  // Cargar pedidos y conductores
+  // Cargar pedidos y conductores aislados por sede activa
   const fetchOrders = useCallback(async () => {
     try {
       setLoading(true)
-      const res = await apiFetch<{ ok: boolean; data: { orders: Order[] } }>("/api/v1/orders?pageSize=100")
+      const branchParam = activeBranch?.id ? `&branchId=${encodeURIComponent(activeBranch.id)}` : ""
+      const res = await apiFetch<{ ok: boolean; data: { orders: Order[] } }>(`/api/v1/orders?pageSize=100${branchParam}`)
       if (res?.data?.orders) {
         setOrders(res.data.orders)
       }
@@ -400,7 +408,7 @@ export default function OrdersView() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [activeBranch?.id])
 
   const fetchStaff = useCallback(async () => {
     try {
@@ -430,11 +438,17 @@ export default function OrdersView() {
     fetchStaff()
     fetchProducts()
     fetchDeliverySettings()
-  }, [fetchOrders, fetchStaff, fetchProducts, fetchDeliverySettings])
+  }, [fetchOrders, fetchStaff, fetchProducts, fetchDeliverySettings, refreshKey, activeBranch?.id])
 
-  // Filtrado multidimensional
+  // Aislamiento estricto por sede activa
+  const branchIsolatedOrders = useMemo(() => {
+    if (!activeBranch?.id) return orders
+    return orders.filter((o) => !o.branchId || o.branchId === activeBranch.id)
+  }, [orders, activeBranch?.id])
+
+  // Filtrado multidimensional sobre los pedidos de la sede activa
   const filteredOrders = useMemo(() => {
-    return orders.filter((o) => {
+    return branchIsolatedOrders.filter((o) => {
       // 1. Filtro por Estado de Envío (Logística)
       if (statusFilter !== "all" && o.status !== statusFilter) return false
 
@@ -480,25 +494,25 @@ export default function OrdersView() {
 
       return true
     })
-  }, [orders, statusFilter, paymentStatusFilter, paymentMethodFilter, driverFilter, search])
+  }, [branchIsolatedOrders, statusFilter, paymentStatusFilter, paymentMethodFilter, driverFilter, search])
 
-  // Métricas completas
+  // Métricas completas para la sede activa
   const metrics = useMemo(() => {
-    const total = orders.length
-    const pending = orders.filter((o) => o.status === "pendiente").length
-    const inPrep = orders.filter((o) => o.status === "en_preparacion").length
-    const inTransit = orders.filter((o) => o.status === "en_camino").length
-    const delivered = orders.filter((o) => o.status === "entregado").length
-    const unassigned = orders.filter((o) => !o.deliveryDriverName && o.status !== "cancelado" && o.status !== "entregado").length
+    const total = branchIsolatedOrders.length
+    const pending = branchIsolatedOrders.filter((o) => o.status === "pendiente").length
+    const inPrep = branchIsolatedOrders.filter((o) => o.status === "en_preparacion").length
+    const inTransit = branchIsolatedOrders.filter((o) => o.status === "en_camino").length
+    const delivered = branchIsolatedOrders.filter((o) => o.status === "entregado").length
+    const unassigned = branchIsolatedOrders.filter((o) => !o.deliveryDriverName && o.status !== "cancelado" && o.status !== "entregado").length
 
-    const countPaid = orders.filter((o) => o.paymentStatus === "pagado").length
-    const countPendingPayment = orders.filter((o) => o.paymentStatus !== "pagado" && o.status !== "cancelado").length
-    const totalPendingMoney = orders
+    const countPaid = branchIsolatedOrders.filter((o) => o.paymentStatus === "pagado").length
+    const countPendingPayment = branchIsolatedOrders.filter((o) => o.paymentStatus !== "pagado" && o.status !== "cancelado").length
+    const totalPendingMoney = branchIsolatedOrders
       .filter((o) => o.paymentStatus !== "pagado" && o.status !== "cancelado")
       .reduce((acc, o) => acc + (o.total || 0), 0)
 
     return { total, pending, inPrep, inTransit, delivered, unassigned, countPaid, countPendingPayment, totalPendingMoney }
-  }, [orders])
+  }, [branchIsolatedOrders])
 
   const dedicatedDrivers = useMemo(() => staffDrivers.filter((s) => s.role === "domiciliario"), [staffDrivers])
   const otherStaff = useMemo(() => staffDrivers.filter((s) => s.role !== "domiciliario"), [staffDrivers])
@@ -512,8 +526,12 @@ export default function OrdersView() {
 
     setSavingQuickDriver(true)
     try {
-      const generatedEmail = quickDriverPhone.trim()
-        ? `repartidor.${quickDriverPhone.trim().replace(/\D/g, "")}@pos.local`
+      const cleanPhone = quickDriverPhone.trim() || null
+      let cleanTg = quickDriverTelegram.trim() || null
+      if (cleanTg && !cleanTg.startsWith("@")) cleanTg = `@${cleanTg}`
+
+      const generatedEmail = cleanPhone
+        ? `repartidor.${cleanPhone.replace(/\D/g, "")}@pos.local`
         : null
 
       const res = await apiFetch<{ ok: boolean; user: StaffUser }>("/api/users", {
@@ -521,6 +539,8 @@ export default function OrdersView() {
         body: JSON.stringify({
           name: quickDriverName.trim(),
           email: generatedEmail,
+          phone: cleanPhone,
+          telegramUsername: cleanTg,
           role: "domiciliario",
           pin: quickDriverPin.trim(),
         }),
@@ -534,6 +554,7 @@ export default function OrdersView() {
       setShowQuickAddDriver(false)
       setQuickDriverName("")
       setQuickDriverPhone("")
+      setQuickDriverTelegram("")
       setQuickDriverPin("1234")
     } catch (e) {
       console.error(e)
@@ -672,6 +693,19 @@ export default function OrdersView() {
     }
   }
 
+  // Difundir pedido a todos los domiciliarios por Telegram (Primero en Aceptar)
+  const handleBroadcastOrder = async (orderId: string) => {
+    try {
+      const res = await apiFetch<{ ok: boolean; data?: { notifiedCount: number; message: string }; message?: string }>(
+        `/api/v1/orders/${orderId}/broadcast`,
+        { method: "POST" }
+      )
+      toast.success(res?.data?.message || res?.message || "Pedido difundido a los domiciliarios vía Telegram")
+    } catch (e) {
+      toast.error((e as Error).message || "Error al difundir pedido")
+    }
+  }
+
   // Actualizar medio de pago (efectivo, transferencia, tarjeta, credito)
   const handleUpdatePaymentMethod = async (orderId: string, paymentMethod: string) => {
     try {
@@ -790,11 +824,12 @@ export default function OrdersView() {
     setSavingOrder(true)
     try {
       // Tomamos el tenant del usuario o el primero del sistema
-      const sessionTenantId = useAppStore.getState().tenantId
+      const sessionTenantId = tenantId || useAppStore.getState().tenantId
       await apiFetch("/api/v1/orders", {
         method: "POST",
         body: JSON.stringify({
           businessId: sessionTenantId || "default",
+          branchId: activeBranch?.id || undefined,
           customerName: customerName.trim(),
           customerPhone: customerPhone.trim(),
           deliveryAddress: deliveryAddress.trim(),
@@ -837,9 +872,17 @@ export default function OrdersView() {
               <IconTruckDelivery className="h-6 w-6" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
-                Gestión de Pedidos & Domicilios
-              </h1>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
+                  Gestión de Pedidos & Domicilios
+                </h1>
+                {activeBranch && (
+                  <Badge variant="outline" className="text-[11px] font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 gap-1">
+                    <IconBuildingStore className="h-3 w-3" />
+                    Sede: {activeBranch.name}
+                  </Badge>
+                )}
+              </div>
               <p className="text-xs sm:text-sm text-muted-foreground">
                 Control de entregas en tiempo real, trazabilidad y asignación de conductores
               </p>
@@ -1101,28 +1144,6 @@ export default function OrdersView() {
               ))}
             </SelectContent>
           </Select>
-
-          {/* Alternar vista Cards / Tabla */}
-          <div className="flex items-center border rounded-xl overflow-hidden bg-muted/40 p-0.5">
-            <button
-              onClick={() => setViewMode("cards")}
-              className={cn(
-                "px-2.5 py-1 text-xs rounded-lg transition-all font-medium",
-                viewMode === "cards" ? "bg-background text-foreground shadow-2xs font-semibold" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Tarjetas
-            </button>
-            <button
-              onClick={() => setViewMode("table")}
-              className={cn(
-                "px-2.5 py-1 text-xs rounded-lg transition-all font-medium",
-                viewMode === "table" ? "bg-background text-foreground shadow-2xs font-semibold" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Tabla
-            </button>
-          </div>
         </div>
       </div>
 
@@ -1160,345 +1181,6 @@ export default function OrdersView() {
             </Button>
           </div>
         </Card>
-      ) : viewMode === "cards" ? (
-        /* VISTA DE TARJETAS (CARDS GRID) */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <AnimatePresence mode="popLayout">
-            {filteredOrders.map((order) => {
-              const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.pendiente
-              const hasDriver = !!order.deliveryDriverName
-
-              return (
-                <motion.div
-                  key={order.id}
-                  layout
-                  initial={{ opacity: 0, scale: 0.96 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.96 }}
-                  transition={{ duration: 0.15 }}
-                >
-                  <Card className="rounded-2xl border shadow-xs hover:shadow-md transition-all flex flex-col h-full overflow-hidden bg-card">
-                    {/* Header de la tarjeta */}
-                    <div className="p-4 pb-3 border-b flex items-start justify-between gap-2 bg-muted/20">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono font-bold text-xs sm:text-sm text-foreground">
-                            {order.orderNumber}
-                          </span>
-                          <Select
-                            value={order.status}
-                            onValueChange={(val) => handleUpdateStatus(order.id, val)}
-                          >
-                            <SelectTrigger
-                              className={cn(
-                                "h-6 text-[10px] font-bold rounded-full border px-2 gap-1 w-auto transition-all cursor-pointer shadow-2xs",
-                                statusCfg.color,
-                                statusCfg.bg,
-                                statusCfg.border
-                              )}
-                            >
-                              <SelectValue>{statusCfg.label}</SelectValue>
-                            </SelectTrigger>
-                            <SelectContent className="text-xs rounded-xl shadow-lg">
-                              <SelectItem value="pendiente" className="cursor-pointer">🟡 Pendiente</SelectItem>
-                              <SelectItem value="confirmado" className="cursor-pointer">🟢 Confirmado</SelectItem>
-                              <SelectItem value="en_preparacion" className="cursor-pointer">🔵 En Preparación</SelectItem>
-                              <SelectItem value="en_camino" className="cursor-pointer">🟣 En Camino</SelectItem>
-                              <SelectItem value="entregado" className="cursor-pointer">✅ Entregado</SelectItem>
-                              <SelectItem value="cancelado" className="cursor-pointer text-rose-600">🔴 Cancelado</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-0.5">
-                          <IconClock className="h-3 w-3" />
-                          <span>{formatDateTime(order.createdAt)}</span>
-                        </div>
-                      </div>
-
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg">
-                            <IconDotsVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="rounded-xl text-xs w-48">
-                          <DropdownMenuItem onClick={() => { setDetailOrder(order); setDetailModalOpen(true); }}>
-                            <IconEye className="h-3.5 w-3.5 mr-2 text-zinc-950 dark:text-white" /> Ver Detalles
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handlePrintOrder(order)}>
-                            <IconPrinter className="h-3.5 w-3.5 mr-2" /> Imprimir Comanda
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuLabel className="text-[10px] text-muted-foreground">Cambiar Estado</DropdownMenuLabel>
-                          <DropdownMenuItem onClick={() => handleUpdateStatus(order.id, "confirmado")}>
-                            Marcar Confirmado
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleUpdateStatus(order.id, "en_preparacion")}>
-                            Marcar En Preparación
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleUpdateStatus(order.id, "en_camino")}>
-                            Marcar En Camino
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleUpdateStatus(order.id, "entregado")}>
-                            Marcar Entregado
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive"
-                            onClick={() => handleUpdateStatus(order.id, "cancelado")}
-                          >
-                            <IconX className="h-3.5 w-3.5 mr-2" /> Cancelar Pedido
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-
-                    {/* Cuerpo de la tarjeta */}
-                    <CardContent className="p-4 space-y-3 flex-1 flex flex-col justify-between">
-                      {/* Datos del Cliente y Destino */}
-                      <div className="space-y-2.5">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-foreground truncate flex items-center gap-1">
-                              <IconUser className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                              {order.customerName}
-                            </p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <button
-                                onClick={() => openWhatsApp(order.customerPhone, `Hola ${order.customerName}, te escribimos sobre tu pedido ${order.orderNumber}`)}
-                                className="text-[11px] text-foreground hover:text-foreground font-semibold flex items-center gap-1 hover:underline"
-                                title="Enviar mensaje por WhatsApp"
-                              >
-                                <IconBrandWhatsapp className="h-3.5 w-3.5" />
-                                {order.customerPhone}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="text-right shrink-0">
-                            <span className="text-xs font-mono font-black text-foreground block">
-                              {formatCurrency(order.total)}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground font-medium block">
-                              {order.deliveryFee > 0 ? `(Envío: ${formatCurrency(order.deliveryFee)})` : "(Envío gratis)"}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Control Detallado de Estados: Pago & Medio de Pago */}
-                        <div className="p-2.5 rounded-xl bg-muted/40 border border-border/80 space-y-2">
-                          <div className="flex items-center justify-between gap-1.5 flex-wrap">
-                            {/* Estado de Pago interactivo */}
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Pago:</span>
-                              {order.paymentStatus === "pagado" ? (
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdatePaymentStatus(order.id, "pendiente")}
-                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 px-2 py-0.5 rounded-md cursor-pointer transition-all active:scale-95 shadow-2xs"
-                                  title="Pago verificado. Clic para cambiar a Pendiente"
-                                >
-                                  💰 Pagado
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdatePaymentStatus(order.id, "pagado")}
-                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 px-2 py-0.5 rounded-md cursor-pointer transition-all active:scale-95 shadow-2xs"
-                                  title="Clic para marcar como Pagado (Verificado)"
-                                >
-                                  ⏳ Por Cobrar
-                                </button>
-                              )}
-                            </div>
-
-                            {/* Medio de Pago interactivo */}
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Medio:</span>
-                              <Select
-                                value={order.paymentMethod || "efectivo"}
-                                onValueChange={(val) => handleUpdatePaymentMethod(order.id, val)}
-                              >
-                                <SelectTrigger className="h-6 text-[10px] font-bold rounded-lg border px-2 gap-1 w-auto bg-background cursor-pointer shadow-2xs">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent className="text-xs rounded-xl shadow-lg">
-                                  <SelectItem value="efectivo">💵 Efectivo</SelectItem>
-                                  <SelectItem value="contraentrega">💵 Contraentrega</SelectItem>
-                                  <SelectItem value="transferencia">📲 Transferencia</SelectItem>
-                                  <SelectItem value="tarjeta">💳 Tarjeta</SelectItem>
-                                  <SelectItem value="credito">📝 Fiado / Crédito</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-
-                          {/* Indicador de cobro al cliente para el repartidor */}
-                          <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-dashed">
-                            <span className="text-muted-foreground">
-                              {order.paymentStatus === "pagado" ? (
-                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
-                                  ✅ Ya liquidado: Cobrar $0
-                                </span>
-                              ) : (
-                                <span className="text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1">
-                                  ⚠️ Domiciliario debe cobrar:
-                                </span>
-                              )}
-                            </span>
-                            <span className="font-mono font-bold text-foreground">
-                              {order.paymentStatus === "pagado" ? "$0" : formatCurrency(order.total)}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Dirección */}
-                        <div className="p-2.5 rounded-xl bg-muted/40 border border-border/60 text-xs space-y-1">
-                          <div className="flex items-start gap-1.5 text-foreground font-medium">
-                            <IconMapPin className="h-3.5 w-3.5 text-zinc-950 dark:text-white shrink-0 mt-0.5" />
-                            <span className="line-clamp-2">{order.deliveryAddress || "Dirección no especificada"}</span>
-                          </div>
-                          {order.deliveryNotes && (
-                            <p className="text-[11px] text-muted-foreground pl-5 italic">
-                              "{order.deliveryNotes}"
-                            </p>
-                          )}
-                        </div>
-
-                        {/* Items resumidos */}
-                        <div className="text-[11px] text-muted-foreground flex items-center gap-1">
-                          <IconBoxSeam className="h-3 w-3 shrink-0" />
-                          <span className="truncate">
-                            {order.items.map((i) => `${i.quantity}x ${i.productName}`).join(", ")}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* SECCIÓN DEL CONDUCTOR / REPARTIDOR */}
-                      <div className="pt-2 border-t space-y-2">
-                        {hasDriver ? (
-                          /* Conductor ya asignado */
-                          <div className="p-2.5 rounded-xl bg-muted/40 border border-border flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <div className="h-8 w-8 rounded-full bg-muted text-foreground flex items-center justify-center shrink-0">
-                                <IconMotorbike className="h-4 w-4" />
-                              </div>
-                              <div className="min-w-0">
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-foreground block">
-                                  Conductor Asignado
-                                </span>
-                                <p className="text-xs font-bold text-foreground truncate">
-                                  {order.deliveryDriverName}
-                                </p>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-1 shrink-0">
-                              {order.deliveryDriverPhone && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 rounded-lg text-foreground hover:text-foreground hover:bg-muted"
-                                  onClick={() => openWhatsApp(order.deliveryDriverPhone!, `Hola ${order.deliveryDriverName}, actualización sobre pedido ${order.orderNumber}`)}
-                                  title="Contactar conductor por WhatsApp"
-                                >
-                                  <IconBrandWhatsapp className="h-4 w-4" />
-                                </Button>
-                              )}
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleOpenAssign(order)}
-                                className="h-7 px-2 text-[10px] rounded-lg border-border text-foreground hover:bg-muted"
-                              >
-                                Cambiar
-                              </Button>
-                            </div>
-                          </div>
-                        ) : (
-                          /* Sin conductor asignado -> Botón destacado */
-                          <div className="p-2.5 rounded-xl bg-muted/40 border border-border flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-1.5 text-xs text-foreground font-medium">
-                              <IconAlertCircle className="h-4 w-4 text-foreground shrink-0" />
-                              <span>Sin conductor asignado</span>
-                            </div>
-
-                            <Button
-                              size="sm"
-                              onClick={() => handleOpenAssign(order)}
-                              className="h-8 px-3 text-xs rounded-xl font-bold bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 shadow-xs gap-1 active:scale-[0.98]"
-                            >
-                              <IconMotorbike className="h-3.5 w-3.5" />
-                              Asignar
-                            </Button>
-                          </div>
-                        )}
-
-                        {/* Botones de acción rápida de flujo */}
-                        <div className="grid grid-cols-2 gap-1.5 pt-1">
-                          {order.status === "pendiente" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleUpdateStatus(order.id, "confirmado")}
-                              className="h-8 text-xs rounded-xl border-border text-foreground hover:bg-muted col-span-2"
-                            >
-                              <IconCheck className="h-3.5 w-3.5 mr-1" /> Confirmar Pedido
-                            </Button>
-                          )}
-
-                          {order.status === "confirmado" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleUpdateStatus(order.id, "en_preparacion")}
-                              className="h-8 text-xs rounded-xl border-border text-foreground hover:bg-muted col-span-2"
-                            >
-                              Comenzar Preparación
-                            </Button>
-                          )}
-
-                          {order.status === "en_preparacion" && (
-                            <Button
-                              size="sm"
-                              onClick={() => {
-                                if (!hasDriver) {
-                                  handleOpenAssign(order)
-                                } else {
-                                  handleUpdateStatus(order.id, "en_camino")
-                                }
-                              }}
-                              className="h-8 text-xs rounded-xl bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 col-span-2 font-bold gap-1"
-                            >
-                              <IconMotorbike className="h-3.5 w-3.5" />
-                              {hasDriver ? "Despachar a Domicilio" : "Asignar Conductor & Despachar"}
-                            </Button>
-                          )}
-
-                          {order.status === "en_camino" && (
-                            <Button
-                              size="sm"
-                              onClick={() => handleUpdateStatus(order.id, "entregado")}
-                              className="h-8 text-xs rounded-xl bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 col-span-2 font-bold gap-1"
-                            >
-                              <IconCheck className="h-3.5 w-3.5" /> Marcar Entregado y Cobrado
-                            </Button>
-                          )}
-
-                          {order.status === "entregado" && (
-                            <div className="col-span-2 flex items-center justify-center gap-1.5 text-xs font-semibold text-foreground py-1">
-                              <IconCheck className="h-4 w-4" /> Entrega Finalizada con Éxito
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              )
-            })}
-          </AnimatePresence>
-        </div>
       ) : (
         /* VISTA DE TABLA DETALLADA (ENVÍO, PAGO, MEDIO) */
         <Card className="rounded-2xl border shadow-xs overflow-hidden">
@@ -1533,10 +1215,21 @@ export default function OrdersView() {
                         <p className="text-xs font-bold text-foreground">{order.customerName}</p>
                         <p className="text-[11px] text-muted-foreground">{order.customerPhone}</p>
                       </TableCell>
-                      <TableCell className="max-w-[180px]">
-                        <p className="text-xs truncate">{order.deliveryAddress || "N/A"}</p>
+                      <TableCell className="max-w-[190px]">
+                        <p className="text-xs truncate font-medium">{order.deliveryAddress || "N/A"}</p>
                         {order.deliveryNotes && (
                           <p className="text-[10px] text-muted-foreground truncate">{order.deliveryNotes}</p>
+                        )}
+                        {order.deliveryLatitude && order.deliveryLongitude && (
+                          <a
+                            href={`https://www.google.com/maps?q=${order.deliveryLatitude},${order.deliveryLongitude}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline mt-0.5"
+                          >
+                            <IconBrandGoogleMaps className="h-3 w-3 text-red-500" />
+                            GPS en Mapa ↗
+                          </a>
                         )}
                       </TableCell>
                       <TableCell className="font-mono text-xs whitespace-nowrap">
@@ -1639,6 +1332,18 @@ export default function OrdersView() {
 
                       {/* Acciones */}
                       <TableCell className="text-right space-x-1 whitespace-nowrap">
+                        {!order.deliveryDriverName && order.status !== "cancelado" && order.status !== "entregado" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleBroadcastOrder(order.id)}
+                            className="h-7 text-xs rounded-lg px-2 border-dashed border-sky-500/40 text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/30"
+                            title="Difundir a todos los domiciliarios de la sede por Telegram (Primero en Aceptar)"
+                          >
+                            <IconSend className="h-3 w-3 mr-1" />
+                            Difundir
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"
@@ -1694,9 +1399,16 @@ export default function OrdersView() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Destino:</span>
-                  <span className="font-medium text-foreground max-w-[240px] truncate text-right">
-                    {selectedOrder.deliveryAddress}
-                  </span>
+                  <div className="flex flex-col items-end">
+                    <span className="font-medium text-foreground max-w-[240px] truncate text-right">
+                      {selectedOrder.deliveryAddress}
+                    </span>
+                    {selectedOrder.deliveryLatitude && selectedOrder.deliveryLongitude && (
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                        <IconBrandGoogleMaps className="h-3 w-3 text-red-500" /> GPS Vinculado
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Total a cobrar:</span>
@@ -1794,7 +1506,7 @@ export default function OrdersView() {
                               />
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-[10px] font-semibold">Teléfono / WhatsApp</Label>
+                              <Label className="text-[10px] font-semibold">Teléfono / Celular</Label>
                               <Input
                                 value={quickDriverPhone}
                                 onChange={(e) => setQuickDriverPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
@@ -1802,10 +1514,21 @@ export default function OrdersView() {
                                 className="h-8 text-xs rounded-lg bg-background"
                               />
                             </div>
-                            <div className="space-y-1 sm:col-span-2">
+                            <div className="space-y-1">
+                              <Label className="text-[10px] font-semibold flex items-center gap-1">
+                                <span>Usuario de Telegram</span>
+                                <span className="text-[9px] text-muted-foreground font-normal">(@usuario)</span>
+                              </Label>
+                              <Input
+                                value={quickDriverTelegram}
+                                onChange={(e) => setQuickDriverTelegram(e.target.value.trim())}
+                                placeholder="Ej. @carlos_domi"
+                                className="h-8 text-xs rounded-lg bg-background"
+                              />
+                            </div>
+                            <div className="space-y-1">
                               <div className="flex items-center justify-between">
                                 <Label className="text-[10px] font-semibold">PIN de Acceso (4-8 dígitos) *</Label>
-                                <span className="text-[9px] text-muted-foreground">Para ingresar al sistema o app</span>
                               </div>
                               <Input
                                 type="password"
@@ -1865,7 +1588,16 @@ export default function OrdersView() {
                               <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-border text-foreground bg-muted/40">
                                 Repartidor
                               </Badge>
-                              {s.email && <span className="text-[10px] text-muted-foreground">{s.email}</span>}
+                              {s.telegramChatId ? (
+                                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/30 font-medium">
+                                  ● Telegram Activo
+                                </Badge>
+                              ) : s.telegramUsername ? (
+                                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/30 font-medium">
+                                  {s.telegramUsername} (Pendiente /start)
+                                </Badge>
+                              ) : null}
+                              {s.phone && <span className="text-[10px] text-muted-foreground">Tel: {s.phone}</span>}
                             </div>
                           </SelectItem>
                         ))
@@ -2096,6 +1828,19 @@ export default function OrdersView() {
                   <p className="font-bold text-foreground">{detailOrder.customerName}</p>
                   <p className="text-muted-foreground">{detailOrder.customerPhone}</p>
                   <p className="text-foreground pt-1 border-t mt-1 font-medium">{detailOrder.deliveryAddress}</p>
+                  {detailOrder.deliveryLatitude && detailOrder.deliveryLongitude && (
+                    <div className="pt-1 border-t mt-1">
+                      <a
+                        href={`https://www.google.com/maps?q=${detailOrder.deliveryLatitude},${detailOrder.deliveryLongitude}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        <IconBrandGoogleMaps className="h-4 w-4 text-red-500" />
+                        Ver Ubicación GPS en Google Maps ↗
+                      </a>
+                    </div>
+                  )}
                   {detailOrder.deliveryNotes && (
                     <p className="text-[11px] text-muted-foreground italic">"{detailOrder.deliveryNotes}"</p>
                   )}

@@ -15,7 +15,10 @@ model User {
   id               String   @id @default(cuid())
   name             String   @unique
   email            String?  @unique
-  role             String   // superadmin | admin | vendedor
+  phone            String?
+  telegramUsername String?  // @usuario en Telegram
+  telegramChatId   String?  // ID numérico de chat en Telegram para despachar notificaciones
+  role             String   // superadmin | admin | vendedor | domiciliario
   pinHash          String   // HMAC del PIN con AUTH_SECRET
   isPrimary        Boolean  @default(false) // Admin principal inmutable
   allowedBranchIds String   @default("[]") @db.VarChar(1000) // IDs de sedes permitidas en formato JSON string
@@ -25,6 +28,7 @@ model User {
   createdAt        DateTime @default(now())
 
   @@index([tenantId])
+  @@index([telegramChatId])
 }
 
 // Log de auditoría: registra quién hizo qué y cuándo
@@ -336,6 +340,8 @@ model Order {
   customerEmail       String?
   deliveryAddress     String?           @db.Text
   deliveryNotes       String?           @db.Text
+  deliveryLatitude    Float?
+  deliveryLongitude   Float?
   subtotal            Float             @default(0)
   tax                 Float             @default(0)
   deliveryFee         Float             @default(0)

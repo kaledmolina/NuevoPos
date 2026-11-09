@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getSession, logAudit } from "@/lib/auth"
 import { apiSuccess, apiError } from "@/lib/api-response"
+import { broadcastNewOrderToDrivers } from "@/lib/telegram-driver"
 
 export const dynamic = "force-dynamic"
 
@@ -16,57 +17,75 @@ export async function GET(req: NextRequest) {
     const session = getSession(req)
     const { searchParams } = new URL(req.url)
     const businessId = searchParams.get("businessId") || searchParams.get("tenantId")
-    const branchId = searchParams.get("branchId")
+    const headerBranchId = req.headers.get("x-branch-id")
+    const queryBranchId = searchParams.get("branchId")
+    const rawBranchId = (queryBranchId && queryBranchId !== "all" && queryBranchId !== "null" && queryBranchId !== "undefined")
+      ? queryBranchId
+      : (headerBranchId && headerBranchId !== "all" && headerBranchId !== "null" && headerBranchId !== "undefined")
+        ? headerBranchId
+        : null
+
     const status = searchParams.get("status")
     const q = searchParams.get("q")?.trim()
     const page = Math.max(1, Number(searchParams.get("page") ?? 1))
     const pageSize = Math.min(100, Math.max(1, Number(searchParams.get("pageSize") ?? 20)))
 
-    const where: Record<string, unknown> = {}
+    const andConditions: any[] = []
 
     // Filtros de visibilidad por Rol
     if (session) {
       if (session.role === "cliente") {
         // Un cliente ve sus propios pedidos
-        where.OR = [
-          { createdById: session.uid },
-          { customerName: session.name },
-        ]
+        andConditions.push({
+          OR: [
+            { createdById: session.uid },
+            { customerName: session.name },
+          ]
+        })
       } else if (session.role === "domiciliario") {
         // Un repartidor ve los pedidos que le han sido asignados o los que están listos para despacho
         if (status) {
-          where.status = status
-          where.deliveryDriverId = session.uid
+          andConditions.push({ status, deliveryDriverId: session.uid })
         } else {
-          where.OR = [
-            { deliveryDriverId: session.uid },
-            { status: { in: ["confirmado", "en_preparacion", "en_camino"] } },
-          ]
+          andConditions.push({
+            OR: [
+              { deliveryDriverId: session.uid },
+              { status: { in: ["confirmado", "en_preparacion", "en_camino"] } },
+            ]
+          })
         }
       } else if (session.role === "admin" || session.role === "vendedor") {
-        // Administradores y vendedores ven los pedidos de su propio negocio (por tenant directo o por su sede)
+        // Administradores y vendedores ven los pedidos de su propio negocio
         if (session.tenantId) {
-          where.OR = [
-            { tenantId: session.tenantId },
-            { branch: { tenantId: session.tenantId } },
-          ]
+          andConditions.push({
+            OR: [
+              { tenantId: session.tenantId },
+              { branch: { tenantId: session.tenantId } },
+            ]
+          })
         }
       }
     }
 
-    // Parámetros explícitos adicionales
-    if (businessId) where.tenantId = businessId
-    if (branchId) where.branchId = branchId
-    if (status && !where.status) where.status = status
+    // Parámetros explícitos adicionales y aislamiento por Sede
+    if (businessId) andConditions.push({ tenantId: businessId })
+    if (rawBranchId) {
+      andConditions.push({ branchId: rawBranchId })
+    }
+    if (status) andConditions.push({ status })
 
     if (q) {
-      where.OR = [
-        { orderNumber: { contains: q } },
-        { customerName: { contains: q } },
-        { customerPhone: { contains: q } },
-        { deliveryAddress: { contains: q } },
-      ]
+      andConditions.push({
+        OR: [
+          { orderNumber: { contains: q } },
+          { customerName: { contains: q } },
+          { customerPhone: { contains: q } },
+          { deliveryAddress: { contains: q } },
+        ]
+      })
     }
+
+    const where: Record<string, unknown> = andConditions.length > 0 ? { AND: andConditions } : {}
 
     const [total, orders] = await Promise.all([
       db.order.count({ where }),
@@ -104,7 +123,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}))
 
     const businessId = (body.businessId || body.tenantId || "").toString().trim()
-    let branchId = (body.branchId || "").toString().trim()
+    let branchId = (body.branchId || req.headers.get("x-branch-id") || "").toString().trim()
     const customerName = (body.customerName || (session?.role === "cliente" ? session.name : "")).toString().trim()
     const customerPhone = (body.customerPhone || "").toString().trim()
     const customerEmail = body.customerEmail ? body.customerEmail.toString().trim() : null
@@ -279,6 +298,13 @@ export async function POST(req: NextRequest) {
       role: session?.role || "cliente",
       detail: `Pedido ${orderNumber} creado por $${total.toLocaleString("es-CO")} en negocio ${tenant.name}`,
     })
+
+    // Difundir automáticamente a los domiciliarios de la sede si no tiene conductor asignado
+    if (!createdOrder.deliveryDriverId) {
+      broadcastNewOrderToDrivers(createdOrder.id).catch((err) => {
+        console.warn("[Orders Broadcast Warning]:", err)
+      })
+    }
 
     return apiSuccess(
       {

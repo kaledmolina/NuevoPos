@@ -90,7 +90,11 @@ export async function PATCH(
       }
       if (newStatus === "entregado") {
         updateData.deliveredAt = new Date()
-        updateData.paymentStatus = "pagado"
+        // Si el pago no fue marcado previamente como pagado (ej. cobro en efectivo contraentrega),
+        // se conserva como 'por_cobrar' hasta que el domiciliario entregue físicamente todo el efectivo en caja.
+        if (!paymentStatus && order.paymentStatus !== "pagado") {
+          updateData.paymentStatus = "por_cobrar"
+        }
       }
       if (newStatus === "cancelado") {
         updateData.cancelledAt = new Date()

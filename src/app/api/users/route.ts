@@ -100,6 +100,9 @@ export async function GET(req: NextRequest) {
         id: u.id,
         name: u.name,
         email: u.email,
+        phone: u.phone,
+        telegramUsername: u.telegramUsername,
+        telegramChatId: u.telegramChatId,
         role: u.role,
         isPrimary: u.isPrimary,
         allowedBranchIds: allowed,
@@ -158,6 +161,11 @@ export async function POST(req: NextRequest) {
     const email = body.email ? String(body.email).trim().toLowerCase() : null
     const role = String(body.role ?? "vendedor").toLowerCase()
     const pin = String(body.pin ?? "").trim()
+    const phone = body.phone ? String(body.phone).trim() : null
+    let telegramUsername = body.telegramUsername ? String(body.telegramUsername).trim() : null
+    if (telegramUsername && !telegramUsername.startsWith("@")) {
+      telegramUsername = `@${telegramUsername}`
+    }
 
     if (!name || name.length < 2) {
       return NextResponse.json(
@@ -234,6 +242,8 @@ export async function POST(req: NextRequest) {
       data: {
         name,
         email,
+        phone,
+        telegramUsername,
         role,
         pinHash: hashPin(pin),
         isPrimary: false,
@@ -245,6 +255,9 @@ export async function POST(req: NextRequest) {
         id: true,
         name: true,
         email: true,
+        phone: true,
+        telegramUsername: true,
+        telegramChatId: true,
         role: true,
         isPrimary: true,
         active: true,
@@ -353,11 +366,27 @@ export async function PUT(req: NextRequest) {
     const updateData: {
       name?: string
       email?: string | null
+      phone?: string | null
+      telegramUsername?: string | null
+      telegramChatId?: string | null
       role?: string
       pinHash?: string
       allowedBranchIds?: string
       active?: boolean
     } = {}
+
+    // Teléfono y Telegram
+    if (body.phone !== undefined) {
+      updateData.phone = body.phone ? String(body.phone).trim() : null
+    }
+    if (body.telegramUsername !== undefined) {
+      let tg = body.telegramUsername ? String(body.telegramUsername).trim() : null
+      if (tg && !tg.startsWith("@")) tg = `@${tg}`
+      updateData.telegramUsername = tg
+    }
+    if (body.telegramChatId !== undefined) {
+      updateData.telegramChatId = body.telegramChatId ? String(body.telegramChatId).trim() : null
+    }
 
     // Sedes asignadas
     if (body.allowedBranchIds !== undefined && !targetUser.isPrimary) {
@@ -492,6 +521,9 @@ export async function PUT(req: NextRequest) {
         id: true,
         name: true,
         email: true,
+        phone: true,
+        telegramUsername: true,
+        telegramChatId: true,
         role: true,
         isPrimary: true,
         active: true,

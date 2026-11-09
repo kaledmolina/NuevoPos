@@ -43,6 +43,14 @@ export async function ensureMySqlTextColumns(): Promise<void> {
     await db.$executeRawUnsafe(`ALTER TABLE AuditLog MODIFY COLUMN detail TEXT;`).catch(() => {})
     await db.$executeRawUnsafe(`ALTER TABLE AuditLog MODIFY COLUMN meta TEXT;`).catch(() => {})
     await db.$executeRawUnsafe(`ALTER TABLE Setting MODIFY COLUMN value TEXT;`).catch(() => {})
+    // Campos de domiciliario y Telegram para usuarios
+    await db.$executeRawUnsafe(`ALTER TABLE \`User\` ADD COLUMN phone VARCHAR(191) NULL;`).catch(() => {})
+    await db.$executeRawUnsafe(`ALTER TABLE \`User\` ADD COLUMN telegramUsername VARCHAR(191) NULL;`).catch(() => {})
+    await db.$executeRawUnsafe(`ALTER TABLE \`User\` ADD COLUMN telegramChatId VARCHAR(191) NULL;`).catch(() => {})
+    await db.$executeRawUnsafe(`ALTER TABLE \`User\` ADD INDEX idx_user_tg_chat (telegramChatId);`).catch(() => {})
+    // Coordenadas GPS en Pedidos para domiciliarios
+    await db.$executeRawUnsafe(`ALTER TABLE \`Order\` ADD COLUMN deliveryLatitude DOUBLE NULL;`).catch(() => {})
+    await db.$executeRawUnsafe(`ALTER TABLE \`Order\` ADD COLUMN deliveryLongitude DOUBLE NULL;`).catch(() => {})
     console.log("🐬 Columnas TEXT de MySQL verificadas y aseguradas en todos los módulos.")
   } catch (err) {
     console.warn("[MySQL Text Columns Patch Error]:", err)

@@ -1,5 +1,6 @@
 import { db, ensureMySqlTextColumns } from "@/lib/db"
 import { getDeliveryConfig, resolveDeliveryFee, formatDeliveryPromptContext } from "@/lib/delivery-config"
+import { broadcastNewOrderToDrivers } from "@/lib/telegram-driver"
 import {
   ensureActiveConversationSession,
   closeConversationSession,
@@ -537,6 +538,7 @@ async function executeWhatsAppMessage(params: {
         })
 
         createdOrderId = createdOrder.id
+        broadcastNewOrderToDrivers(createdOrder.id).catch(() => {})
         await closeConversationSession(cleanPhone, "order_created", createdOrder.orderNumber)
 
         const itemsSummary = itemsToCreate
@@ -832,6 +834,7 @@ async function executeWhatsAppMessage(params: {
         })
 
         createdOrderId = order.id
+        broadcastNewOrderToDrivers(order.id).catch(() => {})
 
         const itemsSummary = detectedItems
           .map((it) => `• ${it.quantity} × *${it.product.name}* ($${it.subtotal.toLocaleString("es-CO")})`)
@@ -1271,6 +1274,8 @@ async function executeMcpTool(
         },
       },
     })
+
+    broadcastNewOrderToDrivers(createdOrder.id).catch(() => {})
 
     const orderSummary = {
       exito: true,

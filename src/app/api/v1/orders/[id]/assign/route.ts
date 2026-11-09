@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { getSession, logAudit } from "@/lib/auth"
 import { apiSuccess, apiError } from "@/lib/api-response"
 import { notifyCustomerOrderStatus } from "@/lib/order-notifications"
+import { notifyDriverAssignedOrder } from "@/lib/telegram-driver"
 
 export const dynamic = "force-dynamic"
 
@@ -93,6 +94,11 @@ export async function POST(
       newStatus: "asignado",
       customMessage: `🛵 *¡Repartidor asignado!*\n\nHola ${updated.customerName || "Cliente"}, tu pedido *#${updated.orderNumber}* fue asignado al repartidor *${driverName}*. Pronto saldrá en camino.`,
     }).catch(() => {})
+
+    // Notificar al domiciliario asignado vía Telegram (si tiene cuenta vinculada)
+    notifyDriverAssignedOrder(updated.id).catch((err) => {
+      console.warn("[Assign Order]: Error notificando al domiciliario vía Telegram:", err)
+    })
 
     return apiSuccess({
       order: updated,
