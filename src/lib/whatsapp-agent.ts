@@ -42,8 +42,71 @@ export const GENERAL_QUERY_WORDS = new Set([
 ])
 
 /**
+ * Detecta si un mensaje es ajeno a la actividad comercial de la tienda
+ * (cálculos matemáticos, tareas, chistes, preguntas de cultura general, etc.)
+ * para rechazarlo de inmediato sin gastar tokens ni llamar a la API LLM.
+ */
+export function detectOffTopicQuery(message: string): { isOffTopic: boolean; reason?: string } {
+  const text = (message || "").trim()
+  if (!text) return { isOffTopic: false }
+
+  const clean = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
+
+  // Si contiene palabras comerciales explícitas o de compra, NO es off-topic
+  const commercialKeywords = [
+    "precio", "precios", "costo", "costos", "cuanto vale", "cuanto cuesta", "cuanto cobran",
+    "domicilio", "domicilios", "envio", "envios", "entrega", "pedido", "pedidos", "orden",
+    "comprar", "compro", "quiero", "necesito", "tienen", "venden", "vende", "hay",
+    "disponible", "disponibles", "catalogo", "menu", "stock", "medicamento", "pastilla",
+    "jarabe", "droga", "farmacia", "tienda", "direccion", "barrio", "efectivo", "transferencia",
+    "nequi", "daviplata", "bancolombia", "fiado", "deuda", "abono", "saldo", "cuenta"
+  ]
+
+  const hasCommercialContext = commercialKeywords.some((kw) => clean.includes(kw))
+
+  // 1. Detección de operaciones matemáticas / cálculos numéricos
+  // Ejemplos: "3222 + 6262", "me ayudas con una suma 3222 + 6262", "cuanto es 50 * 30", "calcula 100 / 5"
+  const isMathOperation =
+    // Palabras explícitas de cálculo matemático acompañadas de números u operadores
+    /(?:ayuda(?:me|s)?\s*(?:con)?\s*(?:un[a]?\s*)?(?:suma|resta|multiplicacion|division|calculo|operacion))|(?:(?:cuanto\s+(?:es|da)|calcula(?:r)?|resuelve)\s+[\d\.,\s\+\-\*\/xX÷]+)/i.test(clean) ||
+    // Operaciones aritméticas explícitas entre dos números (sin contexto comercial)
+    (/\b\d+(?:[\.,]\d+)?\s*[\+\*\/÷xX]\s*\d+(?:[\.,]\d+)?\b/i.test(clean) && !hasCommercialContext) ||
+    // Expresión puramente matemática e.g. "3222 + 6262 = ?" o "1500 - 300"
+    (/^\s*[\d\.,\s\+\-\*\/xX÷=]+\s*$/.test(clean) && /[\+\*\/÷=]/.test(clean))
+
+  if (isMathOperation && !hasCommercialContext) {
+    return { isOffTopic: true, reason: "math_calculation" }
+  }
+
+  // 2. Solicitudes de tareas, poemas, cartas, ensayos, historias, chistes, código
+  const isCreativeOrAcademic =
+    /\b(?:hazme|escribe(?:me)?|redacta|crea(?:me)?)\s+(?:un[a]?\s+)?(?:poema|carta|cancion|cuento|ensayo|resumen|tarea|codigo|script|novela|verso)\b/i.test(clean) ||
+    /\b(?:ayuda(?:me)?\s+con\s+(?:mi\s+)?(?:tarea|ensayo|examen|codigo))\b/i.test(clean) ||
+    /\b(?:cuentame|dime)\s+(?:un\s+)?(?:chiste|adivinanza|historia|acertijo)\b/i.test(clean)
+
+  if (isCreativeOrAcademic) {
+    return { isOffTopic: true, reason: "creative_academic" }
+  }
+
+  // 3. Cultura general, política, cocina/recetas, traducción, horóscopos ajenos a la tienda
+  const isGeneralTrivia =
+    /\bquien\s+(?:fue|es|descubrio|invento|gano|creo|gobierna|preside)\b/i.test(clean) ||
+    /\bcapital\s+de\s+[a-z]+/i.test(clean) ||
+    /\b(?:receta\s+de\s+|como\s+(?:cocinar|hacer)\s+(?!suero|gasa))\b/i.test(clean) ||
+    /\b(?:traduce\s+|traduccion\s+(?:de|al)|que\s+significa\s+en\s+ingles)\b/i.test(clean) ||
+    /\b(?:horoscopo|pronostico\s+del\s+tiempo|clima\s+(?:de\s+hoy|en\s+|para\s+hoy))\b/i.test(clean)
+
+  if (isGeneralTrivia && !hasCommercialContext) {
+    return { isOffTopic: true, reason: "general_trivia" }
+  }
+
+  return { isOffTopic: false }
+}
+
+/**
  * Sanitiza la respuesta del LLM para evitar fugas de razonamiento interno (Chain of Thought),
- * etiquetas <think>, o listas de pasos tipo "1. **Analyze the user's input:**"
+ * etiquetas <think>, o listas de pasos tipo "1. **Analyze the user's input:**",
+ * y bloquea cuentas bancarias inventadas o respuestas de cálculos matemáticos.
  */
 function sanitizeBotReply(reply: string, clientName?: string, activeOrder?: any): string {
   let cleaned = (reply || "").trim()
@@ -72,7 +135,7 @@ function sanitizeBotReply(reply: string, clientName?: string, activeOrder?: any)
       } else {
         // Si todo el texto era exclusivamente razonamiento sin respuesta conversacional:
         if (activeOrder && activeOrder.orderNumber) {
-          cleaned = `Tu pedido #${activeOrder.orderNumber} se encuentra en proceso (${activeOrder.status || "registrado"}). Pronto lo coordinamos a tu dirección. ¡Quedamos atentos!`
+          cleaned = `Tu pedido #${activeOrder.orderNumber} se encuentra registrado en estado pendiente. Un asesor de nuestro equipo confirmará tu pedido para su despacho.`
         } else {
           cleaned = `¡Hola${clientName ? ` ${clientName}` : ""}! Con gusto te colaboramos con tu pedido o consulta. ¿Qué producto necesitas a domicilio?`
         }
@@ -82,6 +145,21 @@ function sanitizeBotReply(reply: string, clientName?: string, activeOrder?: any)
 
   // 3. Limpiar cualquier resto de "Omnipos:", "Bot:" al principio del mensaje
   cleaned = cleaned.replace(/^(?:Omnipos|Bot|Asistente|Respuesta):\s*/i, "").trim()
+
+  // 4. Bloqueo de Cuentas Bancarias Inventadas:
+  // Si el modelo alucina números de cuenta falsos o placeholders (ej: 300 123 4567, 123-456789-00),
+  // se reemplazan por la indicación oficial de que un asesor humano entregará los datos.
+  if (/(?:nequi|daviplata|bancolombia|cuenta|ahorros)[\s\S]*?(?:300\s*123\s*4567|123-?456789|\b\d{3}[\s-]?\d{3}[\s-]?\d{4}\b|\b\d{3}-\d{6}-\d{2}\b)/i.test(cleaned)) {
+    cleaned = cleaned.replace(
+      /(?:(?:Te comparto los datos|Datos para la transferencia|Nequi|Daviplata|Bancolombia|Cuenta de ahorros)[^\n]*?(?:300\s*123\s*4567|123-?456789|\b\d{3}[\s-]?\d{3}[\s-]?\d{4}\b|\b\d{3}-\d{6}-\d{2}\b)[^\n]*\n?)+/gi,
+      "Un asesor humano de nuestro equipo se comunicará por este chat en breve para compartirte los datos oficiales de la cuenta para que puedas realizar la transferencia.\n"
+    )
+  }
+
+  // 5. Bloqueo de Respuestas Matemáticas Accidentales:
+  if (/(?:\d+\s*[\+\-\*\/xX÷]\s*\d+\s*=\s*\*\*?\d+\*\*?)|(?:=\s*\*\*?\d+\*\*?\s*\n*\s*¿Te colaboro)/i.test(cleaned)) {
+    cleaned = `Disculpa${clientName ? ` ${clientName}` : ""}, como asesor comercial solo puedo ayudarte con información de nuestros productos, precios y pedidos de la tienda. 😊 ¿En qué producto te podemos colaborar?`
+  }
 
   return cleaned
 }
@@ -245,6 +323,48 @@ async function executeWhatsAppMessage(params: {
     })
   } catch (crmSaveErr) {
     console.error("[WhatsApp CRM Save Inbound Error]:", crmSaveErr)
+  }
+
+  // 0.1 BLINDAJE ANTI-DESPERDICIO DE TOKENS (Off-Topic Pre-Filter)
+  // Rechazar de inmediato preguntas no comerciales (cálculos matemáticos, poemas, tareas, chistes, etc.)
+  // sin gastar tokens en DeepSeek / OpenRouter y protegiendo el rol de ventas.
+  const offTopicCheck = detectOffTopicQuery(text)
+  if (offTopicCheck.isOffTopic) {
+    const branchName = branch?.name || "nuestra tienda"
+    const politeRedirect = `Disculpa${client.name ? ` ${client.name}` : ""}, como asesor comercial de ${branchName} mi función es exclusivamente orientarte sobre nuestros productos, precios, domicilios y toma de pedidos. 😊 ¿En qué producto o medicamento te podemos colaborar hoy?`
+
+    // Guardar respuesta del bot en el CRM
+    try {
+      await db.whatsAppMessage.create({
+        data: {
+          phone: cleanPhone,
+          sender: "bot",
+          text: politeRedirect,
+          status: "delivered",
+          branchId: resolvedBranchId,
+          clientId: client.id,
+          channel: effectiveChannel,
+        },
+      })
+    } catch {
+      /* noop */
+    }
+
+    try {
+      const currentSession = await getConversationSession(cleanPhone)
+      if (currentSession.status === "pendiente") {
+        await setConversationSessionStatus(cleanPhone, "abierta")
+      }
+    } catch {
+      /* noop */
+    }
+
+    return {
+      reply: politeRedirect,
+      actionTaken: "ai_answered",
+      tokensUsed: 0,
+      modelUsed: "guardrail:off_topic_shield",
+    }
   }
 
   let result: BotProcessResult | null = null
@@ -424,11 +544,11 @@ async function executeWhatsAppMessage(params: {
           .join("\n")
         const feeLine = deliveryFee > 0 ? `\n🛵 *Costo Domicilio:* $${deliveryFee.toLocaleString("es-CO")}` : ""
         const paymentSummary = isTransfer
-          ? "💳 *Método de Pago:* Transferencia previa (Por favor envía el comprobante por este chat para verificar y despachar tu pedido)"
+          ? "💳 *Método de Pago:* Transferencia previa (Un asesor humano de nuestro equipo se comunicará por este chat en breve para compartirte los datos oficiales de la cuenta y validar tu comprobante para confirmar el pedido)"
           : `💵 *Método de Pago:* Efectivo ($${total.toLocaleString("es-CO")} a cobrar contraentrega)`
 
         result = {
-          reply: `🎉 *¡Pedido Confirmado con Éxito!*\n🏬 *Sede:* ${branch?.name || "Principal"}\n📦 *Orden:* #${createdOrder.orderNumber}\n👤 *Cliente:* ${client.name}\n📍 *Entrega:* ${finalAddress}\n\n🛒 *Productos:*\n${itemsSummary}${feeLine}\n💵 *Total a Pagar:* *$${total.toLocaleString("es-CO")}*\n${paymentSummary}\n\n⏱️ *Estado:* Recibido en tienda y en fila de alistamiento.`,
+          reply: `📋 *¡Pedido Registrado con Éxito!*\n🏬 *Sede:* ${branch?.name || "Principal"}\n📦 *Orden:* #${createdOrder.orderNumber}\n👤 *Cliente:* ${client.name}\n📍 *Entrega:* ${finalAddress}\n\n🛒 *Productos:*\n${itemsSummary}${feeLine}\n💵 *Total a Pagar:* *$${total.toLocaleString("es-CO")}*\n${paymentSummary}\n\n⏱️ *Estado:* Pendiente (Un asesor humano validará el pago o confirmará la orden para su despacho).`,
           actionTaken: "order_created",
           orderNumber: createdOrder.orderNumber,
           total: createdOrder.total,
@@ -922,7 +1042,7 @@ export const WHATSAPP_MCP_TOOLS = [
           metodo_pago: {
             type: "string",
             enum: ["efectivo", "transferencia"],
-            description: "Método de pago ('efectivo' contraentrega o 'transferencia')",
+            description: "Método de pago ('efectivo' contraentrega o 'transferencia'). NOTA: Si es transferencia, el bot NO debe entregar cuentas bancarias ni inventar números; un asesor humano del comercio lo contactará en breve para entregar los datos oficiales y validar el comprobante.",
           },
           paga_con_efectivo: {
             type: "number",
@@ -1112,7 +1232,7 @@ async function executeMcpTool(
         paymentNote = `💵 Pago en Efectivo: Cobrar $${total.toLocaleString("es-CO")} contraentrega.`
       }
     } else {
-      paymentNote = `💳 Pago por Transferencia: Pendiente verificar comprobante por $${total.toLocaleString("es-CO")}. Una vez verificado por caja, el repartidor no cobra ($0).`
+      paymentNote = `💳 Pago por Transferencia: Pendiente de verificar comprobante por $${total.toLocaleString("es-CO")}. Una vez verificado por el asesor humano, se pasa a confirmado y se despacha.`
     }
 
     if (fullAddress && !client.address) {
@@ -1156,6 +1276,7 @@ async function executeMcpTool(
       exito: true,
       orden_id: createdOrder.id,
       orderNumber: createdOrder.orderNumber,
+      estado_orden: "pendiente",
       subtotal,
       deliveryFee,
       total,
@@ -1163,6 +1284,9 @@ async function executeMcpTool(
       cambio: cambio > 0 ? cambio : 0,
       direccion_entrega: fullAddress,
       metodo_pago: args.metodo_pago,
+      instruccion_importante: isTransfer
+        ? "El pedido fue registrado en estado PENDIENTE. NUNCA inventes números de cuenta bancaria ni números de Nequi/Daviplata/Bancolombia. Informa al cliente que un asesor humano del comercio se comunicará por este chat en breve para entregarle los datos oficiales de transferencia, verificar su comprobante y pasar la orden a CONFIRMADO."
+        : "El pedido fue registrado en estado PENDIENTE para alistamiento con cobro en efectivo contraentrega.",
       items: itemsToCreate.map((it) => ({
         producto: it.product.name,
         cantidad: it.qty,
@@ -1288,29 +1412,57 @@ async function processWithLLMAI(params: {
   // 2. Configuración oficial de tarifas de domicilio para esta sede
   const deliveryConfig = await getDeliveryConfig(branchId)
 
-  // 3. Prompt de sistema humano con MCP Tools
-  const systemPrompt = `Eres el asesor comercial y de atención al cliente humano de "${branchName}" atendiendo por ${channelLabel}.
-Atiendes con calidez, cercanía, profesionalismo y respeto a cada cliente (tono natural latinoamericano/colombiano).
+  // 3. Prompt de sistema humano con MCP Tools y Blindaje Estricto de Rol Comercial
+  const systemPrompt = `Eres el asesor comercial y de atención al cliente de "${branchName}" atendiendo por ${channelLabel}.
+Tu función y propósito es EXCLUSIVAMENTE comercial: venta de productos de la tienda, consulta de existencias y precios del catálogo, cotización de domicilios y toma de pedidos.
+
+🚨 BLINDAJE ESTRICTO DE ATENCIÓN Y AHORRO DE TOKENS (REGLAS INQUEBRANTABLES):
+1. ROL EXCLUSIVO: Eres única y exclusivamente el asesor comercial de la tienda "${branchName}".
+2. Tienes TERMINANTEMENTE PROHIBIDO:
+   - Resolver operaciones matemáticas o cálculos ajenos a la compra (ej: NUNCA resuelvas operaciones como "3222 + 6262").
+   - Responder preguntas de cultura general, noticias, política, historia, ciencia, tecnología, cocina/recetas, tareas escolares, chistes, poemas o temas personales.
+   - Actuar como asistente de inteligencia artificial de propósito general, redactar código o escribir textos creativos.
+3. Si el cliente solicita cualquier cálculo, tarea o tema ajeno a la tienda, DEBES RECHAZAR LA SOLICITUD DE FORMA AMABLE, MUY BREVE Y DIRECTA (en 1 sola frase corta), redirigiéndolo de inmediato a nuestros productos:
+   "Disculpa, como asesor comercial solo puedo ayudarte con información de nuestros productos, precios y pedidos de la tienda. 😊 ¿En qué producto te puedo colaborar?"
+4. AHORRO DE TOKENS: Sé directo, conciso y profesional. No generes respuestas largas ni explicaciones innecesarias.
+
+🚨 REGLAS CRÍTICAS DE PAGO Y TRANSFERENCIA (PROHIBIDO INVENTAR CUENTAS BANCARIAS):
+1. PROHIBICIÓN ABSOLUTA DE INVENTAR CUENTAS:
+   - NUNCA inventes números de cuenta bancaria, números de celular de Nequi, Daviplata ni cuentas de Bancolombia ni ninguna otra entidad (PROHIBIDO escribir números ficticios o de ejemplo como '300 123 4567', '123-456789-00', etc.).
+   - Tú NO dispones de números de cuenta bancaria en tus herramientas y NO debes entregarlos tú.
+2. LA VALIDACIÓN DE TRANSFERENCIAS ES 100% HUMANA:
+   - Los asesores humanos del comercio son quienes validan los comprobantes de pago y pasan los pedidos a "confirmado".
+   - Tu función como bot es ÚNICAMENTE registrar el pedido en el sistema en estado "PENDIENTE".
+3. CUANDO EL CLIENTE ELIJA "TRANSFERENCIA" (O NEQUI / DAVIPLATA / BANCOLOMBIA):
+   - Llama a la herramienta "crear_pedido" con metodo_pago: "transferencia". El pedido se registrará con estado "pendiente".
+   - Al responder al cliente, indícale CLARAMENTE:
+     a) Que su pedido quedó REGISTRADO con éxito en estado PENDIENTE con su número de orden (#PED-...).
+     b) Resumen claro de los productos, dirección y total a pagar.
+     c) INFÓRMALE QUE UN ASESOR HUMANO DEL EQUIPO DE LA TIENDA SE COMUNICARÁ POR ESTE CHAT EN BREVE PARA COMPARTIRLE LOS NÚMEROS DE CUENTA OFICIALES PARA LA TRANSFERENCIA.
+     d) Explícale que una vez el asesor humano valide su comprobante de pago, el pedido pasará a CONFIRMADO para coordinar el despacho.
+   - NUNCA digas que el pedido ya fue confirmado ni despachado, y NUNCA entregues cuentas bancarias inventadas.
+4. CUANDO EL CLIENTE ELIJA "EFECTIVO":
+   - Pregúntale si pagará con el monto exacto o si requiere cambio (y con cuánto pagará).
+   - Llama a "crear_pedido" con metodo_pago: "efectivo".
+   - Infórmale que su pedido ha quedado REGISTRADO en estado PENDIENTE para cobro contraentrega.
 
 TIENES HERRAMIENTAS (MCP Tools) CONECTADAS AL SISTEMA DE LA TIENDA:
 1. "consultar_catalogo": Úsala para consultar existencias, precios y presentaciones de productos o medicamentos. NUNCA inventes productos ni precios.
 2. "cotizar_domicilio": Úsala para calcular el valor del domicilio según la dirección y barrio del cliente.
-3. "crear_pedido": Úsala para registrar oficialmente el pedido en el sistema una vez que el cliente haya confirmado qué desea, su dirección/barrio y su método de pago (efectivo o transferencia).
+3. "crear_pedido": Úsala para registrar oficialmente el pedido en el sistema una vez que el cliente haya confirmado qué desea, su dirección/barrio y su método de pago (efectivo o transferencia). Recuerda: la orden siempre se crea en estado "pendiente".
 4. "consultar_estado_pedido": Úsala si el cliente pregunta por el estado de su orden o entrega.
 5. "consultar_saldo_fiado": Úsala si el cliente pregunta por su deuda, fiado o saldo.
 
 INSTRUCCIONES CLAVE DE ATENCIÓN:
-- Deja fluir la conversación naturalmente.
-- Si el cliente solo te saluda ("hola", "buenas"), salúdalo con calidez y pregúntale en qué le puedes colaborar. (No llames herramientas para un simple saludo).
+- Si el cliente solo te saluda ("hola", "buenas"), salúdalo con calidez y pregúntale amablemente en qué producto le puedes colaborar. (No llames herramientas para un simple saludo).
 - Recuerda SIEMPRE el contexto de toda la conversación anterior: los productos solicitados, las direcciones y las notas que el cliente ya dio. NUNCA le vuelvas a preguntar lo que ya te dijo.
-- Si el cliente te pide un producto, consulta el catálogo ("consultar_catalogo"), dale el precio y pregúntale amablemente cuántas unidades desea y a qué dirección y barrio se lo envías.
-- Cuando el cliente te dé su dirección y barrio, cotiza el domicilio ("cotizar_domicilio"), infórmale el total (productos + envío) y pregúntale si prefiere pagar en efectivo contraentrega o por transferencia previa (Nequi / Daviplata / Bancolombia).
-- Una vez que confirme su forma de pago, llama a "crear_pedido" para registrar la orden en el sistema.
-- Cuando la orden esté creada, dale una confirmación alegre con el número de pedido y los detalles.
-- Habla siempre como un ser humano atento y servicial.
+- Si el cliente te pide un producto, consulta el catálogo ("consultar_catalogo"), dale el precio real y pregúntale amablemente cuántas unidades desea y a qué dirección y barrio se lo envías.
+- Cuando el cliente te dé su dirección y barrio, cotiza el domicilio ("cotizar_domicilio"), infórmale el total (productos + envío) y pregúntale si prefiere pagar en efectivo contraentrega o por transferencia previa.
+- Una vez que confirme su forma de pago, llama a "crear_pedido".
+- Habla siempre como un ser humano atento, respetuoso y servicial.
 ${config.aiSystemPrompt ? `\nInstrucciones especiales de la sede: ${config.aiSystemPrompt}` : ""}`
 
-  const maxTokens = Math.max(config.maxTokensPerReply || 2048, 2048)
+  const maxTokens = Math.min(Math.max(config.maxTokensPerReply || 450, 150), 750)
 
   async function callAiWithTools(
     messagesList: any[],
@@ -1331,7 +1483,7 @@ ${config.aiSystemPrompt ? `\nInstrucciones especiales de la sede: ${config.aiSys
       model,
       messages: messagesList,
       max_tokens: maxTokens,
-      temperature: 0.5,
+      temperature: 0.3,
     }
 
     if (toolsList && toolsList.length > 0) {
@@ -1480,9 +1632,9 @@ ${config.aiSystemPrompt ? `\nInstrucciones especiales de la sede: ${config.aiSys
   let orderTotal: number | undefined = capturedOrder?.total
   let actionTaken: BotProcessResult["actionTaken"] = capturedOrder ? "order_created" : "ai_answered"
 
-  // Si la respuesta del modelo no incluyó la confirmación clara del pedido creado, agregar el ticket
+  // Si la respuesta del modelo no incluyó el resumen del pedido creado, agregar el ticket
   if (capturedOrder && !finalRawReply.includes(capturedOrder.orderNumber)) {
-    finalRawReply += `\n\n📦 *Pedido Confirmado:* #${capturedOrder.orderNumber}\n💵 *Total a pagar:* ${capturedOrder.total_formateado}\n📍 *Entrega:* ${capturedOrder.direccion_entrega}`
+    finalRawReply += `\n\n📦 *Pedido Registrado (Pendiente):* #${capturedOrder.orderNumber}\n💵 *Total a pagar:* ${capturedOrder.total_formateado}\n📍 *Entrega:* ${capturedOrder.direccion_entrega}\n⏱️ *Estado:* Pendiente (Un asesor humano confirmará tu pedido)`
   }
 
   if (!finalRawReply || !finalRawReply.trim()) {
