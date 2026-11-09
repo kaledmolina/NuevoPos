@@ -78,14 +78,70 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconCircleCheck,
+  IconVolume,
+  IconVolumeOff,
+  IconChecks,
+  IconClock,
+  IconInfoCircle,
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import type { ClientAiUsage } from "@/lib/ai-token-tracker"
 
+interface CareWindow {
+  isOpen: boolean
+  expiresAt: string | null
+  hoursLeft: number
+  minutesLeft: number
+  formattedTimeLeft: string
+}
+
+export interface MetaQuota {
+  monthlyLimit: number
+  usedThisMonth: number
+  remainingFree: number
+  percentUsed: number
+  resetsAt: string
+  isExceeded: boolean
+  botMessagesCount?: number
+  agentMessagesCount?: number
+  customerIncomingCount?: number
+  model?: "per_message"
+}
+
+function playNotificationSound() {
+  if (typeof window === "undefined") return
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
+    if (!AudioContextClass) return
+    const ctx = new AudioContextClass()
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {})
+    }
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+
+    osc.type = "sine"
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime) // D5
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.08) // A5
+
+    gain.gain.setValueAtTime(0.18, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35)
+
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+
+    osc.start()
+    osc.stop(ctx.currentTime + 0.35)
+  } catch (e) {
+    console.debug("[Audio notification]", e)
+  }
+}
+
 interface Conversation {
   phone: string
   channel?: "whatsapp" | "telegram"
+  careWindow?: CareWindow
   session?: {
     status: "abierta" | "pendiente" | "cerrada"
     openedAt: string
@@ -286,6 +342,19 @@ export default function WhatsAppAgentView() {
   const [customerOrdersModalOpen, setCustomerOrdersModalOpen] = useState(false)
   const [customerOrdersList, setCustomerOrdersList] = useState<any[]>([])
   const [loadingCustomerOrders, setLoadingCustomerOrders] = useState(false)
+
+  // Meta Cloud API Cuota 1.000 Mensual y Políticas
+  const [metaQuota, setMetaQuota] = useState<MetaQuota | null>(null)
+  const [metaQuotaModalOpen, setMetaQuotaModalOpen] = useState(false)
+  const [syncingTemplates, setSyncingTemplates] = useState(false)
+
+  // Notificaciones de Audio & Escribiendo
+  const [soundEnabled, setSoundEnabled] = useState(true)
+  const soundEnabledRef = useRef(true)
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled
+  }, [soundEnabled])
+  const [isTyping, setIsTyping] = useState<"cliente" | "ia" | "agente" | null>(null)
 
   // Modal: Ranking y Reporte de Consumo de Tokens por Cliente
   const [aiUsageModalOpen, setAiUsageModalOpen] = useState(false)
@@ -507,10 +576,20 @@ export default function WhatsAppAgentView() {
       const url = currentBranchId
         ? `/api/whatsapp/conversations?branchId=${encodeURIComponent(currentBranchId)}`
         : "/api/whatsapp/conversations"
-      const res = await apiFetch<{ ok: boolean; conversations: Conversation[] }>(url)
+      const res = await apiFetch<{ ok: boolean; conversations: Conversation[]; metaQuota?: MetaQuota }>(url)
       if (res && res.ok) {
         const list = res.conversations || []
-        setConversations(list)
+        if (res.metaQuota) {
+          setMetaQuota(res.metaQuota)
+        }
+        setConversations((prev) => {
+          const prevUnread = prev.reduce((acc, c) => acc + (c.unreadCount || 0), 0)
+          const newUnread = list.reduce((acc, c) => acc + (c.unreadCount || 0), 0)
+          if (newUnread > prevUnread && soundEnabledRef.current) {
+            playNotificationSound()
+          }
+          return list
+        })
         if (selectFirst && list.length > 0 && !selectedPhone) {
           setSelectedPhone(list[0].phone)
         }
@@ -548,6 +627,16 @@ export default function WhatsAppAgentView() {
       const res = await apiFetch<{ ok: boolean; messages: Message[] }>(url)
       if (res && res.ok && res.messages) {
         setChatMessages((prev) => {
+          if (prev.length > 0 && res.messages.length > prev.length) {
+            const lastNew = res.messages[res.messages.length - 1]
+            if (lastNew && lastNew.sender === "customer") {
+              if (soundEnabledRef.current) {
+                playNotificationSound()
+              }
+              setIsTyping("ia")
+              setTimeout(() => setIsTyping(null), 3500)
+            }
+          }
           // Solo actualizar el estado si realmente hay cambios para no disparar renders innecesarios
           if (prev.length === res.messages.length) {
             const lastPrev = prev[prev.length - 1]
@@ -764,6 +853,31 @@ export default function WhatsAppAgentView() {
     }
   }
 
+  // Sincronizar plantillas con Meta Cloud API
+  const handleSyncTemplates = async () => {
+    setSyncingTemplates(true)
+    try {
+      const res = await apiFetch<{
+        ok: boolean
+        message: string
+        syncedCount: number
+        error?: string
+      }>("/api/whatsapp/templates/sync", {
+        method: "POST",
+      })
+      if (res && res.ok) {
+        toast.success(res.message || `Se sincronizaron ${res.syncedCount} plantillas oficiales desde Meta`)
+        loadTemplates()
+      } else {
+        toast.error(res?.error || "No se pudieron sincronizar las plantillas de Meta")
+      }
+    } catch (e) {
+      toast.error("Error al sincronizar plantillas con Meta: " + (e as Error).message)
+    } finally {
+      setSyncingTemplates(false)
+    }
+  }
+
   // Enviar mensaje manual desde el agente humano con actualización optimista inmediata
   const handleSendAgentMessage = async () => {
     if (!selectedPhone || !agentReplyText.trim() || sendingReply) return
@@ -783,6 +897,7 @@ export default function WhatsAppAgentView() {
     setChatMessages((prev) => [...prev, optimisticMessage])
     setTimeout(() => scrollToBottom(true), 30)
 
+    setIsTyping("agente")
     setSendingReply(true)
     try {
       const res = await apiFetch<{ ok: boolean; message: Message }>("/api/whatsapp/conversations", {
@@ -804,6 +919,7 @@ export default function WhatsAppAgentView() {
       loadMessages(selectedPhone, true)
     } finally {
       setSendingReply(false)
+      setIsTyping(null)
     }
   }
 
@@ -818,6 +934,7 @@ export default function WhatsAppAgentView() {
       return
     }
 
+    setIsTyping("cliente")
     setSimulating(true)
     try {
       const res = await apiFetch<{
@@ -875,6 +992,7 @@ export default function WhatsAppAgentView() {
       toast.error("Error en simulación: " + (e as Error).message)
     } finally {
       setSimulating(false)
+      setIsTyping(null)
     }
   }
 
@@ -1250,6 +1368,19 @@ export default function WhatsAppAgentView() {
             <span className="sm:hidden">Tokens IA</span>
           </Button>
 
+          {/* Botón / Contador Nueva Política Meta: 1.000 Mensajes Salientes Gratis */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setMetaQuotaModalOpen(true)}
+            className="h-8 text-xs font-bold rounded-full gap-1.5 border-emerald-300 dark:border-emerald-800 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/20 cursor-pointer shadow-2xs"
+            title="Nueva política de Meta: 1.000 mensajes de servicio gratis al mes por número telefónico"
+          >
+            <IconBrandWhatsapp className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span className="hidden sm:inline">Meta Free:</span>
+            <span><strong>{metaQuota?.usedThisMonth ?? 0} / {metaQuota?.monthlyLimit ?? 1000} msgs</strong></span>
+          </Button>
+
           {/* Selector de Pestañas */}
           <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-900 p-1 rounded-full border border-zinc-200 dark:border-zinc-800 text-xs">
             <button
@@ -1533,159 +1664,184 @@ export default function WhatsAppAgentView() {
           <div className="lg:col-span-6 flex flex-col h-full min-h-0 border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-white dark:bg-zinc-900 shadow-2xs overflow-hidden">
             {selectedPhone && selectedConv ? (
               <>
-                {/* Cabecera del chat */}
-                <div className="p-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/60 flex items-center justify-between gap-3 shrink-0">
-                  <div className="flex items-center gap-2.5 min-w-0">
+                {/* Cabecera del chat — Minimalista, Limpia y Sin Botones Redundantes */}
+                <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-between gap-3 shrink-0">
+                  <div className="flex items-center gap-3 min-w-0">
                     {(() => {
                       const isTg = selectedPhone.startsWith("tg_") || selectedConv.channel === "telegram"
                       const displayName = selectedConv.client?.name || (isTg ? `Telegram (@${selectedPhone.replace("tg_", "")})` : `Contacto (${selectedPhone.slice(-4)})`)
+                      const currentStatus = selectedConv.session?.status || "abierta"
                       return (
                         <>
                           <div className={cn(
-                            "h-9 w-9 rounded-full font-bold flex items-center justify-center text-xs shrink-0 relative",
-                            isTg ? "bg-blue-600 text-white" : "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950"
+                            "h-10 w-10 rounded-full font-bold flex items-center justify-center text-xs shrink-0 relative shadow-2xs",
+                            isTg ? "bg-blue-600 text-white" : "bg-emerald-600 text-white"
                           )}>
                             {displayName.slice(0, 2).toUpperCase()}
-                            {isTg && (
-                              <span className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full bg-white dark:bg-zinc-900 flex items-center justify-center">
-                                <IconBrandTelegram className="h-2.5 w-2.5 text-blue-500" />
-                              </span>
-                            )}
+                            <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-white dark:bg-zinc-900 flex items-center justify-center shadow-xs">
+                              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                            </span>
                           </div>
+
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <p className="font-bold text-xs truncate text-zinc-950 dark:text-white">
+                              <h2 className="font-bold text-sm truncate text-zinc-950 dark:text-white">
                                 {displayName}
-                              </p>
+                              </h2>
 
-                              {/* PILL DE ESTADO DE SESIÓN (ABIERTA / PENDIENTE / CERRADA) idéntico a la referencia */}
-                              {(() => {
-                                const currentStatus = selectedConv.session?.status || "abierta"
-                                return (
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <button
-                                        type="button"
-                                        className={cn(
-                                          "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border transition-all cursor-pointer shadow-2xs hover:opacity-90",
-                                          currentStatus === "pendiente"
-                                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-400/40 hover:bg-amber-500/20"
-                                            : currentStatus === "cerrada"
-                                            ? "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 border-zinc-400/40 hover:bg-zinc-500/20"
-                                            : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-400/40 hover:bg-emerald-500/20"
-                                        )}
-                                        title="Haz clic para cambiar el estado de la conversación"
-                                      >
-                                        <span
-                                          className={cn(
-                                            "h-2 w-2 rounded-full shrink-0 shadow-xs",
-                                            currentStatus === "pendiente"
-                                              ? "bg-amber-500"
-                                              : currentStatus === "cerrada"
-                                              ? "bg-zinc-400"
-                                              : "bg-emerald-500"
-                                          )}
-                                        />
-                                        <span className="capitalize">{currentStatus}</span>
-                                        <IconChevronRight className="h-3 w-3 opacity-60 ml-0.5" />
-                                      </button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="start" className="w-52 text-xs rounded-xl shadow-lg">
-                                      <DropdownMenuItem
-                                        onClick={() => handleToggleSession("status", "abierta")}
-                                        className="cursor-pointer gap-2"
-                                      >
-                                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                                        <span>🟢 Marcar como <strong>Abierta</strong></span>
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={() => handleToggleSession("status", "pendiente")}
-                                        className="cursor-pointer gap-2"
-                                      >
-                                        <span className="h-2 w-2 rounded-full bg-amber-500" />
-                                        <span>🟠 Marcar como <strong>Pendiente</strong></span>
-                                      </DropdownMenuItem>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem
-                                        onClick={() => handleToggleSession("close")}
-                                        className="cursor-pointer gap-2 text-rose-600 focus:text-rose-700"
-                                      >
-                                        <span className="h-2 w-2 rounded-full bg-zinc-400" />
-                                        <span>⚪ <strong>Cerrar Conversación</strong> (Iniciar ciclo nuevo)</span>
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                )
-                              })()}
+                              {/* Estado interactivo único (Abierta / Pendiente / Cerrada) — Sin botón Cerrar redundante */}
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className={cn(
+                                      "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border transition-all cursor-pointer shadow-2xs hover:opacity-90",
+                                      currentStatus === "pendiente"
+                                        ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-400/40"
+                                        : currentStatus === "cerrada"
+                                        ? "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 border-zinc-400/40"
+                                        : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-400/40"
+                                    )}
+                                    title="Haz clic para cambiar el estado del chat"
+                                  >
+                                    <span
+                                      className={cn(
+                                        "h-1.5 w-1.5 rounded-full shrink-0",
+                                        currentStatus === "pendiente"
+                                          ? "bg-amber-500"
+                                          : currentStatus === "cerrada"
+                                          ? "bg-zinc-400"
+                                          : "bg-emerald-500"
+                                      )}
+                                    />
+                                    <span className="capitalize">{currentStatus}</span>
+                                    <IconChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="start" className="w-52 text-xs rounded-xl shadow-lg">
+                                  <DropdownMenuItem
+                                    onClick={() => handleToggleSession("status", "abierta")}
+                                    className="cursor-pointer gap-2"
+                                  >
+                                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                    <span>🟢 Marcar como <strong>Abierta</strong></span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleToggleSession("status", "pendiente")}
+                                    className="cursor-pointer gap-2"
+                                  >
+                                    <span className="h-2 w-2 rounded-full bg-amber-500" />
+                                    <span>🟠 Marcar como <strong>Pendiente</strong></span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => handleToggleSession(currentStatus === "cerrada" ? "reopen" : "close")}
+                                    className="cursor-pointer gap-2 text-rose-600 focus:text-rose-700"
+                                  >
+                                    <span className="h-2 w-2 rounded-full bg-zinc-400" />
+                                    <span>{currentStatus === "cerrada" ? "🔄 Reabrir Conversación" : "⚪ Cerrar Conversación"}</span>
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
 
-                              {isTg ? (
-                                <Badge variant="outline" className="text-[9px] font-mono border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 gap-1">
-                                  <IconBrandTelegram className="h-3 w-3 text-blue-500" /> Telegram ID: {selectedPhone.replace("tg_", "")}
-                                </Badge>
+                            {/* Subtítulo limpio: Número + Sede + Ventana 24h Meta + Live */}
+                            <div className="flex items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 flex-wrap">
+                              <span className="inline-flex items-center gap-1 font-mono">
+                                {isTg ? <IconBrandTelegram className="h-3 w-3 text-blue-500" /> : <IconBrandWhatsapp className="h-3 w-3 text-emerald-600" />}
+                                {isTg ? `Telegram: ${selectedPhone.replace("tg_", "")}` : selectedPhone}
+                              </span>
+                              <span>·</span>
+                              <span>{activeBranch?.name || "Principal"}</span>
+                              <span>·</span>
+
+                              {/* Indicador de Ventana 24h Meta */}
+                              {selectedConv?.careWindow && (
+                                <>
+                                  <span
+                                    className={cn(
+                                      "inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-medium border",
+                                      selectedConv.careWindow.isOpen
+                                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20"
+                                        : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20"
+                                    )}
+                                    title={
+                                      selectedConv.careWindow.isOpen
+                                        ? "Ventana 24h abierta: mensajes libres e ilimitados de servicio"
+                                        : "Ventana 24h expirada: según políticas de Meta, debes enviar una plantilla para reanudar"
+                                    }
+                                  >
+                                    <IconClock className="h-2.5 w-2.5" />
+                                    {selectedConv.careWindow.isOpen ? `24h: ${selectedConv.careWindow.formattedTimeLeft}` : "24h Expirada"}
+                                  </span>
+                                  <span>·</span>
+                                </>
+                              )}
+
+                              {/* Indicador Escribiendo o En vivo */}
+                              {isTyping ? (
+                                <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400 animate-pulse">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
+                                  Escribiendo...
+                                </span>
                               ) : (
-                                <Badge variant="outline" className="text-[9px] font-mono border-zinc-300 dark:border-zinc-700 gap-1">
-                                  <IconBrandWhatsapp className="h-3 w-3 text-emerald-600" /> {selectedPhone}
-                                </Badge>
+                                <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                  En vivo
+                                </span>
                               )}
                             </div>
-                            <p className="text-[11px] text-zinc-500 flex items-center gap-1.5">
-                              <span>Sede: <strong>{activeBranch?.name || "Principal"}</strong></span>
-                              <span>·</span>
-                              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200/60 dark:border-emerald-800/40">
-                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
-                                En vivo (Auto-actualizado)
-                              </span>
-                            </p>
                           </div>
                         </>
                       )
                     })()}
                   </div>
 
-                  {/* Acciones de cabecera */}
+                  {/* Acciones de cabecera minimalistas y limpias */}
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {/* Botón Cerrar / Reabrir estilo referencia exacta */}
-                    {selectedConv.session?.status === "cerrada" ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleToggleSession("reopen")}
-                        className="h-7 text-xs font-semibold rounded-lg gap-1 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 bg-emerald-50/60 dark:bg-emerald-950/40 hover:bg-emerald-100 cursor-pointer shadow-2xs"
-                        title="Reabrir esta conversación para nuevo ciclo"
-                      >
-                        <IconRefresh className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                        Reabrir
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleToggleSession("close")}
-                        className="h-7 text-xs font-semibold rounded-lg gap-1.5 border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer shadow-2xs"
-                        title="Cerrar conversación: el bot no tomará productos de este pedido en la próxima charla"
-                      >
-                        <IconCircleCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                        Cerrar
-                      </Button>
-                    )}
+                    {/* Botón Silenciar / Activar Sonido */}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        const next = !soundEnabled
+                        setSoundEnabled(next)
+                        soundEnabledRef.current = next
+                        if (next) playNotificationSound()
+                        toast.info(next ? "Sonido de mensajes activado" : "Sonido silenciado")
+                      }}
+                      className="h-8 w-8 p-0 rounded-xl text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      title={soundEnabled ? "Silenciar notificaciones sonoras" : "Activar sonido de nuevos mensajes"}
+                    >
+                      {soundEnabled ? (
+                        <IconVolume className="h-4 w-4 text-emerald-600" />
+                      ) : (
+                        <IconVolumeOff className="h-4 w-4 text-zinc-400" />
+                      )}
+                    </Button>
 
+                    {/* Botón Plantilla */}
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => setTemplateModalOpen(true)}
-                      className="h-7 text-xs rounded-lg gap-1 border-zinc-300 dark:border-zinc-700"
+                      className="h-8 text-xs rounded-xl gap-1.5 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+                      title="Enviar plantilla oficial o promoción"
                     >
-                      <IconSpeakerphone className="h-3 w-3" />
-                      Promoción
+                      <IconSpeakerphone className="h-3.5 w-3.5 text-zinc-500" />
+                      <span className="hidden sm:inline">Plantilla</span>
                     </Button>
+
+                    {/* Botón Editar Contacto */}
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={openContactEditor}
-                      className="h-7 text-xs rounded-lg gap-1 border-zinc-300 dark:border-zinc-700"
+                      className="h-8 text-xs rounded-xl gap-1.5 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+                      title="Editar datos del cliente"
                     >
-                      <IconPencil className="h-3 w-3" />
-                      Editar
+                      <IconPencil className="h-3.5 w-3.5 text-zinc-500" />
+                      <span className="hidden sm:inline">Editar</span>
                     </Button>
 
                     {/* Menú de opciones adicionales (Vaciar chat / Eliminar contacto) */}
@@ -1694,17 +1850,24 @@ export default function WhatsAppAgentView() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="h-7 w-7 p-0 rounded-lg text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+                          className="h-8 w-8 p-0 rounded-xl text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
                         >
                           <IconDotsVertical className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-52 text-xs rounded-xl shadow-lg">
+                        <DropdownMenuItem
+                          onClick={() => handleToggleSession(selectedConv.session?.status === "cerrada" ? "reopen" : "close")}
+                          className="cursor-pointer gap-2"
+                        >
+                          <IconRefresh className="h-3.5 w-3.5 text-zinc-500" />
+                          {selectedConv.session?.status === "cerrada" ? "Reabrir Conversación" : "Cerrar Conversación"}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={handleClearChat} className="cursor-pointer gap-2 text-amber-600 focus:text-amber-700">
                           <IconTrash className="h-3.5 w-3.5" />
                           Vaciar Historial del Chat
                         </DropdownMenuItem>
-                        <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={handleDeleteContact} className="cursor-pointer gap-2 text-rose-600 focus:text-rose-700">
                           <IconUserX className="h-3.5 w-3.5" />
                           Eliminar Contacto del CRM
@@ -1714,23 +1877,30 @@ export default function WhatsAppAgentView() {
                   </div>
                 </div>
 
-                {/* Banner de Estado IA en este chat */}
-                <div className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800/80 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-xs shrink-0">
-                  <div className="flex items-center gap-1.5 text-zinc-700 dark:text-zinc-300">
-                    <IconRobot className="h-3.5 w-3.5" />
+                {/* Banner de Estado IA en este chat — Suave y No Intrusivo */}
+                <div className="px-4 py-2 bg-zinc-50 dark:bg-zinc-950/70 border-b border-zinc-200/80 dark:border-zinc-800 flex items-center justify-between text-xs shrink-0">
+                  <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300">
+                    <span className={cn(
+                      "h-2 w-2 rounded-full",
+                      aiActiveForChat[selectedPhone] === false ? "bg-amber-500" : "bg-emerald-500 animate-pulse"
+                    )} />
                     <span className="font-medium text-[11px]">
                       {aiActiveForChat[selectedPhone] === false ? (
-                        <span className="text-zinc-500">IA Pausada para este chat (Atención humana exclusiva)</span>
+                        <span className="text-amber-700 dark:text-amber-300 font-semibold">
+                          Modo Agente Humano activo (IA pausada para este chat)
+                        </span>
                       ) : (
                         <span>
                           Bot IA Activo:{" "}
-                          {config.aiProvider === "openrouter"
-                            ? config.hasOpenRouterKey
-                              ? `OpenRouter (${config.openrouterModel?.split("/")[1] || config.openrouterModel})`
-                              : "Motor Local"
-                            : config.hasDeepSeekKey
-                            ? `DeepSeek (${config.deepseekModel})`
-                            : "Motor Local"}
+                          <strong className="text-zinc-900 dark:text-zinc-100">
+                            {config.aiProvider === "openrouter"
+                              ? config.hasOpenRouterKey
+                                ? `OpenRouter (${config.openrouterModel?.split("/")[1] || config.openrouterModel})`
+                                : "Motor Local"
+                              : config.hasDeepSeekKey
+                              ? `DeepSeek (${config.deepseekModel})`
+                              : "Motor Local"}
+                          </strong>
                           {config.aiProvider === "openrouter" &&
                             (config.openrouterModel === "openrouter/free" || config.openrouterModel?.endsWith(":free")) && (
                               <span
@@ -1748,17 +1918,19 @@ export default function WhatsAppAgentView() {
                       )}
                     </span>
                   </div>
-                  <button
+                  <Button
+                    size="sm"
+                    variant="ghost"
                     onClick={() =>
                       setAiActiveForChat((prev) => ({
                         ...prev,
                         [selectedPhone]: prev[selectedPhone] === false ? true : false,
                       }))
                     }
-                    className="text-[11px] font-semibold underline text-zinc-900 dark:text-zinc-100 cursor-pointer"
+                    className="h-6 px-2 text-[11px] font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg cursor-pointer"
                   >
-                    {aiActiveForChat[selectedPhone] === false ? "Reanudar IA" : "Pausar IA"}
-                  </button>
+                    {aiActiveForChat[selectedPhone] === false ? "▶ Reanudar IA" : "⏸ Pausar IA"}
+                  </Button>
                 </div>
 
                 {/* Alerta visible si la cuota gratuita de OpenRouter está agotada */}
@@ -1864,18 +2036,25 @@ export default function WhatsAppAgentView() {
                             <span>{new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
                           </div>
 
-                          {/* Globo de mensaje */}
+                          {/* Globo de mensaje — Estilo WhatsApp Elegante y Confortable para la Vista */}
                           <div
                             className={cn(
-                              "p-3 rounded-2xl text-xs leading-relaxed shadow-2xs whitespace-pre-line",
+                              "px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed shadow-2xs whitespace-pre-line relative",
                               isCustomer
-                                ? "bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white border border-zinc-200 dark:border-zinc-700 rounded-tl-xs"
+                                ? "bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white border border-zinc-200/90 dark:border-zinc-700/80 rounded-tl-xs"
                                 : isBot
-                                ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 rounded-tr-xs"
-                                : "bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-950 rounded-tr-xs"
+                                ? "bg-emerald-700 text-white dark:bg-emerald-700 dark:text-white rounded-tr-xs border border-emerald-600/30"
+                                : "bg-blue-600 text-white dark:bg-blue-600 dark:text-white rounded-tr-xs border border-blue-500/30"
                             )}
                           >
-                            {m.text}
+                            <div>{m.text}</div>
+                            <div className={cn(
+                              "flex items-center justify-end gap-1 mt-1 text-[9px] font-mono",
+                              isCustomer ? "text-zinc-400" : isBot ? "text-emerald-200" : "text-blue-200"
+                            )}>
+                              <span>{new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                              {!isCustomer && <IconChecks className="h-3 w-3 inline" />}
+                            </div>
                           </div>
 
                           {/* Tarjeta de Orden vinculada */}
@@ -1897,6 +2076,25 @@ export default function WhatsAppAgentView() {
                       )
                     })
                   )}
+
+                  {/* Indicador de "Escribiendo..." con animación de 3 puntos estilo WhatsApp */}
+                  {isTyping && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-white dark:bg-zinc-800 border border-zinc-200/80 dark:border-zinc-700/80 text-zinc-600 dark:text-zinc-300 w-fit text-xs animate-in fade-in duration-200 shadow-2xs mr-auto">
+                      <div className="flex items-center gap-1 px-0.5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:0ms]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:150ms]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:300ms]" />
+                      </div>
+                      <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                        {isTyping === "ia"
+                          ? "OmniPOS IA generando respuesta..."
+                          : isTyping === "agente"
+                          ? "Enviando respuesta..."
+                          : `${selectedConv.client?.name || "Cliente"} está escribiendo...`}
+                      </span>
+                    </div>
+                  )}
+
                   <div ref={chatScrollRef} />
                 </div>
 
@@ -2466,18 +2664,31 @@ export default function WhatsAppAgentView() {
       {/* ========================================================= */}
       {mainTab === "templates" && (
         <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-zinc-950 dark:text-white">Plantillas de Difusión WhatsApp</h2>
               <p className="text-xs text-zinc-500">Envía promociones y recordatorios personalizados con un solo clic.</p>
             </div>
-            <Button
-              onClick={() => handleSendBroadcast(false)}
-              className="rounded-xl h-9 text-xs font-bold bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 gap-1.5"
-            >
-              <IconSpeakerphone className="h-4 w-4" />
-              Enviar Difusión a Todos los Contactos ({conversations.length})
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSyncTemplates}
+                disabled={syncingTemplates}
+                className="rounded-xl h-9 text-xs font-semibold border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 gap-1.5 cursor-pointer shadow-2xs"
+                title="Sincronizar plantillas oficiales aprobadas directamente desde Meta Cloud API"
+              >
+                <IconRefresh className={cn("h-3.5 w-3.5", syncingTemplates && "animate-spin")} />
+                {syncingTemplates ? "Sincronizando..." : "Sincronizar con Meta"}
+              </Button>
+              <Button
+                onClick={() => handleSendBroadcast(false)}
+                className="rounded-xl h-9 text-xs font-bold bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 gap-1.5 shadow-2xs"
+              >
+                <IconSpeakerphone className="h-4 w-4" />
+                Enviar Difusión a Todos ({conversations.length})
+              </Button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -3511,7 +3722,18 @@ export default function WhatsAppAgentView() {
 
           <div className="space-y-3 pt-2">
             <div className="space-y-1">
-              <Label className="text-xs font-semibold">Seleccionar Plantilla</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold">Seleccionar Plantilla</Label>
+                <button
+                  type="button"
+                  onClick={handleSyncTemplates}
+                  disabled={syncingTemplates}
+                  className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <IconRefresh className={cn("h-3 w-3", syncingTemplates && "animate-spin")} />
+                  {syncingTemplates ? "Sincronizando..." : "Sincronizar con Meta"}
+                </button>
+              </div>
               <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
                 <SelectTrigger className="text-xs h-9">
                   <SelectValue placeholder="Selecciona una plantilla" />
@@ -4154,6 +4376,126 @@ export default function WhatsAppAgentView() {
           <DialogFooter className="pt-2">
             <Button variant="outline" size="sm" onClick={() => setHistoryModalOpen(false)}>
               Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Límites y Nueva Política Oficial de Meta WhatsApp Cloud API */}
+      <Dialog open={metaQuotaModalOpen} onOpenChange={setMetaQuotaModalOpen}>
+        <DialogContent className="max-w-lg rounded-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <IconBrandWhatsapp className="h-5 w-5 text-emerald-600" />
+              Nueva Política de Meta: Cobro por Mensaje Entregado
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Monitoreo del paquete mensual de 1.000 mensajes de servicio gratuitos por línea.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3.5 pt-2 text-xs">
+            {/* Tarjeta de Contador 1.000 Mensajes Gratis */}
+            <div className="p-3.5 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  Paquete Mensual Gratuito (Por Línea de WhatsApp)
+                </span>
+                <Badge variant="outline" className="text-[10px] bg-emerald-600 text-white font-bold border-none">
+                  🎁 1.000 Mensajes Gratis
+                </Badge>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs font-semibold">
+                  <span>Mensajes de servicio salientes consumidos:</span>
+                  <span className="font-mono text-emerald-700 dark:text-emerald-300 font-bold">
+                    {metaQuota?.usedThisMonth ?? 0} / {metaQuota?.monthlyLimit ?? 1000} msgs
+                  </span>
+                </div>
+                {/* Progress bar */}
+                <div className="h-2.5 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all duration-500",
+                      (metaQuota?.percentUsed ?? 0) > 90
+                        ? "bg-rose-500"
+                        : (metaQuota?.percentUsed ?? 0) > 75
+                        ? "bg-amber-500"
+                        : "bg-emerald-500"
+                    )}
+                    style={{ width: `${Math.max(3, metaQuota?.percentUsed ?? 0)}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-0.5">
+                  <span>{metaQuota?.remainingFree ?? 1000} mensajes restantes sin costo</span>
+                  <span>{metaQuota?.percentUsed ?? 0}% consumido</span>
+                </div>
+              </div>
+
+              {/* Desglose Bot vs Agente vs Entrantes */}
+              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-emerald-200/60 dark:border-emerald-800/40 text-center text-[10px]">
+                <div className="p-1.5 rounded-lg bg-white/70 dark:bg-zinc-900/60">
+                  <p className="text-zinc-500">🤖 Bot IA</p>
+                  <p className="font-bold text-zinc-900 dark:text-zinc-100 font-mono text-xs">{metaQuota?.botMessagesCount ?? 0}</p>
+                </div>
+                <div className="p-1.5 rounded-lg bg-white/70 dark:bg-zinc-900/60">
+                  <p className="text-zinc-500">👤 Agente</p>
+                  <p className="font-bold text-zinc-900 dark:text-zinc-100 font-mono text-xs">{metaQuota?.agentMessagesCount ?? 0}</p>
+                </div>
+                <div className="p-1.5 rounded-lg bg-emerald-100/70 dark:bg-emerald-900/40">
+                  <p className="text-emerald-700 dark:text-emerald-300 font-semibold">📥 Entrantes</p>
+                  <p className="font-bold text-emerald-800 dark:text-emerald-200 font-mono text-xs">{metaQuota?.customerIncomingCount ?? 0} (Gratis)</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Explicación Detallada de la Nueva Política */}
+            <div className="space-y-2">
+              <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 space-y-1.5">
+                <p className="font-bold text-[11px] text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                  <IconInfoCircle className="h-3.5 w-3.5 text-blue-500" />
+                  📋 ¿Cómo funciona el nuevo esquema por mensaje individual?
+                </p>
+                <ul className="text-[11px] text-zinc-600 dark:text-zinc-400 space-y-1 list-disc pl-4 leading-relaxed">
+                  <li><strong>Los primeros 1.000 mensajes son gratis:</strong> Cada mes calendario, cada número telefónico de tu negocio recibe un paquete de 1.000 mensajes de servicio sin costo.</li>
+                  <li><strong>Cobro desde el mensaje 1.001:</strong> En cuanto envíes el mensaje 1.001 del mes en esa línea, Meta cobrará una tarifa fija por cada mensaje individual entregado.</li>
+                  <li><strong>No son acumulables:</strong> Los mensajes gratuitos que no utilices se pierden y no se transfieren al mes siguiente (se reinician el día 1).</li>
+                  <li><strong>Aplica para humanos y bots:</strong> El consumo corre por igual si el mensaje lo redacta un agente humano o el asistente con IA.</li>
+                </ul>
+              </div>
+
+              <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 space-y-1.5">
+                <p className="font-bold text-[11px] text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                  <IconShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                  💰 Excepciones: ¿Qué sigue siendo 100% Gratis?
+                </p>
+                <ul className="text-[11px] text-zinc-600 dark:text-zinc-400 space-y-1 list-disc pl-4 leading-relaxed">
+                  <li><strong>Mensajes entrantes:</strong> Todo lo que tus clientes te escriban es 100% gratuito siempre.</li>
+                  <li><strong>Anuncios Click-to-WhatsApp:</strong> Si el cliente llega desde un botón de anuncio en Facebook o Instagram, toda la conversación de las siguientes 72 horas es completamente gratis.</li>
+                  <li><strong>App de WhatsApp tradicional:</strong> No afecta a la app móvil de WhatsApp Business del celular, solo a plataformas masivas conectadas por API oficial.</li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Enlace oficial al panel de Meta */}
+            <div className="pt-1 flex items-center justify-between text-[11px] text-zinc-500">
+              <span>El cupo se renueva el 1º de cada mes.</span>
+              <a
+                href="https://business.facebook.com/wa/manage/phone-numbers/"
+                target="_blank"
+                rel="noreferrer"
+                className="text-emerald-600 dark:text-emerald-400 font-semibold hover:underline inline-flex items-center gap-1"
+              >
+                Ver en Meta Manager <IconExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+          </div>
+
+          <DialogFooter className="pt-2">
+            <Button variant="outline" size="sm" onClick={() => setMetaQuotaModalOpen(false)}>
+              Entendido
             </Button>
           </DialogFooter>
         </DialogContent>

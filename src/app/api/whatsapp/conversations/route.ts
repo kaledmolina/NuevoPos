@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { requireBranchAccess } from "@/lib/branch"
 import type { ClientAiUsage } from "@/lib/ai-token-tracker"
+import { getMetaMonthlyConversations, calculateCareWindow, CareWindowStatus } from "@/lib/meta-whatsapp-policy"
 
 export const dynamic = "force-dynamic"
 
@@ -14,6 +15,7 @@ export interface ConversationItem {
     closedAt: string | null
     closedReason?: string | null
   } | null
+  careWindow?: CareWindowStatus
   aiUsage?: ClientAiUsage | null
   client: {
     id: string
@@ -260,10 +262,13 @@ export async function GET(req: NextRequest) {
         : null
 
       const isTelegram = phone.startsWith("tg_") || (lastMsg as any)?.channel === "telegram"
+      const lastCustomerMsg = data.messages.find((m) => m.sender === "customer")
+      const careWindow = isTelegram ? undefined : calculateCareWindow(lastCustomerMsg?.createdAt)
 
       conversations.push({
         phone,
         channel: isTelegram ? "telegram" : "whatsapp",
+        careWindow,
         client: data.client
           ? {
               id: data.client.id,
@@ -307,10 +312,13 @@ export async function GET(req: NextRequest) {
       return timeB - timeA
     })
 
+    const metaQuota = await getMetaMonthlyConversations(branchId)
+
     return NextResponse.json({
       ok: true,
       total: conversations.length,
       unreadTotal: conversations.reduce((acc, c) => acc + c.unreadCount, 0),
+      metaQuota,
       conversations,
     })
   } catch (error) {

@@ -92,9 +92,12 @@ export async function POST(req: NextRequest) {
         messageId: msg.id,
       })
 
-      // Despacho a Meta API si está configurada
-      const token = process.env.WHATSAPP_ACCESS_TOKEN
-      const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID
+      // Despacho a Meta API si está configurada (prioriza credenciales de la sede activa)
+      const config = branchId
+        ? await db.whatsAppConfig.findUnique({ where: { branchId } })
+        : await db.whatsAppConfig.findFirst()
+      const token = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
+      const phoneId = config?.metaPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
       if (token && phoneId) {
         fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
           method: "POST",
