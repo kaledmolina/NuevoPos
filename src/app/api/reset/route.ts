@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireSuperAdmin, hashPin, getSession, logAudit } from "@/lib/auth"
+import { requireSuperAdmin, hashPin, getSession, logAudit, requireNotDemo } from "@/lib/auth"
 import { getBackupDirectory, isMysql } from "@/lib/db"
 import fs from "fs"
 import path from "path"
@@ -13,6 +13,9 @@ export const runtime = "nodejs"
 // sus sedes demo, productos, ventas, compras, cajas y los usuarios demo (admin y vendedor).
 // GARANTÍA: No toca ninguna información de usuarios reales, empresas reales ni Superadmin.
 export async function POST(req: NextRequest) {
+  const demoBlocked = requireNotDemo(req)
+  if (demoBlocked) return demoBlocked
+
   const denied = requireSuperAdmin(req)
   if (denied) return denied
   const session = getSession(req)

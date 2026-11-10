@@ -29,7 +29,6 @@ export interface SaleCreditInfo {
 }
 
 // Helper para calcular deuda real, abonos y estado de créditos
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function enrichSalesWithCredit(sales: any[]) {
   // Agrupar ventas a crédito por cliente
   const clientSalesMap = new Map<string, typeof sales>()
@@ -45,7 +44,6 @@ function enrichSalesWithCredit(sales: any[]) {
     const sortedSales = [...cSales].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
     const account = sortedSales[0]?.client?.creditAccount
     const movements = account?.movements || []
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const abonos = movements.filter((m: any) => m.type === "abono")
 
     // Estado de pagos por venta
@@ -58,7 +56,6 @@ function enrichSalesWithCredit(sales: any[]) {
     }
 
     // 1. Abonos específicos con saleId
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const unassignedAbonos: any[] = []
     for (const ab of abonos) {
       if (ab.saleId && saleDebt.has(ab.saleId)) {

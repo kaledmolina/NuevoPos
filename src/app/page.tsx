@@ -8,6 +8,7 @@ import { apiFetch } from "@/lib/api"
 import { ROLE_CONFIG, canAccessView, defaultViewFor, type ViewKey } from "@/lib/permissions"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
 import {
   Avatar, AvatarFallback,
 } from "@/components/ui/avatar"
@@ -90,50 +91,260 @@ import { ThemeToggle } from "@/components/theme-toggle"
 interface NavItem { key: ViewKey; label: string; icon: React.ElementType }
 interface NavGroup { label: string; items: NavItem[] }
 
+interface SidebarNavProps {
+  collapsed?: boolean
+  storeName: string
+  storeRubro: string
+  cashOpen: boolean
+  role: import("@/lib/permissions").Role
+  perms: import("@/lib/permissions").RoleConfig
+  view: ViewKey
+  cartCount: number
+  allowedGroups: NavGroup[]
+  collapsedGroups: Record<string, boolean>
+  toggleGroup: (label: string) => void
+  handleSetView: (v: ViewKey) => void
+  handleLogout: () => void
+  userName: string | null
+  userEmail: string | null
+  tenantOwnerName: string | null
+  tenantOwnerEmail: string | null
+  seeding: boolean
+  initials: string
+}
+
 const NAV: NavGroup[] = [
   {
-    label: "Principal",
+    label: "🏠 Principal",
     items: [
       { key: "dashboard", label: "Panel", icon: IconLayoutDashboard },
       { key: "pos", label: "Punto de Venta", icon: IconShoppingCart },
     ],
   },
   {
-    label: "Inventario",
+    label: "📦 Inventario",
     items: [
       { key: "products", label: "Productos", icon: IconBoxSeam },
       { key: "purchases", label: "Compras", icon: IconTruck },
-    ],
-  },
-  {
-    label: "Comercial",
-    items: [
-      { key: "orders", label: "Pedidos & Domicilios", icon: IconTruckDelivery },
-      { key: "driver_settlement", label: "Mi Cuadre de Caja", icon: IconCalculator },
-      { key: "whatsapp", label: "WhatsApp IA", icon: IconBrandWhatsapp },
-      { key: "sales", label: "Ventas", icon: IconReceipt2 },
-      { key: "clients", label: "Clientes", icon: IconUsers },
       { key: "suppliers", label: "Proveedores", icon: IconBuildingStore },
     ],
   },
   {
-    label: "Finanzas",
+    label: "🛒 Ventas",
     items: [
-      { key: "cash", label: "Caja y Arqueo", icon: IconWallet },
-      { key: "finance", label: "Ingresos/Egresos", icon: IconArrowsExchange },
-      { key: "credit", label: "Cuentas por Cobrar", icon: IconCreditCard },
+      { key: "orders", label: "Pedidos & Domicilios", icon: IconTruckDelivery },
+      { key: "sales", label: "Ventas", icon: IconReceipt2 },
+      { key: "clients", label: "Clientes", icon: IconUsers },
+      { key: "credit", label: "Créditos", icon: IconCreditCard },
     ],
   },
   {
-    label: "Sistema",
+    label: "💰 Finanzas",
     items: [
+      { key: "cash", label: "Caja y Arqueo", icon: IconWallet },
+      { key: "finance", label: "Ingresos/Egresos", icon: IconArrowsExchange },
       { key: "reports", label: "Reportes", icon: IconChartBar },
+    ],
+  },
+  {
+    label: "⚙️ Sistema",
+    items: [
       { key: "personal", label: "Personal & Sedes", icon: IconUsers },
+      { key: "whatsapp", label: "WhatsApp IA", icon: IconBrandWhatsapp },
       { key: "settings", label: "Configuración", icon: IconSettings },
-      { key: "api_docs", label: "Documentación API", icon: IconCode },
+      { key: "api_docs", label: "API Docs", icon: IconCode },
+      { key: "driver_settlement", label: "Mi Cuadre de Caja", icon: IconCalculator },
     ],
   },
 ]
+
+function SidebarNav({
+  collapsed = false,
+  storeName,
+  storeRubro,
+  cashOpen,
+  role,
+  perms,
+  view,
+  cartCount,
+  allowedGroups,
+  collapsedGroups,
+  toggleGroup,
+  handleSetView,
+  handleLogout,
+  userName,
+  tenantOwnerName,
+  tenantOwnerEmail,
+  seeding,
+  initials,
+}: SidebarNavProps) {
+  return (
+    <div className="flex h-full w-full flex-col overflow-hidden bg-sidebar select-none">
+      {/* Header del comercio */}
+      <div className={cn("flex items-center border-b border-sidebar-border/70 bg-sidebar shrink-0", collapsed ? "justify-center p-3" : "gap-3 px-4 py-3.5")}>
+        <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 border border-border/60 overflow-hidden shrink-0 shadow-xs ring-1 ring-primary/20">
+          <Image src="/logo.svg" alt="OmniPOS Logo" width={40} height={40} className="h-full w-full object-cover" priority />
+        </div>
+        {!collapsed && (
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold text-sidebar-foreground truncate tracking-tight" title={storeName}>{storeName}</p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className={cn("inline-block w-2 h-2 rounded-full shrink-0", cashOpen ? "bg-zinc-950 dark:bg-white" : "bg-muted-foreground/40")} />
+              <p className="text-[11px] font-medium text-muted-foreground truncate">
+                {role === "domiciliario" ? "Portal de Repartidores" : role === "cliente" ? "Portal de Clientes" : `${getRubroLabel(storeRubro)} · ${cashOpen ? "Caja abierta" : "Caja cerrada"}`}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Navegación */}
+      <nav data-tour="sidebar-nav" className={cn("flex-1 overflow-y-auto scroll-thin space-y-2", collapsed ? "px-2 py-3" : "px-3 py-3")}>
+        {allowedGroups.map((group) => {
+          const isCollapsed = !!collapsedGroups[group.label]
+          const hasActiveItem = group.items.some((it) => it.key === view)
+
+          if (collapsed) {
+            return (
+              <div key={group.label} className="space-y-1">
+                <div className="my-1.5 mx-1"><Separator /></div>
+                {group.items.map((item) => {
+                  const Icon = item.icon
+                  const active = view === item.key
+                  return (
+                    <motion.button
+                      key={item.key}
+                      data-tour={`nav-${item.key}`}
+                      onClick={() => handleSetView(item.key)}
+                      whileTap={{ scale: 0.96 }}
+                      title={item.label}
+                      className={cn(
+                        "relative w-full flex items-center justify-center rounded-xl p-2.5 text-sm transition-colors group cursor-pointer",
+                        active ? "text-primary-foreground font-bold" : "text-sidebar-foreground/75 hover:text-sidebar-foreground hover:bg-sidebar-accent/70 font-medium"
+                      )}
+                    >
+                      {active && (
+                        <motion.div layoutId="sidebar-active-pill" className="absolute inset-0 rounded-xl bg-primary shadow-xs shadow-primary/25" transition={{ type: "spring", stiffness: 450, damping: 32 }} />
+                      )}
+                      <Icon className={cn("h-5 w-5 shrink-0 relative z-10 transition-transform group-hover:scale-105", active ? "text-primary-foreground stroke-[2.3]" : "text-muted-foreground stroke-[1.8]")} />
+                      {item.key === "pos" && cartCount > 0 && (
+                        <span className="absolute top-1 right-1 z-20 flex h-4 min-w-4 items-center justify-center rounded-full text-[9px] font-black bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 shadow-xs px-1">{cartCount}</span>
+                      )}
+                    </motion.button>
+                  )
+                })}
+              </div>
+            )
+          }
+
+          return (
+            <div key={group.label} className="space-y-0.5">
+              <Separator className="mb-1 opacity-60" />
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.label)}
+                className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80 hover:text-foreground hover:bg-sidebar-accent/50 rounded-lg transition-colors group select-none cursor-pointer"
+                title={isCollapsed ? `Expandir ${group.label}` : `Colapsar ${group.label}`}
+              >
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="truncate">{group.label}</span>
+                  {isCollapsed && hasActiveItem && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" title="Sección activa adentro" />
+                  )}
+                </div>
+                <div className="flex items-center gap-1 text-muted-foreground/60 group-hover:text-foreground">
+                  <span className="text-[9px] font-medium opacity-0 group-hover:opacity-100 transition-opacity hidden sm:inline">{isCollapsed ? "Mostrar" : "Ocultar"}</span>
+                  <IconChevronDown className={cn("h-3.5 w-3.5 transition-transform duration-200", isCollapsed ? "-rotate-90 text-muted-foreground/50" : "rotate-0 text-muted-foreground/80")} />
+                </div>
+              </button>
+
+              <AnimatePresence initial={false}>
+                {!isCollapsed && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.18, ease: "easeInOut" }}
+                    className="overflow-hidden space-y-0.5 pt-0.5"
+                  >
+                    {group.items.map((item) => {
+                      const Icon = item.icon
+                      const active = view === item.key
+                      return (
+                        <motion.button
+                          key={item.key}
+                          data-tour={`nav-${item.key}`}
+                          onClick={() => handleSetView(item.key)}
+                          whileTap={{ scale: 0.96 }}
+                          className={cn(
+                            "relative w-full flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors text-left group cursor-pointer",
+                            active ? "text-primary-foreground font-bold border-l-2 border-emerald-500" : "text-sidebar-foreground/75 hover:text-sidebar-foreground hover:bg-sidebar-accent/70 font-medium"
+                          )}
+                        >
+                          {active && (
+                            <motion.div layoutId="sidebar-active-pill" className="absolute inset-0 rounded-xl bg-primary shadow-xs shadow-primary/25" transition={{ type: "spring", stiffness: 450, damping: 32 }} />
+                          )}
+                          <Icon className={cn("h-4 w-4 shrink-0 relative z-10 transition-transform group-hover:scale-105", active ? "text-primary-foreground stroke-[2.3]" : "text-muted-foreground stroke-[1.8]")} />
+                          <span className="truncate relative z-10 flex-1">{item.label}</span>
+                          {item.key === "pos" && cartCount > 0 && (
+                            <span className={cn("relative z-10 flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold px-1.5 shadow-xs", active ? "bg-white text-primary font-black" : "bg-primary text-primary-foreground")}>{cartCount}</span>
+                          )}
+                        </motion.button>
+                      )
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )
+        })}
+      </nav>
+
+      {/* Footer del sidebar */}
+      {collapsed ? (
+        <div className="border-t border-sidebar-border/70 p-2 space-y-2 bg-sidebar shrink-0 flex flex-col items-center">
+          <Avatar className="h-8 w-8 shrink-0" title={`${userName} (${perms?.label ?? role})`}>
+            <AvatarFallback className={cn("text-xs font-bold", role === "admin" ? "bg-primary text-primary-foreground" : "bg-slate-700 text-white")}>{initials}</AvatarFallback>
+          </Avatar>
+          <ThemeToggle variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" />
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg active:scale-[0.96]" onClick={handleLogout} title="Cerrar sesión" disabled={seeding}>
+            <IconLogout className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
+        <div className="border-t border-sidebar-border/70 p-3 space-y-2 bg-sidebar shrink-0">
+          <div className="px-2.5 py-2 rounded-xl bg-sidebar-accent/60 text-sidebar-foreground space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <Avatar className="h-7 w-7 shrink-0">
+                  <AvatarFallback className={cn("text-[11px] font-bold", role === "admin" ? "bg-primary text-primary-foreground" : "bg-slate-700 text-white")}>{initials}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold truncate text-sidebar-foreground">{userName}</p>
+                  <p className="text-[10px] text-muted-foreground capitalize">{perms?.label ?? role}</p>
+                </div>
+              </div>
+              <ThemeToggle variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground" />
+            </div>
+            {(tenantOwnerEmail || tenantOwnerName) && role !== "superadmin" && (
+              <div className="pt-1.5 border-t border-sidebar-border/50 text-[10px] text-muted-foreground leading-tight">
+                <span className="text-[9px] uppercase font-bold text-muted-foreground/70 block">Pertenece a:</span>
+                <p className="font-semibold text-sidebar-foreground truncate">{tenantOwnerName || "Admin Principal"}</p>
+                <p className="text-primary truncate flex items-center gap-1 mt-0.5 font-medium">
+                  <IconMail className="h-2.5 w-2.5 shrink-0" />
+                  {tenantOwnerEmail}
+                </p>
+              </div>
+            )}
+          </div>
+          <Button variant="ghost" size="sm" className="w-full justify-start text-muted-foreground hover:text-foreground hover:bg-sidebar-accent text-xs h-8 rounded-lg active:scale-[0.96]" onClick={handleLogout} disabled={seeding}>
+            <IconLogout className="h-3.5 w-3.5 mr-2 shrink-0 text-muted-foreground" /> Cerrar sesión
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function getRubroIcon(rubro: string) {
   switch (rubro?.toLowerCase()) {
@@ -190,6 +401,8 @@ export default function Home() {
   const tenantName = useAppStore((s) => s.tenantName)
   const tenantOwnerName = useAppStore((s) => s.tenantOwnerName)
   const tenantOwnerEmail = useAppStore((s) => s.tenantOwnerEmail)
+  const isDemo = useAppStore((s) => s.isDemo)
+  const [demoBannerDismissed, setDemoBannerDismissed] = useState(false)
 
   // Sedes autorizadas para el usuario activo
 
@@ -450,248 +663,13 @@ export default function Home() {
     sales: { title: "Historial de ventas", subtitle: "Consultas, comprobantes y anulación de ventas" },
     cash: { title: "Caja y arqueo", subtitle: "Apertura, cierre y cuadre de turnos" },
     finance: { title: "Ingresos y egresos", subtitle: "Control de movimientos financieros y gastos" },
-    credit: { title: "Cuentas por cobrar", subtitle: "Créditos otorgados y abonos de clientes" },
+    credit: { title: "Créditos y Cuentas por Cobrar", subtitle: "Créditos otorgados y abonos de clientes" },
     reports: { title: "Reportes y estadísticas", subtitle: "Análisis de ventas, utilidad y rendimiento" },
     personal: { title: "Personal y Sedes", subtitle: "Gestión de colaboradores, credenciales PIN y sucursales físicas" },
     settings: { title: "Configuración del sistema", subtitle: "Datos de la tienda, seguridad, backups y reseteo" },
     whatsapp: { title: "Agente IA WhatsApp", subtitle: "Atención comercial 24/7, consultas de catálogo y pedidos a domicilio automáticos" },
     api_docs: { title: "Portal de Desarrolladores & API REST", subtitle: "Documentación completa de endpoints, autenticación Bearer y guías para clientes y repartidores" },
   }
-
-  const NavContent = ({ collapsed = false }: { collapsed?: boolean }) => (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-sidebar select-none">
-      {/* Header del comercio */}
-      <div className={cn("flex items-center border-b border-sidebar-border/70 bg-sidebar shrink-0", collapsed ? "justify-center p-3" : "gap-3 px-4 py-3.5")}>
-        <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 border border-border/60 overflow-hidden shrink-0 shadow-xs ring-1 ring-primary/20">
-          <Image
-            src="/logo.svg"
-            alt="OmniPOS Logo"
-            width={40}
-            height={40}
-            className="h-full w-full object-cover"
-            priority
-          />
-        </div>
-        {!collapsed && (
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-bold text-sidebar-foreground truncate tracking-tight" title={storeName}>{storeName}</p>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className={cn("inline-block w-2 h-2 rounded-full shrink-0", cashOpen ? "bg-zinc-950 dark:bg-white" : "bg-muted-foreground/40")} />
-              <p className="text-[11px] font-medium text-muted-foreground truncate">
-                {role === "domiciliario"
-                  ? "Portal de Repartidores"
-                  : role === "cliente"
-                  ? "Portal de Clientes"
-                  : `${getRubroLabel(storeRubro)} · ${cashOpen ? "Caja abierta" : "Caja cerrada"}`}
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Menú de navegación con efecto acordeón animado y contraste ultra-nítido 2026 */}
-      <nav data-tour="sidebar-nav" className={cn("flex-1 overflow-y-auto scroll-thin space-y-2", collapsed ? "px-2 py-3" : "px-3 py-3")}>
-        {allowedGroups.map((group) => {
-          const isCollapsed = !!collapsedGroups[group.label]
-          const hasActiveItem = group.items.some((it) => it.key === view)
-
-          if (collapsed) {
-            return (
-              <div key={group.label} className="space-y-1">
-                <div className="my-1.5 border-t border-sidebar-border/60 mx-1" />
-                {group.items.map((item) => {
-                  const Icon = item.icon
-                  const active = view === item.key
-                  return (
-                    <motion.button
-                      key={item.key}
-                      data-tour={`nav-${item.key}`}
-                      onClick={() => handleSetView(item.key)}
-                      whileTap={{ scale: 0.96 }}
-                      title={item.label}
-                      className={cn(
-                        "relative w-full flex items-center justify-center rounded-xl p-2.5 text-sm transition-colors group cursor-pointer",
-                        active
-                          ? "text-primary-foreground font-bold"
-                          : "text-sidebar-foreground/75 hover:text-sidebar-foreground hover:bg-sidebar-accent/70 font-medium"
-                      )}
-                    >
-                      {active && (
-                        <motion.div
-                          layoutId="sidebar-active-pill"
-                          className="absolute inset-0 rounded-xl bg-primary shadow-xs shadow-primary/25"
-                          transition={{ type: "spring", stiffness: 450, damping: 32 }}
-                        />
-                      )}
-                      <Icon className={cn(
-                        "h-5 w-5 shrink-0 relative z-10 transition-transform group-hover:scale-105",
-                        active ? "text-primary-foreground stroke-[2.3]" : "text-muted-foreground stroke-[1.8]"
-                      )} />
-                      {item.key === "pos" && cartCount > 0 && (
-                        <span className="absolute top-1 right-1 z-20 flex h-4 min-w-4 items-center justify-center rounded-full text-[9px] font-black bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 shadow-xs px-1">
-                          {cartCount}
-                        </span>
-                      )}
-                    </motion.button>
-                  )
-                })}
-              </div>
-            )
-          }
-
-          return (
-            <div key={group.label} className="space-y-0.5">
-              {/* Cabecera del Grupo con botón interactivo de Acordeón */}
-              <button
-                type="button"
-                onClick={() => toggleGroup(group.label)}
-                className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80 hover:text-foreground hover:bg-sidebar-accent/50 rounded-lg transition-colors group select-none cursor-pointer"
-                title={isCollapsed ? `Expandir ${group.label}` : `Colapsar ${group.label}`}
-              >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="truncate">{group.label}</span>
-                  {/* Indicador pulsante si el grupo está cerrado pero adentro está la sección actual */}
-                  {isCollapsed && hasActiveItem && (
-                    <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" title="Sección activa adentro" />
-                  )}
-                </div>
-
-                <div className="flex items-center gap-1 text-muted-foreground/60 group-hover:text-foreground">
-                  <span className="text-[9px] font-medium opacity-0 group-hover:opacity-100 transition-opacity hidden sm:inline">
-                    {isCollapsed ? "Mostrar" : "Ocultar"}
-                  </span>
-                  <IconChevronDown
-                    className={cn(
-                      "h-3.5 w-3.5 transition-transform duration-200",
-                      isCollapsed ? "-rotate-90 text-muted-foreground/50" : "rotate-0 text-muted-foreground/80"
-                    )}
-                  />
-                </div>
-              </button>
-
-              {/* Contenido colapsable con animación suave */}
-              <AnimatePresence initial={false}>
-                {!isCollapsed && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.18, ease: "easeInOut" }}
-                    className="overflow-hidden space-y-0.5 pt-0.5"
-                  >
-                    {group.items.map((item) => {
-                      const Icon = item.icon
-                      const active = view === item.key
-                      return (
-                        <motion.button
-                          key={item.key}
-                          data-tour={`nav-${item.key}`}
-                          onClick={() => handleSetView(item.key)}
-                          whileTap={{ scale: 0.96 }}
-                          className={cn(
-                            "relative w-full flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors text-left group cursor-pointer",
-                            active
-                              ? "text-primary-foreground font-bold"
-                              : "text-sidebar-foreground/75 hover:text-sidebar-foreground hover:bg-sidebar-accent/70 font-medium"
-                          )}
-                        >
-                          {/* Active Background Pill Solid Animation */}
-                          {active && (
-                            <motion.div
-                              layoutId="sidebar-active-pill"
-                              className="absolute inset-0 rounded-xl bg-primary shadow-xs shadow-primary/25"
-                              transition={{ type: "spring", stiffness: 450, damping: 32 }}
-                            />
-                          )}
-
-                          <Icon className={cn(
-                            "h-4 w-4 shrink-0 relative z-10 transition-transform group-hover:scale-105",
-                            active ? "text-primary-foreground stroke-[2.3]" : "text-muted-foreground stroke-[1.8]"
-                          )} />
-                          <span className="truncate relative z-10 flex-1">{item.label}</span>
-
-                          {/* Badge para el carrito POS */}
-                          {item.key === "pos" && cartCount > 0 && (
-                            <span className={cn(
-                              "relative z-10 flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold px-1.5 shadow-xs",
-                              active ? "bg-white text-primary font-black" : "bg-primary text-primary-foreground"
-                            )}>
-                              {cartCount}
-                            </span>
-                          )}
-                        </motion.button>
-                      )
-                    })}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          )
-        })}
-      </nav>
-
-      {/* Footer del sidebar */}
-      {collapsed ? (
-        <div className="border-t border-sidebar-border/70 p-2 space-y-2 bg-sidebar shrink-0 flex flex-col items-center">
-          <Avatar className="h-8 w-8 shrink-0" title={`${userName} (${perms?.label ?? role})`}>
-            <AvatarFallback className={cn("text-xs font-bold", role === "admin" ? "bg-primary text-primary-foreground" : "bg-slate-700 text-white")}>
-              {initials}
-            </AvatarFallback>
-          </Avatar>
-          <ThemeToggle variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg active:scale-[0.96]"
-            onClick={handleLogout}
-            title="Cerrar sesión"
-            disabled={seeding}
-          >
-            <IconLogout className="h-4 w-4" />
-          </Button>
-        </div>
-      ) : (
-        <div className="border-t border-sidebar-border/70 p-3 space-y-2 bg-sidebar shrink-0">
-          <div className="px-2.5 py-2 rounded-xl bg-sidebar-accent/60 text-sidebar-foreground space-y-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                <Avatar className="h-7 w-7 shrink-0">
-                  <AvatarFallback className={cn("text-[11px] font-bold", role === "admin" ? "bg-primary text-primary-foreground" : "bg-slate-700 text-white")}>
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold truncate text-sidebar-foreground">{userName}</p>
-                  <p className="text-[10px] text-muted-foreground capitalize">{perms?.label ?? role}</p>
-                </div>
-              </div>
-              <ThemeToggle variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground" />
-            </div>
-
-            {(tenantOwnerEmail || tenantOwnerName) && role !== "superadmin" && (
-              <div className="pt-1.5 border-t border-sidebar-border/50 text-[10px] text-muted-foreground leading-tight">
-                <span className="text-[9px] uppercase font-bold text-muted-foreground/70 block">Pertenece a:</span>
-                <p className="font-semibold text-sidebar-foreground truncate">{tenantOwnerName || "Admin Principal"}</p>
-                <p className="text-primary truncate flex items-center gap-1 mt-0.5 font-medium">
-                  <IconMail className="h-2.5 w-2.5 shrink-0" />
-                  {tenantOwnerEmail}
-                </p>
-              </div>
-            )}
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start text-muted-foreground hover:text-foreground hover:bg-sidebar-accent text-xs h-8 rounded-lg active:scale-[0.96]"
-            onClick={handleLogout}
-            disabled={seeding}
-          >
-            <IconLogout className="h-3.5 w-3.5 mr-2 shrink-0 text-muted-foreground" /> Cerrar sesión
-          </Button>
-        </div>
-      )}
-    </div>
-  )
 
   const meta = TITLES[view] || { title: "Sistema POS", subtitle: "Gestión de punto de venta" }
   const initials = (userName ?? "?").slice(0, 2).toUpperCase()
@@ -703,14 +681,53 @@ export default function Home() {
         "hidden lg:flex flex-col shrink-0 bg-sidebar border-r border-sidebar-border h-screen overflow-hidden shadow-xs transition-[width] duration-200 ease-in-out",
         desktopCollapsed ? "w-[68px] min-w-[68px] max-w-[68px]" : "w-64 min-w-[16rem] max-w-[16rem]"
       )}>
-        <NavContent collapsed={desktopCollapsed} />
+        <SidebarNav
+          collapsed={desktopCollapsed}
+          storeName={storeName}
+          storeRubro={storeRubro}
+          cashOpen={cashOpen}
+          role={role}
+          perms={perms}
+          view={view}
+          cartCount={cartCount}
+          allowedGroups={allowedGroups}
+          collapsedGroups={collapsedGroups}
+          toggleGroup={toggleGroup}
+          handleSetView={handleSetView}
+          handleLogout={handleLogout}
+          userName={userName}
+          userEmail={userEmail}
+          tenantOwnerName={tenantOwnerName}
+          tenantOwnerEmail={tenantOwnerEmail}
+          seeding={seeding}
+          initials={initials}
+        />
       </aside>
 
       {/* Sidebar móvil (drawer) */}
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
         <SheetContent side="left" className="w-72 p-0 bg-sidebar border-r border-sidebar-border">
           <SheetTitle className="sr-only">Menú de Navegación</SheetTitle>
-          <NavContent />
+          <SidebarNav
+            storeName={storeName}
+            storeRubro={storeRubro}
+            cashOpen={cashOpen}
+            role={role}
+            perms={perms}
+            view={view}
+            cartCount={cartCount}
+            allowedGroups={allowedGroups}
+            collapsedGroups={collapsedGroups}
+            toggleGroup={toggleGroup}
+            handleSetView={handleSetView}
+            handleLogout={handleLogout}
+            userName={userName}
+            userEmail={userEmail}
+            tenantOwnerName={tenantOwnerName}
+            tenantOwnerEmail={tenantOwnerEmail}
+            seeding={seeding}
+            initials={initials}
+          />
         </SheetContent>
       </Sheet>
 
@@ -930,6 +947,26 @@ export default function Home() {
             </DropdownMenuContent>
           </DropdownMenu>
         </header>
+
+        {/* Banner de modo demo */}
+        {isDemo && !demoBannerDismissed && (
+          <div className="sticky top-0 z-20 flex items-center justify-between gap-3 bg-amber-400 dark:bg-amber-500 px-4 py-2 text-amber-950 text-xs sm:text-sm font-medium shadow-sm shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <IconAlertTriangle className="h-4 w-4 shrink-0" />
+              <span className="truncate">
+                ⚠️ Modo demo activo — Algunas acciones están deshabilitadas para proteger la integridad del sistema.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDemoBannerDismissed(true)}
+              className="shrink-0 rounded-md p-1 hover:bg-amber-500/40 dark:hover:bg-amber-600/40 transition-colors"
+              aria-label="Cerrar aviso de modo demo"
+            >
+              <IconX className="h-4 w-4" />
+            </button>
+          </div>
+        )}
 
         {/* Contenido Principal con animación fluida entre vistas */}
         <main className={cn("flex-1 min-w-0 overflow-y-auto overflow-x-hidden scroll-thin", view === "pos" ? "pb-0" : "pb-20 lg:pb-0")}>

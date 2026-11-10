@@ -56,6 +56,7 @@ interface AppState {
   userName: string | null
   userEmail: string | null
   isPrimaryAdmin: boolean
+  isDemo: boolean
   tenantId: string | null
   tenantName: string | null
   tenantOwnerName: string | null
@@ -133,6 +134,7 @@ export const useAppStore = create<AppState>()(
       userName: null,
       userEmail: null,
       isPrimaryAdmin: false,
+      isDemo: false,
       tenantId: null,
       tenantName: null,
       tenantOwnerName: null,
@@ -193,6 +195,7 @@ export const useAppStore = create<AppState>()(
                 role: Role
                 email?: string | null
                 isPrimary?: boolean
+                isDemo?: boolean
                 tenantId?: string | null
                 tenantName?: string | null
                 tenantOwnerName?: string | null
@@ -228,6 +231,7 @@ export const useAppStore = create<AppState>()(
               userName: authData.user.name,
               userEmail: authData.user.email ?? null,
               isPrimaryAdmin: Boolean(authData.user.isPrimary),
+              isDemo: Boolean(authData.user.isDemo),
               tenantId: authData.user.tenantId ?? null,
               tenantName: authData.user.tenantName ?? null,
               tenantOwnerName: authData.user.tenantOwnerName ?? null,
@@ -249,6 +253,7 @@ export const useAppStore = create<AppState>()(
           userName: null,
           userEmail: null,
           isPrimaryAdmin: false,
+          isDemo: false,
           tenantId: null,
           tenantName: null,
           tenantOwnerName: null,
@@ -261,6 +266,7 @@ export const useAppStore = create<AppState>()(
       login: async (name, pin) => {
         const data = await apiFetch<{
           ok: boolean
+          isDemo?: boolean
           user: {
             id?: string
             name: string
@@ -296,6 +302,7 @@ export const useAppStore = create<AppState>()(
           userName: data.user.name,
           userEmail: data.user.email ?? null,
           isPrimaryAdmin: Boolean(data.user.isPrimary),
+          isDemo: Boolean(data.isDemo),
           tenantId: data.user.tenantId ?? null,
           tenantName: data.user.tenantName ?? null,
           tenantOwnerName: data.user.tenantOwnerName ?? null,
@@ -329,6 +336,7 @@ export const useAppStore = create<AppState>()(
           userName: null,
           userEmail: null,
           isPrimaryAdmin: false,
+          isDemo: false,
           tenantId: null,
           tenantName: null,
           tenantOwnerName: null,

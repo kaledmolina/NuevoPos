@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireAdmin, getSession, logAudit } from "@/lib/auth"
+import { requireAdmin, getSession, logAudit, requireNotDemo } from "@/lib/auth"
 import { getBackupDirectory, isMysql } from "@/lib/db"
 import fs from "fs"
 import path from "path"
@@ -98,6 +98,9 @@ export async function GET(req: NextRequest) {
 // - Para Admin: exporta ÚNICAMENTE los datos de sus tiendas/sedes (JSON estructurado)
 // - Para Superadmin: genera el respaldo global MySQL en formato estructurado (.json)
 export async function POST(req: NextRequest) {
+  const demoBlocked = requireNotDemo(req)
+  if (demoBlocked) return demoBlocked
+
   const denied = requireAdmin(req)
   if (denied) return denied
 

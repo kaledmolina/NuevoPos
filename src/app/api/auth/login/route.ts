@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import {
-  hashPin, verifyPin, setSessionCookie, checkRateLimit, resetRateLimit, logAudit, type Role,
+  verifyPin, setSessionCookie, checkRateLimit, resetRateLimit, logAudit, isDemoAccount, type Role, type SessionPayload,
 } from "@/lib/auth"
 import { getUserAllowedBranches } from "@/lib/branch"
 
@@ -128,8 +128,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const isDemo = isDemoAccount({ name: user.name } as SessionPayload)
     const res = NextResponse.json({
       ok: true,
+      isDemo,
+      ...(isDemo && {
+        demoWarning: "Cuenta de prueba: algunas funciones están limitadas para proteger la integridad del sistema.",
+      }),
       user: {
         id: user.id,
         name: user.name,
@@ -149,6 +154,7 @@ export async function POST(req: NextRequest) {
       uid: user.id,
       tenantId: user.tenantId,
       iat: Date.now(),
+      isDemo,
     })
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })

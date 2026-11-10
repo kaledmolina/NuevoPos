@@ -10,7 +10,8 @@ if (process.env.NODE_ENV === "production" && SECRET === FALLBACK_SECRET) {
   console.error("⚠️  AUTH_SECRET no configurado. Define la variable de entorno AUTH_SECRET con un valor aleatorio (openssl rand -hex 32).")
 }
 const COOKIE_NAME = "pos_session"
-const MAX_AGE_SECONDS = 60 * 60 * 24 * 7 // 7 días para APIs y sesiones
+const MAX_AGE_SECONDS = 60 * 60 * 8 // 8 horas para cuentas normales
+const MAX_AGE_DEMO_SECONDS = 60 * 60 * 2 // 2 horas para cuentas demo
 
 // --- Hashear PIN / Contraseña (HMAC-SHA256) ---
 export function hashPin(pin: string): string {
@@ -33,6 +34,7 @@ export interface SessionPayload {
   branchId?: string | null
   clientId?: string | null
   iat: number
+  isDemo?: boolean
 }
 
 export function sign(payload: SessionPayload): string {
@@ -70,8 +72,9 @@ export function verify(token: string): SessionPayload | null {
     if (sig.length !== expected.length) return null
     if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null
     const payload = JSON.parse(Buffer.from(data, "base64url").toString())
-    // Expiración: MAX_AGE_SECONDS
-    if (Date.now() - (payload.iat || 0) > MAX_AGE_SECONDS * 1000) return null
+    // Expiración: demo = 2 horas, normal = 8 horas
+    const maxAge = payload.isDemo ? MAX_AGE_DEMO_SECONDS : MAX_AGE_SECONDS
+    if (Date.now() - (payload.iat || 0) > maxAge * 1000) return null
     const VALID_ROLES: Role[] = ["superadmin", "admin", "vendedor", "domiciliario", "cliente"]
     if (!VALID_ROLES.includes(payload.role)) return null
     return payload as SessionPayload
@@ -116,7 +119,8 @@ function sessionCookieOptions() {
 }
 
 export function setSessionCookie(res: NextResponse, payload: SessionPayload): NextResponse {
-  res.cookies.set(COOKIE_NAME, sign(payload), sessionCookieOptions())
+  const maxAge = payload.isDemo ? MAX_AGE_DEMO_SECONDS : MAX_AGE_SECONDS
+  res.cookies.set(COOKIE_NAME, sign(payload), { ...sessionCookieOptions(), maxAge })
   return res
 }
 
@@ -263,4 +267,28 @@ export function checkRegisterRateLimit(ipOrKey: string): { allowed: boolean; rem
 
 export function resetRegisterRateLimit(ipOrKey: string) {
   registerAttempts.delete((ipOrKey || "anonymous").toLowerCase().trim())
+}
+
+// --- Cuentas de demostración ---
+// Detecta si la sesión pertenece a una cuenta de prueba (admin / vendedor)
+export function isDemoAccount(session: SessionPayload | null | undefined): boolean {
+  if (!session) return false
+  const lowerName = session.name.toLowerCase()
+  return lowerName === "admin" || lowerName === "vendedor"
+}
+
+// Guardia: bloquea operaciones destructivas/destructivas a cuentas demo.
+// Retorna una respuesta 403 si la sesión es demo, o null si está permitido.
+export function requireNotDemo(req: NextRequest): NextResponse | null {
+  const session = getSession(req)
+  if (!session) {
+    return NextResponse.json({ error: "No autenticado" }, { status: 401 })
+  }
+  if (isDemoAccount(session)) {
+    return NextResponse.json(
+      { error: "Cuenta de demostración: Esta acción está deshabilitada para proteger la integridad del sistema." },
+      { status: 403 }
+    )
+  }
+  return null
 }

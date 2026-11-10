@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireAdmin, getSession, logAudit } from "@/lib/auth"
+import { requireAdmin, getSession, logAudit, requireNotDemo } from "@/lib/auth"
 import { verifyEntityBranchAccess } from "@/lib/branch"
 
 export const dynamic = "force-dynamic"
@@ -70,6 +70,9 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const demoBlocked = requireNotDemo(req)
+  if (demoBlocked) return demoBlocked
+
   const denied = requireAdmin(req)
   if (denied) return denied
   const session = getSession(req)

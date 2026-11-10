@@ -87,6 +87,7 @@ export async function GET(req: NextRequest) {
         tenantOwnerName: ownerName,
         tenantOwnerEmail: ownerEmail,
         allowedBranchIds,
+        isDemo: Boolean(user.name === "admin" || user.name === "vendedor"),
       },
     })
   } catch {

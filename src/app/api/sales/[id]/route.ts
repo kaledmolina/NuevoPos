@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireAdmin, logAudit } from "@/lib/auth"
+import { requireAdmin, logAudit, requireNotDemo } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -10,6 +10,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const demoBlocked = requireNotDemo(req)
+  if (demoBlocked) return demoBlocked
+
   const denied = requireAdmin(req)
   if (denied) return denied
   // Obtener session para el log

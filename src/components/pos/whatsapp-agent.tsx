@@ -554,7 +554,7 @@ export default function WhatsAppAgentView() {
     } finally {
       setLoadingConfig(false)
     }
-  }, [checkOpenRouterQuota])
+  }, [checkOpenRouterQuota, setIsCustomModel, setCustomOpenRouterModel, setConfig])
 
   // Polling periódico de cuota OpenRouter si se usa un modelo gratuito (cada 30s)
   useEffect(() => {
@@ -1556,99 +1556,107 @@ export default function WhatsAppAgentView() {
                   const isSelected = selectedPhone === c.phone
                   const isTg = c.channel === "telegram" || c.phone.startsWith("tg_")
                   const displayName = c.client?.name || (isTg ? `Telegram (@${c.phone.replace("tg_", "")})` : `Contacto (${c.phone.slice(-4)})`)
+                  // Color del avatar determinístico según el nombre
+                  const avatarColors = [
+                    "bg-violet-500 text-white", "bg-emerald-500 text-white", "bg-blue-500 text-white",
+                    "bg-orange-500 text-white", "bg-pink-500 text-white", "bg-teal-500 text-white",
+                    "bg-indigo-500 text-white", "bg-amber-500 text-white",
+                  ]
+                  const colorIdx = displayName.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % avatarColors.length
+                  const avatarColor = isTg ? "bg-blue-600 text-white" : avatarColors[colorIdx]
+                  const lastMsgTime = c.lastMessage
+                    ? (() => {
+                        const d = new Date(c.lastMessage.createdAt)
+                        const now = new Date()
+                        const isToday = d.toDateString() === now.toDateString()
+                        return isToday
+                          ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                          : d.toLocaleDateString([], { day: "2-digit", month: "2-digit" })
+                      })()
+                    : ""
                   return (
                     <button
                       key={c.phone}
                       onClick={() => setSelectedPhone(c.phone)}
                       className={cn(
-                        "w-full text-left p-3 transition-all cursor-pointer flex items-start gap-2.5",
+                        "w-full text-left px-3 py-2.5 transition-all cursor-pointer flex items-start gap-3",
                         isSelected
-                          ? "bg-zinc-100 dark:bg-zinc-800/80 border-l-4 border-l-zinc-950 dark:border-l-white"
-                          : "hover:bg-zinc-50 dark:hover:bg-zinc-950/50"
+                          ? "bg-zinc-100 dark:bg-zinc-800/80 border-l-[3px] border-l-zinc-950 dark:border-l-white"
+                          : "hover:bg-zinc-50 dark:hover:bg-zinc-950/50 border-l-[3px] border-l-transparent"
                       )}
                     >
+                      {/* Avatar con iniciales y badge de canal */}
                       <div className="relative shrink-0">
                         <div className={cn(
-                          "h-9 w-9 rounded-full font-bold flex items-center justify-center text-xs",
-                          isTg
-                            ? "bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200"
-                            : "bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                          "h-10 w-10 rounded-full font-bold flex items-center justify-center text-sm shadow-xs",
+                          avatarColor
                         )}>
                           {displayName.slice(0, 2).toUpperCase()}
                         </div>
-                        {isTg ? (
-                          <span className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-white dark:bg-zinc-900 shadow-xs flex items-center justify-center border border-zinc-200 dark:border-zinc-800">
-                            <IconBrandTelegram className="h-2.5 w-2.5 text-blue-500" />
-                          </span>
-                        ) : (
-                          <span className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-white dark:bg-zinc-900 shadow-xs flex items-center justify-center border border-zinc-200 dark:border-zinc-800">
-                            <IconBrandWhatsapp className="h-2.5 w-2.5 text-emerald-500" />
-                          </span>
-                        )}
+                        <span className={cn(
+                          "absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full bg-white dark:bg-zinc-900 shadow-xs flex items-center justify-center border border-zinc-200/80 dark:border-zinc-700"
+                        )}>
+                          {isTg
+                            ? <IconBrandTelegram className="h-2.5 w-2.5 text-blue-500" />
+                            : <IconBrandWhatsapp className="h-2.5 w-2.5 text-emerald-500" />
+                          }
+                        </span>
                         {c.unreadCount > 0 && (
-                          <span className="absolute -top-1 -right-1 h-4 min-w-[16px] px-1 bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 rounded-full text-[9px] font-bold flex items-center justify-center">
-                            {c.unreadCount}
+                          <span className="absolute -top-1 -right-1 h-4.5 min-w-[18px] px-1 bg-emerald-500 text-white rounded-full text-[9px] font-black flex items-center justify-center shadow-xs">
+                            {c.unreadCount > 9 ? "9+" : c.unreadCount}
                           </span>
                         )}
                       </div>
 
-                      <div className="flex-1 min-w-0 space-y-0.5">
-                        <div className="flex items-center justify-between">
-                          <p className="font-bold text-xs truncate text-zinc-950 dark:text-white">{displayName}</p>
-                          <span className="text-[10px] text-zinc-400 shrink-0 font-mono">
-                            {c.lastMessage ? new Date(c.lastMessage.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
-                          </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-1">
+                          <p className={cn(
+                            "text-xs truncate",
+                            c.unreadCount > 0 ? "font-black text-zinc-950 dark:text-white" : "font-semibold text-zinc-800 dark:text-zinc-200"
+                          )}>
+                            {displayName}
+                          </p>
+                          <span className="text-[10px] text-zinc-400 shrink-0 font-medium tabular-nums">{lastMsgTime}</span>
                         </div>
 
-                        <p className="text-[11px] text-zinc-500 truncate">
-                          {c.lastMessage ? c.lastMessage.text : "Sin mensajes recientes"}
+                        <p className={cn(
+                          "text-[11px] truncate mt-0.5",
+                          c.unreadCount > 0 ? "font-semibold text-zinc-700 dark:text-zinc-300" : "text-zinc-500 dark:text-zinc-400"
+                        )}>
+                          {c.lastMessage
+                            ? (c.lastMessage.sender === "bot" ? "🤖 " : c.lastMessage.sender === "agent" ? "👤 " : "")
+                              + c.lastMessage.text
+                            : "Sin mensajes recientes"}
                         </p>
 
-                        <div className="flex items-center gap-1.5 pt-0.5 flex-wrap">
+                        {/* Badges de estado compactos */}
+                        <div className="flex items-center gap-1 mt-1 flex-wrap">
                           {c.session?.status === "cerrada" ? (
-                            <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono text-zinc-500 border-zinc-300 dark:border-zinc-700 bg-zinc-100/70 dark:bg-zinc-800/60 gap-1">
-                              <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-zinc-400 dark:text-zinc-600">
+                              <span className="h-1.5 w-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600" />
                               Cerrada
-                            </Badge>
+                            </span>
                           ) : c.session?.status === "pendiente" ? (
-                            <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-800 bg-amber-500/10 gap-1">
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 dark:text-amber-400">
                               <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
                               Pendiente
-                            </Badge>
+                            </span>
                           ) : (
-                            <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono text-emerald-600 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 bg-emerald-500/10 gap-1">
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">
                               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                              Abierta
-                            </Badge>
-                          )}
-                          {isTg ? (
-                            <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/30 gap-0.5">
-                              <IconBrandTelegram className="h-2.5 w-2.5" /> Telegram
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900 bg-emerald-50/50 dark:bg-emerald-950/30 gap-0.5">
-                              <IconBrandWhatsapp className="h-2.5 w-2.5" /> WhatsApp
-                            </Badge>
+                              Activa
+                            </span>
                           )}
                           {c.latestOrder && (
-                            <Badge variant="outline" className="text-[9px] py-0 px-1.5 font-mono uppercase border-zinc-300 dark:border-zinc-700">
-                              📦 {c.latestOrder.status}
-                            </Badge>
+                            <span className="text-[9px] font-semibold text-zinc-500 dark:text-zinc-400">
+                              · 📦 {c.latestOrder.status}
+                            </span>
                           )}
                           {c.client?.creditBalance ? (
-                            <Badge variant="outline" className="text-[9px] py-0 px-1.5 font-mono text-zinc-700 dark:text-zinc-300">
-                              Fiado: {formatCurrency(c.client.creditBalance)}
-                            </Badge>
+                            <span className="text-[9px] font-semibold text-orange-600 dark:text-orange-400">
+                              · Fiado {formatCurrency(c.client.creditBalance)}
+                            </span>
                           ) : null}
-                          {c.aiUsage && c.aiUsage.totalTokens > 0 && (
-                            <Badge
-                              variant="outline"
-                              className="text-[9px] py-0 px-1 font-mono bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800 gap-0.5"
-                              title={`Consumo IA: ${c.aiUsage.totalTokens.toLocaleString()} tokens (${c.aiUsage.totalReplies} respuestas). Gasto: $${c.aiUsage.estimatedCostUsd} USD`}
-                            >
-                              ⚡ {c.aiUsage.totalTokens >= 1000 ? `${(c.aiUsage.totalTokens / 1000).toFixed(1)}k` : c.aiUsage.totalTokens} tok
-                            </Badge>
-                          )}
                         </div>
                       </div>
                     </button>
@@ -1999,115 +2007,166 @@ export default function WhatsAppAgentView() {
                 {/* Mensajes del chat scrollables */}
                 <div
                   ref={messagesContainerRef}
-                  className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3 bg-zinc-50/30 dark:bg-zinc-950/20"
+                  className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-1.5 bg-[#f0f2f5] dark:bg-zinc-950/40"
+                  style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23000000' fill-opacity='0.02'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")" }}
                 >
                   {loadingMessages ? (
                     <div className="py-12 text-center space-y-2">
-                      <IconRefresh className="h-5 w-5 animate-spin mx-auto text-zinc-400" />
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-zinc-400 animate-bounce [animation-delay:0ms]" />
+                        <span className="h-2 w-2 rounded-full bg-zinc-400 animate-bounce [animation-delay:150ms]" />
+                        <span className="h-2 w-2 rounded-full bg-zinc-400 animate-bounce [animation-delay:300ms]" />
+                      </div>
                       <p className="text-xs text-zinc-400">Cargando mensajes…</p>
                     </div>
                   ) : chatMessages.length === 0 ? (
-                    <div className="py-12 text-center text-xs text-zinc-400 space-y-2">
-                      <IconMessageCircle className="h-8 w-8 text-zinc-300 dark:text-zinc-700 mx-auto" />
-                      <p>No hay mensajes en este chat aún.</p>
+                    <div className="py-12 text-center text-xs text-zinc-400 space-y-3">
+                      <div className="h-14 w-14 mx-auto rounded-2xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 flex items-center justify-center shadow-xs">
+                        <IconMessageCircle className="h-7 w-7 text-zinc-300 dark:text-zinc-600" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-zinc-500 dark:text-zinc-400">No hay mensajes aún</p>
+                        <p className="text-zinc-400 dark:text-zinc-500 mt-0.5">Envía el primero para iniciar la conversación</p>
+                      </div>
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={() => handleSimulateInbound("Hola, ¿qué productos tienen disponibles?")}
-                        className="text-xs h-7"
+                        className="text-xs h-8 rounded-full bg-white dark:bg-zinc-800"
                       >
-                        Enviar mensaje de prueba como cliente
+                        <IconBolt className="h-3.5 w-3.5 mr-1.5 text-emerald-500" />
+                        Simular mensaje de cliente
                       </Button>
                     </div>
                   ) : (
-                    chatMessages.map((m) => {
-                      const isCustomer = m.sender === "customer"
-                      const isBot = m.sender === "bot"
-                      return (
-                        <div
-                          key={m.id}
-                          className={cn("flex flex-col max-w-[85%]", isCustomer ? "mr-auto items-start" : "ml-auto items-end")}
-                        >
-                          {/* Etiqueta de remitente */}
-                          <div className="flex items-center gap-1 text-[10px] text-zinc-400 mb-0.5 px-1">
-                            {isCustomer ? (
-                              <>
-                                <IconUser className="h-2.5 w-2.5" />
-                                <span>{selectedConv.client?.name || "Cliente"}</span>
-                              </>
-                            ) : isBot ? (
-                              <>
-                                <IconRobot className="h-2.5 w-2.5" />
-                                <span>
-                                  OmniPOS Bot IA ({config.aiProvider === "openrouter" ? "OpenRouter" : "DeepSeek"})
-                                </span>
-                              </>
-                            ) : (
-                              <>
-                                <IconUserCheck className="h-2.5 w-2.5" />
-                                <span>Agente Humano</span>
-                              </>
-                            )}
-                            <span>·</span>
-                            <span>{new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-                          </div>
+                    <>
+                      {chatMessages.map((m, idx) => {
+                        const isCustomer = m.sender === "customer"
+                        const isBot = m.sender === "bot"
+                        const isAgent = m.sender === "agent"
+                        const prevMsg = idx > 0 ? chatMessages[idx - 1] : null
+                        const isSameSenderAsPrev = prevMsg?.sender === m.sender
+                        const msgTime = new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 
-                          {/* Globo de mensaje — Estilo WhatsApp Elegante y Confortable para la Vista */}
+                        return (
                           <div
+                            key={m.id}
                             className={cn(
-                              "px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed shadow-2xs whitespace-pre-line relative",
-                              isCustomer
-                                ? "bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white border border-zinc-200/90 dark:border-zinc-700/80 rounded-tl-xs"
-                                : isBot
-                                ? "bg-emerald-700 text-white dark:bg-emerald-700 dark:text-white rounded-tr-xs border border-emerald-600/30"
-                                : "bg-blue-600 text-white dark:bg-blue-600 dark:text-white rounded-tr-xs border border-blue-500/30"
+                              "flex flex-col",
+                              isCustomer ? "items-start mr-auto" : "items-end ml-auto",
+                              "max-w-[80%] sm:max-w-[72%]",
+                              isSameSenderAsPrev ? "mt-0.5" : "mt-3"
                             )}
                           >
-                            <div>{m.text}</div>
-                            <div className={cn(
-                              "flex items-center justify-end gap-1 mt-1 text-[9px] font-mono",
-                              isCustomer ? "text-zinc-400" : isBot ? "text-emerald-200" : "text-blue-200"
-                            )}>
-                              <span>{new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-                              {!isCustomer && <IconChecks className="h-3 w-3 inline" />}
-                            </div>
-                          </div>
+                            {/* Etiqueta de remitente — solo si cambia de quien habla */}
+                            {!isSameSenderAsPrev && (
+                              <div className={cn(
+                                "flex items-center gap-1 text-[10px] text-zinc-500 dark:text-zinc-400 mb-1 px-1",
+                                isCustomer ? "flex-row" : "flex-row-reverse"
+                              )}>
+                                <div className={cn(
+                                  "h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0",
+                                  isCustomer
+                                    ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200"
+                                    : isBot
+                                    ? "bg-emerald-500 text-white"
+                                    : "bg-blue-500 text-white"
+                                )}>
+                                  {isCustomer
+                                    ? (selectedConv.client?.name || "C").slice(0, 1).toUpperCase()
+                                    : isBot ? "🤖" : "👤"}
+                                </div>
+                                <span className="font-semibold">
+                                  {isCustomer
+                                    ? (selectedConv.client?.name || "Cliente")
+                                    : isBot
+                                    ? `Bot IA (${config.aiProvider === "openrouter" ? config.openrouterModel?.split("/")[1] || "OR" : "DeepSeek"})`
+                                    : "Agente Humano"}
+                                </span>
+                              </div>
+                            )}
 
-                          {/* Tarjeta de Orden vinculada */}
-                          {m.order && (
-                            <div className="mt-1.5 p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-[11px] space-y-1 w-full max-w-xs">
-                              <div className="flex items-center justify-between font-bold">
-                                <span>Pedido #{m.order.orderNumber}</span>
-                                <Badge variant="outline" className="text-[9px] uppercase font-mono">
-                                  {m.order.status}
-                                </Badge>
-                              </div>
-                              <div className="flex items-center justify-between text-zinc-500">
-                                <span>Total: {formatCurrency(m.order.total)}</span>
-                                <span className="line-clamp-1 max-w-[120px]">{m.order.deliveryAddress}</span>
+                            {/* Burbuja de mensaje */}
+                            <div
+                              className={cn(
+                                "relative px-3.5 py-2.5 shadow-xs text-xs leading-relaxed whitespace-pre-line group",
+                                // Forma de la burbuja según sender y agrupación
+                                isCustomer
+                                  ? cn("bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border border-zinc-200/70 dark:border-zinc-700/60",
+                                      isSameSenderAsPrev ? "rounded-2xl" : "rounded-2xl rounded-tl-sm")
+                                  : isBot
+                                  ? cn("bg-emerald-600 text-white",
+                                      isSameSenderAsPrev ? "rounded-2xl" : "rounded-2xl rounded-tr-sm")
+                                  : cn("bg-blue-600 text-white",
+                                      isSameSenderAsPrev ? "rounded-2xl" : "rounded-2xl rounded-tr-sm")
+                              )}
+                            >
+                              <p className="break-words">{m.text}</p>
+
+                              {/* Hora y ticks en la misma línea al pie */}
+                              <div className={cn(
+                                "flex items-center gap-1 mt-1.5 text-[9px] font-medium",
+                                isCustomer
+                                  ? "text-zinc-400 dark:text-zinc-500 justify-start"
+                                  : "text-white/60 justify-end"
+                              )}>
+                                <span>{msgTime}</span>
+                                {!isCustomer && (
+                                  <IconChecks className={cn(
+                                    "h-3 w-3",
+                                    m.status === "read" ? "text-sky-300" : "text-white/50"
+                                  )} />
+                                )}
                               </div>
                             </div>
-                          )}
-                        </div>
-                      )
-                    })
+
+                            {/* Tarjeta de Orden vinculada al mensaje */}
+                            {m.order && (
+                              <div className="mt-1.5 p-2.5 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-[11px] space-y-1.5 w-full shadow-xs">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">
+                                    <IconPackage className="h-3.5 w-3.5 text-zinc-500" />
+                                    Pedido #{m.order.orderNumber}
+                                  </span>
+                                  <Badge variant="outline" className="text-[9px] uppercase font-mono px-1.5 py-0.5">
+                                    {m.order.status}
+                                  </Badge>
+                                </div>
+                                <div className="flex items-center justify-between text-zinc-500 dark:text-zinc-400">
+                                  <span className="font-semibold text-zinc-700 dark:text-zinc-300">{formatCurrency(m.order.total)}</span>
+                                  {m.order.deliveryAddress && (
+                                    <span className="line-clamp-1 max-w-[140px] flex items-center gap-1">
+                                      <IconMapPin className="h-3 w-3 shrink-0" />
+                                      {m.order.deliveryAddress}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </>
                   )}
 
-                  {/* Indicador de "Escribiendo..." con animación de 3 puntos estilo WhatsApp */}
+                  {/* Indicador "escribiendo..." estilo WhatsApp */}
                   {isTyping && (
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-white dark:bg-zinc-800 border border-zinc-200/80 dark:border-zinc-700/80 text-zinc-600 dark:text-zinc-300 w-fit text-xs animate-in fade-in duration-200 shadow-2xs mr-auto">
-                      <div className="flex items-center gap-1 px-0.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:0ms]" />
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:150ms]" />
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:300ms]" />
+                    <div className={cn(
+                      "flex items-center gap-2 max-w-fit",
+                      isTyping === "cliente" ? "mr-auto" : "ml-auto"
+                    )}>
+                      <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white dark:bg-zinc-800 border border-zinc-200/70 dark:border-zinc-700/60 shadow-xs flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-zinc-400 animate-bounce [animation-delay:0ms]" />
+                        <span className="h-2 w-2 rounded-full bg-zinc-400 animate-bounce [animation-delay:160ms]" />
+                        <span className="h-2 w-2 rounded-full bg-zinc-400 animate-bounce [animation-delay:320ms]" />
+                        <span className="text-[10px] text-zinc-400 dark:text-zinc-500 ml-1 font-medium">
+                          {isTyping === "ia"
+                            ? "IA generando respuesta"
+                            : isTyping === "agente"
+                            ? "Enviando…"
+                            : `${selectedConv?.client?.name || "Cliente"} escribiendo`}
+                        </span>
                       </div>
-                      <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-                        {isTyping === "ia"
-                          ? "OmniPOS IA generando respuesta..."
-                          : isTyping === "agente"
-                          ? "Enviando respuesta..."
-                          : `${selectedConv.client?.name || "Cliente"} está escribiendo...`}
-                      </span>
                     </div>
                   )}
 
@@ -2132,44 +2191,91 @@ export default function WhatsAppAgentView() {
                 )}
 
                 {/* Input de respuesta manual del agente */}
-                <div className="p-2.5 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0">
-                  <div className="flex items-center gap-2">
-                    <Input
-                      value={agentReplyText}
-                      onChange={(e) => setAgentReplyText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault()
-                          handleSendAgentMessage()
+                <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0 space-y-2">
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1 relative">
+                      <Textarea
+                        value={agentReplyText}
+                        onChange={(e) => setAgentReplyText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault()
+                            handleSendAgentMessage()
+                          }
+                        }}
+                        placeholder={
+                          selectedPhone.startsWith("tg_") || selectedConv?.channel === "telegram"
+                            ? "Respuesta por Telegram... (Enter = enviar, Shift+Enter = nueva línea)"
+                            : "Respuesta por WhatsApp... (Enter = enviar, Shift+Enter = nueva línea)"
                         }
-                      }}
-                      placeholder={selectedPhone.startsWith("tg_") || selectedConv?.channel === "telegram" ? "Escribe una respuesta como Agente Humano (se despachará por Telegram)..." : "Escribe una respuesta como Agente Humano (se despachará por WhatsApp)..."}
-                      className="h-10 text-xs rounded-xl bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 flex-1"
-                    />
+                        rows={1}
+                        className="min-h-[40px] max-h-[120px] resize-none text-xs rounded-xl bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 pr-12 py-2.5 leading-relaxed overflow-y-auto"
+                        style={{ fieldSizing: "content" } as React.CSSProperties}
+                      />
+                      {agentReplyText.length > 0 && (
+                        <span className="absolute bottom-1.5 right-2 text-[9px] text-zinc-400 font-mono pointer-events-none">
+                          {agentReplyText.length}
+                        </span>
+                      )}
+                    </div>
                     <Button
                       onClick={handleSendAgentMessage}
                       disabled={sendingReply || !agentReplyText.trim()}
-                      className="h-10 w-10 p-0 rounded-xl bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 shrink-0"
+                      className={cn(
+                        "h-10 w-10 p-0 rounded-xl shrink-0 transition-all",
+                        agentReplyText.trim()
+                          ? "bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 shadow-xs"
+                          : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed"
+                      )}
                     >
-                      <IconSend className="h-4 w-4" />
+                      {sendingReply
+                        ? <IconRefresh className="h-4 w-4 animate-spin" />
+                        : <IconSend className="h-4 w-4" />
+                      }
                     </Button>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-zinc-400 dark:text-zinc-500 px-0.5">
+                    <span className="flex items-center gap-1.5">
+                      <span className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        aiActiveForChat[selectedPhone] === false ? "bg-amber-400" : "bg-emerald-500"
+                      )} />
+                      {aiActiveForChat[selectedPhone] === false ? "Modo Agente Humano" : "Bot IA activo"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={openSimModal}
+                      className="flex items-center gap-1 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer font-medium"
+                    >
+                      <IconBolt className="h-3 w-3" />
+                      Simular mensaje
+                    </button>
                   </div>
                 </div>
               </>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-xs text-zinc-500 space-y-2">
-                <IconMessageCircle className="h-12 w-12 text-zinc-300 dark:text-zinc-700 mx-auto" />
-                <p className="font-bold text-sm text-zinc-800 dark:text-zinc-200">Selecciona una conversación</p>
-                <p className="text-zinc-400 max-w-xs">
-                  Haz clic en un contacto de la izquierda para ver el historial en vivo o genera un mensaje simulado.
-                </p>
+              <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4 bg-[#f0f2f5] dark:bg-zinc-950/40">
+                <div className="relative">
+                  <div className="h-20 w-20 mx-auto rounded-3xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 flex items-center justify-center shadow-lg">
+                    <IconBrandWhatsapp className="h-10 w-10 text-emerald-500/70" />
+                  </div>
+                  <div className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-white dark:bg-zinc-800 border-2 border-zinc-200 dark:border-zinc-700 flex items-center justify-center shadow-xs">
+                    <IconBolt className="h-3.5 w-3.5 text-purple-500" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <p className="font-bold text-base text-zinc-800 dark:text-zinc-200">Selecciona una conversación</p>
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500 max-w-xs">
+                    Haz clic en un contacto de la izquierda para ver el historial en vivo o simula un mensaje de cliente
+                  </p>
+                </div>
                 <Button
                   size="sm"
                   onClick={openSimModal}
-                  className="rounded-full text-xs h-8 mt-2"
+                  className="rounded-full text-xs h-9 gap-1.5 shadow-xs"
                 >
-                  <IconPlus className="h-3.5 w-3.5 mr-1" />
-                  Simular Mensaje de Cliente
+                  <IconPlus className="h-3.5 w-3.5" />
+                  Simular mensaje de cliente
                 </Button>
               </div>
             )}

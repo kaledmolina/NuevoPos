@@ -66,13 +66,6 @@ export function McpTokenGenerator({
   const [generatedData, setGeneratedData] = useState<McpTokenResponse["data"] | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
-  // Generar un token por defecto al cargar si es la primera vez
-  useEffect(() => {
-    if (!generatedData) {
-      handleGenerate()
-    }
-  }, [])
-
   const handleGenerate = async () => {
     setGenerating(true)
     try {
@@ -95,6 +88,13 @@ export function McpTokenGenerator({
       setGenerating(false)
     }
   }
+
+  // Generar un token por defecto al cargar si es la primera vez
+  useEffect(() => {
+    if (!generatedData) {
+      handleGenerate()
+    }
+  }, [])
 
   const copyToClipboard = (text: string, key: string) => {
     if (typeof navigator !== "undefined" && navigator.clipboard) {

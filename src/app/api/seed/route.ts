@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireSuperAdmin, hashPin, getSession, logAudit } from "@/lib/auth"
+import { requireSuperAdmin, hashPin, getSession, logAudit, requireNotDemo } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -14,6 +14,9 @@ export const runtime = "nodejs"
 // Y el Superadmin global (kaledmoly@gmail.com / PIN 9999).
 // Incluye catálogo con stock, clientes, sesión de caja abierta, ventas reales e ingresos/gastos.
 export async function POST(req: NextRequest) {
+  const demoBlocked = requireNotDemo(req)
+  if (demoBlocked) return demoBlocked
+
   const denied = requireSuperAdmin(req)
   if (denied) return denied
 

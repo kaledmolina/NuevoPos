@@ -65,6 +65,9 @@ import {
   IconClock,
   IconRobot,
   IconCpu,
+  IconCrown,
+  IconPalette,
+  IconSettings2,
 } from "@tabler/icons-react"
 import { cn } from "@/lib/utils"
 import { TOUR_STORAGE_KEY_PREFIX } from "@/components/pos/tour"
@@ -458,12 +461,12 @@ export default function SettingsView() {
         </p>
       </div>
 
-      <Tabs defaultValue="general" className="w-full space-y-4">
+      <Tabs defaultValue="negocio" className="w-full space-y-4">
         {/* Barra de navegación de pestañas responsive adaptada para móvil y escritorio */}
         <div className="w-full overflow-x-auto no-scrollbar pb-1">
           <TabsList className="grid grid-cols-3 sm:grid-cols-6 h-auto p-1 bg-muted/60 border border-border/80 rounded-xl gap-1 w-full min-w-[340px]">
             <TabsTrigger
-              value="general"
+              value="negocio"
               className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
             >
               <IconBuildingStore className="h-4 w-4 shrink-0" />
@@ -471,11 +474,35 @@ export default function SettingsView() {
             </TabsTrigger>
 
             <TabsTrigger
-              value="security"
+              value="seguridad"
               className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
             >
               <IconShieldLock className="h-4 w-4 shrink-0" />
               <span className="truncate">Seguridad</span>
+            </TabsTrigger>
+
+            <TabsTrigger
+              value="apariencia"
+              className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
+            >
+              <IconPalette className="h-4 w-4 shrink-0" />
+              <span className="truncate">Apariencia</span>
+            </TabsTrigger>
+
+            <TabsTrigger
+              value="backups"
+              className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
+            >
+              <IconDeviceFloppy className="h-4 w-4 shrink-0" />
+              <span className="truncate">Copias de Seguridad</span>
+            </TabsTrigger>
+
+            <TabsTrigger
+              value="avanzado"
+              className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
+            >
+              <IconSettings2 className="h-4 w-4 shrink-0" />
+              <span className="truncate">Avanzado</span>
             </TabsTrigger>
 
             <TabsTrigger
@@ -485,32 +512,6 @@ export default function SettingsView() {
               <IconRobot className="h-4 w-4 shrink-0" />
               <span className="truncate font-semibold">Tokens MCP</span>
             </TabsTrigger>
-
-            <TabsTrigger
-              value="backups"
-              className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
-            >
-              <IconDeviceFloppy className="h-4 w-4 shrink-0" />
-              <span className="truncate">Backups</span>
-            </TabsTrigger>
-
-            {role === "superadmin" && (
-              <TabsTrigger
-                value="demo"
-                className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
-              >
-                <IconDatabase className="h-4 w-4 shrink-0" />
-                <span className="truncate">Demo</span>
-              </TabsTrigger>
-            )}
-
-            <TabsTrigger
-              value="help"
-              className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
-            >
-              <IconHelp className="h-4 w-4 shrink-0" />
-              <span className="truncate">Ayuda</span>
-            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -519,70 +520,8 @@ export default function SettingsView() {
           <McpTokenGenerator />
         </TabsContent>
 
-        {/* ==================== PESTAÑA 1: NEGOCIO & RUBRO ==================== */}
-        <TabsContent value="general" className="space-y-4">
-          {/* Apariencia / Modo Oscuro */}
-          <Card className="rounded-xl shadow-xs border-border/80 overflow-hidden">
-            <CardHeader className="p-3.5 sm:p-4 pb-2 sm:pb-3 border-b bg-muted/20">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-foreground">
-                  <IconSun className="h-4 w-4" />
-                </div>
-                <div>
-                  <CardTitle className="text-sm sm:text-base font-bold">Apariencia y Modo Oscuro</CardTitle>
-                  <CardDescription className="text-xs">
-                    Personaliza el tema visual según tu preferencia
-                  </CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="p-3.5 sm:p-4">
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTheme("light")}
-                  className={cn(
-                    "flex flex-col items-center justify-center p-2.5 sm:p-3 rounded-lg border transition-all gap-1.5 text-center",
-                    theme === "light"
-                      ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
-                      : "border-border/80 hover:bg-muted/50 text-muted-foreground"
-                  )}
-                >
-                  <IconSun className="h-4 w-4 sm:h-5 sm:w-5" />
-                  <span className="text-[11px] sm:text-xs">Modo Claro</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setTheme("dark")}
-                  className={cn(
-                    "flex flex-col items-center justify-center p-2.5 sm:p-3 rounded-lg border transition-all gap-1.5 text-center",
-                    theme === "dark"
-                      ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
-                      : "border-border/80 hover:bg-muted/50 text-muted-foreground"
-                  )}
-                >
-                  <IconMoon className="h-4 w-4 sm:h-5 sm:w-5" />
-                  <span className="text-[11px] sm:text-xs">Modo Oscuro</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setTheme("system")}
-                  className={cn(
-                    "flex flex-col items-center justify-center p-2.5 sm:p-3 rounded-lg border transition-all gap-1.5 text-center",
-                    theme === "system"
-                      ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
-                      : "border-border/80 hover:bg-muted/50 text-muted-foreground"
-                  )}
-                >
-                  <IconDeviceDesktop className="h-4 w-4 sm:h-5 sm:w-5" />
-                  <span className="text-[11px] sm:text-xs">Automático</span>
-                </button>
-              </div>
-            </CardContent>
-          </Card>
-
+        {/* ==================== PESTAÑA 1: NEGOCIO ==================== */}
+        <TabsContent value="negocio" className="space-y-4">
           <Card className="rounded-xl shadow-xs border-border/80 overflow-hidden" data-tour="settings-store-form">
             <CardHeader className="p-3.5 sm:p-4 pb-2 sm:pb-3 border-b bg-muted/20">
               <div className="flex items-center gap-2.5">
@@ -778,8 +717,8 @@ export default function SettingsView() {
           </Card>
         </TabsContent>
 
-        {/* ==================== PESTAÑA 2: SEGURIDAD & AUDITORÍA ==================== */}
-        <TabsContent value="security" className="space-y-4 sm:space-y-5">
+        {/* ==================== PESTAÑA 2: SEGURIDAD ==================== */}
+        <TabsContent value="seguridad" className="space-y-4 sm:space-y-5">
           {/* Banner de Acceso a Gestión de Personal y Sedes */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 sm:p-4 rounded-2xl border bg-primary/5 border-primary/20">
             <div className="flex items-center gap-3">
@@ -1068,20 +1007,117 @@ export default function SettingsView() {
           </Card>
         </TabsContent>
 
-        {/* ==================== PESTAÑA 3: BACKUPS ==================== */}
+        {/* ==================== PESTAÑA 3: APARIENCIA ==================== */}
+        <TabsContent value="apariencia" className="space-y-4">
+          <Card className="rounded-xl shadow-xs border-border/80 overflow-hidden">
+            <CardHeader className="p-3.5 sm:p-4 pb-2 sm:pb-3 border-b bg-muted/20">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-foreground">
+                  <IconPalette className="h-4 w-4" />
+                </div>
+                <div>
+                  <CardTitle className="text-sm sm:text-base font-bold">Apariencia y Tema Visual</CardTitle>
+                  <CardDescription className="text-xs">
+                    Personaliza el tema según tu preferencia o el entorno de trabajo
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-3.5 sm:p-4 space-y-4">
+              <div>
+                <p className="text-xs font-semibold text-foreground mb-2">Modo de Color</p>
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setTheme("light")}
+                    className={cn(
+                      "flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl border-2 transition-all gap-2 text-center",
+                      theme === "light"
+                        ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
+                        : "border-border/80 hover:bg-muted/50 text-muted-foreground"
+                    )}
+                  >
+                    <IconSun className="h-5 w-5 sm:h-6 sm:w-6" />
+                    <span className="text-[11px] sm:text-xs font-medium">Modo Claro</span>
+                    <span className="text-[10px] text-muted-foreground leading-tight hidden sm:block">Fondo blanco, mayor luminosidad</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setTheme("dark")}
+                    className={cn(
+                      "flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl border-2 transition-all gap-2 text-center",
+                      theme === "dark"
+                        ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
+                        : "border-border/80 hover:bg-muted/50 text-muted-foreground"
+                    )}
+                  >
+                    <IconMoon className="h-5 w-5 sm:h-6 sm:w-6" />
+                    <span className="text-[11px] sm:text-xs font-medium">Modo Oscuro</span>
+                    <span className="text-[10px] text-muted-foreground leading-tight hidden sm:block">Reduce fatiga visual nocturna</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setTheme("system")}
+                    className={cn(
+                      "flex flex-col items-center justify-center p-3 sm:p-4 rounded-xl border-2 transition-all gap-2 text-center",
+                      theme === "system"
+                        ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
+                        : "border-border/80 hover:bg-muted/50 text-muted-foreground"
+                    )}
+                  >
+                    <IconDeviceDesktop className="h-5 w-5 sm:h-6 sm:w-6" />
+                    <span className="text-[11px] sm:text-xs font-medium">Automático</span>
+                    <span className="text-[10px] text-muted-foreground leading-tight hidden sm:block">Sigue el sistema operativo</span>
+                  </button>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="p-3 rounded-xl bg-muted/20 border border-border/60 text-xs text-muted-foreground flex items-start gap-2">
+                <IconDeviceDesktop className="h-4 w-4 shrink-0 mt-0.5" />
+                <p className="leading-relaxed">
+                  El tema seleccionado se aplica de inmediato y se recuerda en este navegador. Puedes cambiarlo en cualquier momento desde este panel o desde el icono de tema en la barra superior.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ==================== PESTAÑA 4: COPIAS DE SEGURIDAD ==================== */}
         <TabsContent value="backups" className="space-y-4">
           <Card className="rounded-xl shadow-xs border-border/80 overflow-hidden" data-tour="settings-backup-section">
             <CardHeader className="p-3.5 sm:p-4 pb-2 sm:pb-3 border-b bg-muted/20">
               <div className="flex items-center gap-2.5">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-foreground">
-                  <IconDeviceFloppy className="h-4 w-4" />
+                <div className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-lg shrink-0",
+                  role === "superadmin"
+                    ? "bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400"
+                    : "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400"
+                )}>
+                  {role === "superadmin"
+                    ? <IconCrown className="h-5 w-5" />
+                    : <IconDeviceFloppy className="h-5 w-5" />}
                 </div>
-                <div>
-                  <CardTitle className="text-sm sm:text-base font-bold">
-                    {role === "superadmin"
-                      ? "Copias de Seguridad Globales (Base de Datos MySQL)"
-                      : `Copias de Seguridad de ${tenantName || "Mi Negocio"} (Datos Aislados)`}
-                  </CardTitle>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <CardTitle className="text-sm sm:text-base font-bold">
+                      {role === "superadmin"
+                        ? "Copias Globales del Sistema"
+                        : "Copias de tu Tienda"}
+                    </CardTitle>
+                    {role === "superadmin" ? (
+                      <Badge className="text-[10px] font-bold px-2 py-0.5 bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/40 border shrink-0">
+                        <IconCrown className="h-3 w-3 mr-1" /> Global
+                      </Badge>
+                    ) : (
+                      <Badge className="text-[10px] font-bold px-2 py-0.5 bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border-emerald-500/40 border shrink-0">
+                        Tu Tienda
+                      </Badge>
+                    )}
+                  </div>
                   <CardDescription className="text-xs mt-0.5">
                     {role === "superadmin"
                       ? "Respaldos completos de la base de datos MySQL de toda la plataforma SaaS."
@@ -1091,6 +1127,22 @@ export default function SettingsView() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4 p-3.5 sm:p-4">
+              {/* Mensaje explicativo según el rol */}
+              <div className={cn(
+                "flex items-start gap-2.5 p-3 rounded-xl border text-xs",
+                role === "superadmin"
+                  ? "bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/40 text-amber-800 dark:text-amber-300"
+                  : "bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800/40 text-emerald-800 dark:text-emerald-300"
+              )}>
+                {role === "superadmin"
+                  ? <IconCrown className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
+                  : <IconDeviceFloppy className="h-4 w-4 shrink-0 mt-0.5 text-emerald-500" />}
+                <p className="leading-relaxed">
+                  {role === "superadmin"
+                    ? "Las copias globales incluyen TODOS los datos del sistema SaaS: negocios, usuarios, ventas, productos e historial completo de la plataforma."
+                    : "Las copias de seguridad de tu tienda se guardan en formato JSON con todos tus productos, ventas, clientes y más. Solo afectan tu negocio."}
+                </p>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Button onClick={createBackup} disabled={creatingBackup} className="h-10 font-semibold shadow-xs">
                   {creatingBackup ? (
@@ -1219,9 +1271,9 @@ export default function SettingsView() {
           </Card>
         </TabsContent>
 
-        {/* ==================== PESTAÑA 4: DATOS DEMO & RESETEO (SOLO SUPERADMIN) ==================== */}
-        {role === "superadmin" && (
-        <TabsContent value="demo" className="space-y-4">
+        {/* ==================== PESTAÑA 5: AVANZADO (Demo, Reset, Tour) ==================== */}
+        <TabsContent value="avanzado" className="space-y-4">
+          {/* Cargar datos de demostración */}
           <Card className="rounded-xl shadow-xs border-border/80 overflow-hidden">
             <CardHeader className="p-3.5 sm:p-4 pb-2 sm:pb-3 border-b bg-muted/20">
               <div className="flex items-center gap-2.5">
@@ -1280,6 +1332,38 @@ export default function SettingsView() {
               <p className="text-xs text-muted-foreground text-center">
                 ⚠️ Al cargar datos demo se reinicializarán los catálogos con el set de prueba seleccionado.
               </p>
+            </CardContent>
+          </Card>
+
+          {/* Tour guiado */}
+          <Card className="rounded-xl shadow-xs border-border/80 overflow-hidden">
+            <CardHeader className="p-3.5 sm:p-4 pb-2 sm:pb-3 border-b bg-muted/20">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-foreground">
+                  <IconHelp className="h-4 w-4" />
+                </div>
+                <div>
+                  <CardTitle className="text-sm sm:text-base font-bold">Repetir Tour Guiado</CardTitle>
+                  <CardDescription className="text-xs mt-0.5">Aprende a sacar el máximo provecho de tu punto de venta</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 p-3.5 sm:p-4">
+              <div className="p-3.5 rounded-xl border bg-muted/20 space-y-3">
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  ¿Tienes nuevos colaboradores o deseas repasar las funciones del sistema? Ejecuta el tour paso a paso con explicaciones detalladas para cada sección.
+                </p>
+                <Button
+                  onClick={() => {
+                    if (role) localStorage.removeItem(TOUR_STORAGE_KEY_PREFIX + role)
+                    useAppStore.getState().startTour()
+                    toast.success("Tour interactivo iniciado")
+                  }}
+                  className="h-10 font-semibold shadow-xs"
+                >
+                  <IconSparkles className="h-4 w-4 mr-2" /> Iniciar tour interactivo ahora
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
@@ -1358,71 +1442,6 @@ export default function SettingsView() {
                   <p className="text-muted-foreground text-[11px] leading-relaxed">
                     Las sesiones de caja cerradas quedan selladas para evitar modificaciones financieras retroactivas.
                   </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        )}
-
-        {/* ==================== PESTAÑA 5: AYUDA & TUTORIAL ==================== */}
-        <TabsContent value="help" className="space-y-4">
-          <Card className="rounded-xl shadow-xs border-border/80 overflow-hidden">
-            <CardHeader className="p-3.5 sm:p-4 pb-2 sm:pb-3 border-b bg-muted/20">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-foreground">
-                  <IconHelp className="h-4 w-4" />
-                </div>
-                <div>
-                  <CardTitle className="text-sm sm:text-base font-bold">Tutorial Guiado y Ayuda Rápida</CardTitle>
-                  <CardDescription className="text-xs mt-0.5">Aprende a sacar el máximo provecho de tu punto de venta</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4 p-3.5 sm:p-4">
-              <div className="p-3.5 rounded-xl border bg-muted/20 space-y-3">
-                <h4 className="font-bold text-sm flex items-center gap-2">
-                  <IconSparkles className="h-4 w-4 text-foreground" /> Tour Guiado Interactivo
-                </h4>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  ¿Tienes nuevos colaboradores o deseas repasar las funciones del sistema? Ejecuta el tour paso a paso con explicaciones detalladas para cada sección.
-                </p>
-                <Button
-                  onClick={() => {
-                    if (role) localStorage.removeItem(TOUR_STORAGE_KEY_PREFIX + role)
-                    useAppStore.getState().startTour()
-                    toast.success("Tour interactivo iniciado")
-                  }}
-                  className="h-10 font-semibold shadow-xs"
-                >
-                  <IconSparkles className="h-4 w-4 mr-2" /> Iniciar tour interactivo ahora
-                </Button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                <div className="p-3 rounded-xl border bg-card space-y-1 shadow-xs">
-                  <p className="font-bold text-foreground flex items-center gap-1.5">
-                    <IconBuildingStore className="h-4 w-4 text-muted-foreground" /> Escaneo en POS
-                  </p>
-                  <p className="text-muted-foreground leading-relaxed">En el Punto de Venta, cualquier lector USB o inalámbrico de código de barras agrega productos automáticamente al carrito.</p>
-                </div>
-                <div className="p-3 rounded-xl border bg-card space-y-1 shadow-xs">
-                  <p className="font-bold text-foreground flex items-center gap-1.5">
-                    <IconShieldLock className="h-4 w-4 text-muted-foreground" /> Arqueo de Caja Seguro
-                  </p>
-                  <p className="text-muted-foreground leading-relaxed">El sistema compara el efectivo esperado con el contado y registra discrepancias en el historial para auditorías.</p>
-                </div>
-                <div className="p-3 rounded-xl border bg-card space-y-1 shadow-xs">
-                  <p className="font-bold text-foreground flex items-center gap-1.5">
-                    <IconCoin className="h-4 w-4 text-muted-foreground" /> Créditos / Fiados
-                  </p>
-                  <p className="text-muted-foreground leading-relaxed">Otorga crédito a clientes de confianza con límites definidos y registra abonos parciales o totales con saldo en vivo.</p>
-                </div>
-                <div className="p-3 rounded-xl border bg-card space-y-1 shadow-xs">
-                  <p className="font-bold text-foreground flex items-center gap-1.5">
-                    <IconDeviceFloppy className="h-4 w-4 text-muted-foreground" /> Respaldo Automático
-                  </p>
-                  <p className="text-muted-foreground leading-relaxed">Descarga copias de seguridad de tu base de datos antes de realizar cambios importantes con protección de 5 días.</p>
                 </div>
               </div>
             </CardContent>

@@ -178,7 +178,7 @@ export default function CashView() {
       })
       .catch((e) => setError((e as Error).message))
       .finally(() => setLoading(false))
-  }, [activeBranch?.id])
+  }, [activeBranch])
 
   useEffect(() => {
     load()

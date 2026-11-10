@@ -53,7 +53,10 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { requireAdmin, logAudit, getSession } = await import("@/lib/auth")
+  const { requireAdmin, requireNotDemo, logAudit, getSession } = await import("@/lib/auth")
+  const demoBlocked = requireNotDemo(req)
+  if (demoBlocked) return demoBlocked
+
   const denied = requireAdmin(req)
   if (denied) return denied
   const session = getSession(req)

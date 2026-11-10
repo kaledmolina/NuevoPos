@@ -365,7 +365,7 @@ export default function TourGuide() {
       }
     }
     setTargetRect(null)
-  }, [tourOpen, step?.targetSelector])
+  }, [tourOpen, step])
 
   // Recalcular rect al cambiar de paso, ventana o scroll
   useEffect(() => {
@@ -379,20 +379,6 @@ export default function TourGuide() {
     }
   }, [currentStep, tourOpen, updateTargetRect])
 
-  const handleNext = useCallback(() => {
-    if (currentStep < steps.length - 1) {
-      setCurrentStep((prev) => prev + 1)
-    } else {
-      handleFinish()
-    }
-  }, [currentStep, steps.length])
-
-  const handlePrev = useCallback(() => {
-    if (currentStep > 0) {
-      setCurrentStep((prev) => prev - 1)
-    }
-  }, [currentStep])
-
   const handleFinish = useCallback(() => {
     if (role) {
       try {
@@ -404,7 +390,21 @@ export default function TourGuide() {
     setMinimized(false)
     setMobileCollapsed(false)
     setTargetRect(null)
-  }, [role, closeTour])
+  }, [role, closeTour, setCurrentStep, setMinimized, setMobileCollapsed, setTargetRect])
+
+  const handleNext = useCallback(() => {
+    if (currentStep < steps.length - 1) {
+      setCurrentStep((prev) => prev + 1)
+    } else {
+      handleFinish()
+    }
+  }, [currentStep, steps.length, handleFinish])
+
+  const handlePrev = useCallback(() => {
+    if (currentStep > 0) {
+      setCurrentStep((prev) => prev - 1)
+    }
+  }, [currentStep])
 
   // Atajos de teclado para PC
   useEffect(() => {

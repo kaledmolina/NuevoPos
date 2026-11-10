@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import { motion, AnimatePresence, useScroll, useTransform } from "framer-motion"
+import { motion, AnimatePresence, useScroll, useTransform, useSpring } from "framer-motion"
 import { ParticlesCanvas } from "./particles-canvas"
 import { useAppStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
@@ -22,6 +22,59 @@ import {
 import { cn } from "@/lib/utils"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { toast } from "sonner"
+
+// ── Custom hook: count up animation ──────────────────────────────────
+function useCountUp(target: number, duration = 1.4) {
+  const [value, setValue] = useState(0)
+  const ref = useRef(false)
+
+  const start = () => {
+    if (ref.current) return
+    ref.current = true
+    const startTime = performance.now()
+    const tick = (now: number) => {
+      const progress = Math.min((now - startTime) / (duration * 1000), 1)
+      // ease-out cubic
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setValue(Math.round(eased * target))
+      if (progress < 1) requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  }
+
+  return { value, start }
+}
+
+// ── Framer Motion variants ────────────────────────────────────────────
+const cardContainerVariants = {
+  hidden: {},
+  visible: {
+    transition: { staggerChildren: 0.1, delayChildren: 0.05 },
+  },
+}
+
+const cardItemVariants = {
+  hidden: { opacity: 0, y: 24 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] } },
+}
+
+// Word-by-word clip-path reveal variants
+const heroWordContainerVariants = {
+  hidden: {},
+  visible: {
+    transition: { staggerChildren: 0.07, delayChildren: 0.1 },
+  },
+}
+
+const heroWordVariants = {
+  hidden: { clipPath: "inset(100% 0 0 0)", y: 16, opacity: 0 },
+  visible: {
+    clipPath: "inset(0% 0 0 0)",
+    y: 0,
+    opacity: 1,
+    transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] },
+  },
+}
 
 // Tipos
 type Role = "admin" | "vendedor"
@@ -333,9 +386,13 @@ export default function LandingPage() {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
   const [mobileExpandedGroup, setMobileExpandedGroup] = useState<string | null>("producto")
   const [isScrolled, setIsScrolled] = useState(false)
-  const { scrollY } = useScroll()
+  const { scrollY, scrollYProgress } = useScroll()
   const heroParallaxY = useTransform(scrollY, [0, 500], [0, 35])
   const mockupParallaxY = useTransform(scrollY, [0, 800], [0, -45])
+  const bgParallaxY = useTransform(scrollY, [0, 800], [0, 20])
+  // Scroll progress bar (springified for smoothness)
+  const rawProgress = useSpring(scrollYProgress, { stiffness: 100, damping: 30, restDelta: 0.001 })
+  const progressWidth = useTransform(rawProgress, [0, 1], ["0%", "100%"])
   const [hoveredNav, setHoveredNav] = useState<string | null>(null)
   const [activeNav, setActiveNav] = useState("home")
 
@@ -529,8 +586,8 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-white dark:bg-black text-zinc-950 dark:text-zinc-100 transition-colors duration-200 selection:bg-zinc-900 selection:text-white dark:selection:bg-white dark:selection:text-zinc-950 relative">
       
-      {/* Interactive Floating Monochrome Particles & Ambient Mesh */}
-      <ParticlesCanvas particleCount={70} connectDistance={135} className="fixed inset-0 pointer-events-none -z-10" />
+      {/* Interactive Floating Particles & Ambient Mesh */}
+      <ParticlesCanvas particleCount={70} connectDistance={135} colorScheme="violet" className="fixed inset-0 pointer-events-none -z-10" />
       <div className="fixed inset-0 pointer-events-none overflow-hidden -z-20">
         <div className="absolute inset-0 bg-[radial-gradient(#e4e4e7_1px,transparent_1px)] dark:bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:28px_28px] opacity-70 dark:opacity-40" />
         <motion.div
@@ -543,6 +600,25 @@ export default function LandingPage() {
           transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
           className="absolute top-28 right-1/4 w-[650px] h-[550px] rounded-full bg-zinc-200/20 dark:bg-zinc-800/15 blur-[150px]"
         />
+        {/* Additional smaller orbs: circular orbit */}
+        <motion.div
+          animate={{ x: [0, 40, 0, -40, 0], y: [0, 30, 0, -30, 0] }}
+          transition={{ duration: 22, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute top-1/3 left-1/2 w-[300px] h-[300px] rounded-full bg-zinc-200/20 dark:bg-violet-900/15 blur-[120px]"
+        />
+        {/* Additional smaller orbs: diagonal drift */}
+        <motion.div
+          animate={{ x: [0, 35, 0], y: [0, -25, 0] }}
+          transition={{ duration: 25, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute bottom-1/4 right-1/3 w-[250px] h-[250px] rounded-full bg-zinc-200/20 dark:bg-violet-900/15 blur-[100px]"
+        />
+        {/* Second parallax layer: large background particles */}
+        <motion.div style={{ y: bgParallaxY }} className="absolute inset-0">
+          <div className="absolute top-[20%] left-[10%] w-2 h-2 rounded-full bg-zinc-400/20 dark:bg-violet-500/15 blur-[2px]" />
+          <div className="absolute top-[45%] right-[15%] w-3 h-3 rounded-full bg-zinc-400/15 dark:bg-white/10 blur-[2px]" />
+          <div className="absolute top-[65%] left-[40%] w-2.5 h-2.5 rounded-full bg-zinc-400/18 dark:bg-violet-500/12 blur-[2px]" />
+          <div className="absolute top-[15%] right-[30%] w-2 h-2 rounded-full bg-zinc-400/20 dark:bg-white/12 blur-[2px]" />
+        </motion.div>
       </div>
 
       {/* ========================================================= */}
@@ -550,7 +626,7 @@ export default function LandingPage() {
       {/* ========================================================= */}
       <header className="fixed top-0 left-0 right-0 z-50 flex flex-col items-center px-4 sm:px-6 lg:px-8 pt-3 sm:pt-4 pointer-events-none transition-all">
         <motion.div
-          initial={{ y: -50, opacity: 0 }}
+          initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ type: "spring", stiffness: 320, damping: 28 }}
           className={cn(
@@ -562,6 +638,12 @@ export default function LandingPage() {
             isScrolled && "bg-white/95 dark:bg-zinc-950/95 border-zinc-300 dark:border-zinc-700 shadow-xl"
           )}
         >
+          {/* Scroll progress bar at bottom of navbar */}
+          <motion.div
+            className="absolute bottom-0 left-0 h-[2px] rounded-full bg-zinc-950 dark:bg-white origin-left"
+            style={{ width: progressWidth }}
+          />
+
           {/* Columna 1 (Izquierda): Logo y Marca */}
           <div className="flex-1 flex items-center justify-start">
             <a
@@ -569,7 +651,7 @@ export default function LandingPage() {
               className="flex items-center gap-2.5 select-none group cursor-pointer"
             >
               <motion.div
-                whileHover={{ rotate: 15, scale: 1.1 }}
+                whileHover={{ rotate: 15, scale: 1.1, filter: "brightness(2)" }}
                 transition={{ type: "spring", stiffness: 400, damping: 17 }}
                 className="relative flex h-8 w-8 sm:h-8.5 sm:w-8.5 items-center justify-center rounded-full bg-zinc-950 dark:bg-white text-white dark:text-black shadow-md"
               >
@@ -587,28 +669,43 @@ export default function LandingPage() {
           {/* Columna 2 (Centro): Navegación central simétricamente centrada */}
           <nav
             className="hidden lg:flex flex-none items-center justify-center gap-1.5 relative"
-            onMouseLeave={() => setOpenDropdown(null)}
+            onMouseLeave={() => { setOpenDropdown(null); setHoveredNav(null) }}
           >
             {NAV_DROPDOWNS.map((grp) => {
               const isOpen = openDropdown === grp.id
+              const isHovered = hoveredNav === grp.id
 
               return (
                 <div
                   key={grp.id}
                   className="relative"
-                  onMouseEnter={() => setOpenDropdown(grp.id)}
+                  onMouseEnter={() => { setOpenDropdown(grp.id); setHoveredNav(grp.id) }}
                 >
                   <button
                     type="button"
                     onClick={() => setOpenDropdown(isOpen ? null : grp.id)}
                     className={cn(
-                      "px-3.5 py-1.5 text-xs font-semibold rounded-full transition-all flex items-center gap-1.5 select-none cursor-pointer",
-                      isOpen
-                        ? "text-zinc-950 dark:text-zinc-100 bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700"
-                        : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:bg-zinc-100/80 dark:hover:bg-zinc-900/60"
+                      "relative px-3.5 py-1.5 text-xs font-semibold rounded-full transition-colors flex items-center gap-1.5 select-none cursor-pointer z-10",
+                      isOpen || isHovered
+                        ? "text-zinc-950 dark:text-zinc-100"
+                        : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
                     )}
                     aria-expanded={isOpen}
                   >
+                    {/* Hover background pill with layoutId for shared transition */}
+                    <AnimatePresence>
+                      {(isHovered || isOpen) && (
+                        <motion.span
+                          key="hoverBg"
+                          layoutId="hoverBg"
+                          className="absolute inset-0 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 -z-10"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.15 }}
+                        />
+                      )}
+                    </AnimatePresence>
                     <span>{grp.label}</span>
                     <ChevronDown
                       className={cn(
@@ -674,15 +771,44 @@ export default function LandingPage() {
             })}
 
             {/* Enlaces directos sin submenú (Precios y Acceso Demo) */}
-            {DIRECT_NAV_ITEMS.map((item) => (
-              <a
-                key={item.id}
-                href={item.href}
-                className="px-3.5 py-1.5 text-xs font-semibold rounded-full text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:bg-zinc-100/80 dark:hover:bg-zinc-900/60 transition-colors select-none"
-              >
-                {item.label}
-              </a>
-            ))}
+            {DIRECT_NAV_ITEMS.map((item) => {
+              const isActive = activeNav === item.id
+              const isItemHovered = hoveredNav === item.id
+              return (
+                <a
+                  key={item.id}
+                  href={item.href}
+                  onMouseEnter={() => setHoveredNav(item.id)}
+                  onMouseLeave={() => setHoveredNav(null)}
+                  onClick={() => setActiveNav(item.id)}
+                  className="relative px-3.5 py-1.5 text-xs font-semibold rounded-full text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-colors select-none z-10"
+                >
+                  {/* Shared hover background */}
+                  <AnimatePresence>
+                    {isItemHovered && (
+                      <motion.span
+                        key="hoverBg"
+                        layoutId="hoverBg"
+                        className="absolute inset-0 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 -z-10"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.15 }}
+                      />
+                    )}
+                  </AnimatePresence>
+                  {/* Active section indicator */}
+                  {isActive && (
+                    <motion.span
+                      layoutId="navIndicator"
+                      className="absolute inset-0 rounded-full bg-zinc-950 dark:bg-white -z-10"
+                      transition={{ type: "spring", stiffness: 350, damping: 30 }}
+                    />
+                  )}
+                  <span className={isActive ? "text-white dark:text-zinc-950" : ""}>{item.label}</span>
+                </a>
+              )
+            })}
           </nav>
 
           {/* Columna 3 (Derecha): Acciones (ThemeToggle + Iniciar Sesión + Probar Gratis) */}
@@ -823,6 +949,26 @@ export default function LandingPage() {
       {/* 2. HERO SECTION ESTILO SAAS MODERNO & ELEGANTE            */}
       {/* ========================================================= */}
       <section id="home" className="relative z-10 pt-28 sm:pt-36 pb-16 sm:pb-24 px-4 sm:px-6 overflow-hidden">
+        {/* Animated gradient background */}
+        <motion.div
+          className="absolute inset-0 -z-10 opacity-60 dark:opacity-40 pointer-events-none"
+          animate={{ backgroundPosition: ["0% 0%", "100% 100%", "0% 0%"] }}
+          transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+          style={{
+            background: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 50%, #f8fafc 100%)",
+            backgroundSize: "200% 200%",
+          }}
+        />
+        <motion.div
+          className="absolute inset-0 -z-10 opacity-0 dark:opacity-100 pointer-events-none"
+          animate={{ backgroundPosition: ["0% 0%", "100% 100%", "0% 0%"] }}
+          transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+          style={{
+            background: "linear-gradient(135deg, #09090b 0%, #18181b 50%, #09090b 100%)",
+            backgroundSize: "200% 200%",
+          }}
+        />
+
         <motion.div style={{ y: heroParallaxY }} className="mx-auto max-w-6xl text-center">
 
           {/* Badge Pill Superior (Estilo del Referente) */}
@@ -838,28 +984,58 @@ export default function LandingPage() {
             <span className="text-zinc-600 dark:text-zinc-300">POS & Agentes IA en Tiempo Real</span>
           </motion.div>
 
-          {/* Headline Limpio y Elegante con Icono Destacado Embebido */}
-          <motion.h1
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
-            className="text-4xl sm:text-6xl md:text-7xl font-extrabold tracking-tight text-zinc-950 dark:text-white max-w-4xl mx-auto leading-[1.12]"
-          >
-            Hacemos la Gestión de tu Empresa{" "}
-            <span className="inline-flex items-center gap-2 align-middle">
-              <span className="inline-flex items-center justify-center h-8 w-8 sm:h-12 sm:w-12 rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-black shadow-md">
-                <Zap className="h-4 w-4 sm:h-6 sm:w-6 fill-white dark:fill-black" />
-              </span>
-            </span>
+          {/* Headline con word-by-word clip-path reveal */}
+          <h1 className="text-4xl sm:text-6xl md:text-7xl font-extrabold tracking-tight text-zinc-950 dark:text-white max-w-4xl mx-auto leading-[1.12]">
+            <motion.span
+              className="inline"
+              variants={heroWordContainerVariants}
+              initial="hidden"
+              animate="visible"
+            >
+              {["Hacemos", "la", "Gestión", "de", "tu", "Empresa"].map((word, i) => (
+                <motion.span
+                  key={i}
+                  variants={heroWordVariants}
+                  className="inline-block mr-[0.25em] overflow-hidden"
+                  style={{ verticalAlign: "top" }}
+                >
+                  {word}
+                </motion.span>
+              ))}
+              <motion.span
+                variants={heroWordVariants}
+                className="inline-flex items-center gap-2 align-middle mx-1"
+              >
+                <span className="inline-flex items-center justify-center h-8 w-8 sm:h-12 sm:w-12 rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-black shadow-md">
+                  <Zap className="h-4 w-4 sm:h-6 sm:w-6 fill-white dark:fill-black" />
+                </span>
+              </motion.span>
+            </motion.span>
             <br />
-            Más Fácil & Rentable
-          </motion.h1>
+            <motion.span
+              className="inline"
+              variants={heroWordContainerVariants}
+              initial="hidden"
+              animate="visible"
+            >
+              {["Más", "Fácil", "&", "Rentable"].map((word, i) => (
+                <motion.span
+                  key={i}
+                  variants={heroWordVariants}
+                  className="inline-block mr-[0.25em] overflow-hidden"
+                  style={{ verticalAlign: "top" }}
+                >
+                  {word}
+                </motion.span>
+              ))}
+            </motion.span>
+          </h1>
 
           {/* Subtítulo descriptivo con tipografía balanceada */}
           <motion.p
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
+            transition={{ duration: 0.5, delay: 0.5 }}
             className="mt-6 text-base sm:text-lg text-zinc-700 dark:text-zinc-300 max-w-2xl mx-auto leading-relaxed font-normal"
           >
             Administra inventario, acelera tus ventas en mostrador, cuadra tu caja sin descuadres y conecta Agentes de IA autónomos con protocolo MCP en una sola suite profesional.
@@ -869,7 +1045,7 @@ export default function LandingPage() {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
+            transition={{ duration: 0.5, delay: 0.6 }}
             className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3.5"
           >
             <Button
@@ -898,7 +1074,7 @@ export default function LandingPage() {
           <motion.div
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.35 }}
+            transition={{ duration: 0.5, delay: 0.75 }}
             className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3"
           >
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/90 dark:bg-zinc-900/90 border border-zinc-200/90 dark:border-zinc-800 text-xs font-semibold text-zinc-700 dark:text-zinc-300 shadow-2xs">

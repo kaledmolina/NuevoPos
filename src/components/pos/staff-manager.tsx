@@ -622,8 +622,8 @@ export default function StaffManager() {
 
   // Métricas
   const primaryAdmin = users.find((u) => u.isPrimary)
-  const ownerDisplayName = primaryAdmin?.name || tenantOwnerName || "Administrador Principal"
-  const ownerDisplayEmail = primaryAdmin?.email || tenantOwnerEmail || "admin@pos.com"
+  const ownerDisplayName = useMemo(() => primaryAdmin?.name || tenantOwnerName || "Administrador Principal", [primaryAdmin?.name, tenantOwnerName])
+  const ownerDisplayEmail = useMemo(() => primaryAdmin?.email || tenantOwnerEmail || "admin@pos.com", [primaryAdmin?.email, tenantOwnerEmail])
   const adminCount = users.filter((u) => u.role === "admin" && u.active).length
   const sellerCount = users.filter((u) => u.role === "vendedor" && u.active).length
   const branchUsagePercent = Math.min(Math.round((branches.length / MAX_BRANCHES) * 100), 100)
