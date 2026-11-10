@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/api"
 import { formatCurrency, formatCurrencyCompact, formatNumber, expirationStatus, daysUntil, formatDateTime } from "@/lib/format"
 import { useAppStore } from "@/lib/store"
 import { ROLE_CONFIG } from "@/lib/permissions"
+import type { DriverSettlementApiResponse } from "@/components/pos/driver-settlement"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -22,6 +23,15 @@ import {
   IconArrowRight,
   IconArrowUpRight,
   IconActivity,
+  IconMotorbike,
+  IconTruckDelivery,
+  IconCalculator,
+  IconCoins,
+  IconMapPin,
+  IconBrandGoogleMaps,
+  IconHistory,
+  IconBuildingStore,
+  IconCircleCheck,
 } from "@tabler/icons-react"
 import {
   Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid,
@@ -47,21 +57,414 @@ interface DashboardData {
   totalProducts: number
 }
 
+interface DriverOrderLite {
+  id: string
+  orderNumber: string
+  customerName: string
+  customerPhone: string
+  deliveryAddress: string | null
+  deliveryLatitude?: number | null
+  deliveryLongitude?: number | null
+  deliveryDriverId?: string | null
+  total: number
+  deliveryFee: number
+  paymentMethod: string
+  paymentStatus: string
+  status: string
+  createdAt: string
+}
+
+interface DriverDashboardState {
+  orders: DriverOrderLite[]
+  counts: {
+    available: number
+    active: number
+    delivered: number
+    unsettled: number
+  }
+  settlement: DriverSettlementApiResponse | null
+}
+
 export default function DashboardView() {
   const [data, setData] = useState<DashboardData | null>(null)
+  const [driverData, setDriverData] = useState<DriverDashboardState | null>(null)
   const [loading, setLoading] = useState(true)
   const setView = useAppStore((s) => s.setView)
   const refreshKey = useAppStore((s) => s.refreshKey)
   const role = useAppStore((s) => s.role)
+  const userName = useAppStore((s) => s.userName)
+  const activeBranch = useAppStore((s) => s.activeBranch)
+  const isDriver = role === "domiciliario"
   const canSeeCosts = role ? ROLE_CONFIG[role].canSeeCosts : false
 
   useEffect(() => {
+    let active = true
     setLoading(true)
-    apiFetch<DashboardData>("/api/dashboard")
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() => setLoading(false))
-  }, [refreshKey])
+
+    if (isDriver) {
+      const branchQuery = activeBranch?.id ? `&branchId=${encodeURIComponent(activeBranch.id)}` : ""
+      Promise.all([
+        apiFetch<{
+          ok: boolean
+          data?: {
+            orders?: DriverOrderLite[]
+            counts?: { available: number; active: number; delivered: number; unsettled: number }
+          }
+        }>(`/api/v1/delivery/orders?pageSize=30${branchQuery}`),
+        apiFetch<DriverSettlementApiResponse>(`/api/cash/driver-settlement?range=all${branchQuery}`),
+      ])
+        .then(([ordersRes, settlementRes]) => {
+          if (!active) return
+          const orders = ordersRes?.data?.orders || []
+          const counts = ordersRes?.data?.counts || {
+            available: orders.filter((o) => !o.deliveryDriverId).length,
+            active: orders.filter((o) => o.deliveryDriverId && o.status !== "entregado" && o.status !== "cancelado").length,
+            delivered: orders.filter((o) => o.deliveryDriverId && o.status === "entregado").length,
+            unsettled: orders.filter((o) => o.deliveryDriverId && o.status === "entregado" && o.paymentStatus !== "pagado").length,
+          }
+          setDriverData({
+            orders,
+            counts,
+            settlement: settlementRes || null,
+          })
+        })
+        .catch(() => {
+          if (active) setDriverData(null)
+        })
+        .finally(() => {
+          if (active) setLoading(false)
+        })
+    } else {
+      apiFetch<DashboardData>("/api/dashboard")
+        .then((res) => {
+          if (active) setData(res)
+        })
+        .catch(() => {
+          if (active) setData(null)
+        })
+        .finally(() => {
+          if (active) setLoading(false)
+        })
+    }
+
+    return () => {
+      active = false
+    }
+  }, [refreshKey, isDriver, activeBranch?.id])
+
+  if (isDriver) {
+    if (loading || !driverData) {
+      return (
+        <div className="p-4 md:p-6 space-y-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-28 rounded-2xl" />
+            ))}
+          </div>
+          <Skeleton className="h-72 rounded-2xl" />
+        </div>
+      )
+    }
+
+    const bucket = driverData.settlement?.mySettlement || driverData.settlement?.drivers?.[0] || null
+    const xProducts = bucket?.unsettledCashProductsTotal ?? 0
+    const yDelivery = bucket?.unsettledCashDeliveryTotal ?? 0
+    const grossToDeliver = bucket?.unsettledCashGrossTotal ?? 0
+    const settledTodayGross = bucket?.settledTodayGrossTotal ?? 0
+    const settledTodayCount = bucket?.settledTodayCount ?? 0
+    const nonCashPendingCount = bucket?.unsettledNonCashCount ?? 0
+    const nonCashPendingAmount = bucket?.unsettledNonCashTotal ?? 0
+    const cashOpen = Boolean(driverData.settlement?.openSession)
+    const history = driverData.settlement?.history || []
+    const upcomingOrders = driverData.orders
+      .filter((o) => o.status !== "entregado" && o.status !== "cancelado")
+      .slice(0, 6)
+
+    return (
+      <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto pb-24 lg:pb-8">
+        {/* Banner Bienvenida & Acciones Rápidas */}
+        <div className="rounded-2xl border bg-card p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant="secondary" className="text-[11px] font-bold gap-1">
+                <IconMotorbike className="h-3.5 w-3.5" />
+                Resumen del Repartidor
+              </Badge>
+              {activeBranch && (
+                <Badge variant="outline" className="text-[11px] font-semibold gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10">
+                  <IconBuildingStore className="h-3 w-3" />
+                  {activeBranch.name}
+                </Badge>
+              )}
+              <Badge
+                variant="outline"
+                className={
+                  cashOpen
+                    ? "text-[11px] border-emerald-500/30 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10"
+                    : "text-[11px] border-amber-500/30 text-amber-700 dark:text-amber-300 bg-amber-500/10"
+                }
+              >
+                {cashOpen ? "Caja abierta para recibir cuadres" : "Caja cerrada actualmente"}
+              </Badge>
+            </div>
+            <h2 className="text-lg sm:text-xl font-bold tracking-tight">
+              Hola{userName ? `, ${userName}` : ""} · Tu operación de reparto al día
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Consulta pedidos libres para tomar, tus envíos en ruta y el monto exacto (Pedidos X + Domicilios Y) a entregar en Caja.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            <Button size="sm" onClick={() => setView("orders")} className="rounded-xl text-xs gap-1.5 font-bold">
+              <IconTruckDelivery className="h-4 w-4" />
+              Tomar Pedidos ({driverData.counts.available})
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setView("driver_settlement")}
+              className="rounded-xl text-xs gap-1.5 font-bold"
+            >
+              <IconCalculator className="h-4 w-4" />
+              Mi Cuadre de Caja
+            </Button>
+          </div>
+        </div>
+
+        {/* 4 KPI Cards del Domiciliario */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <Card
+            onClick={() => setView("driver_settlement")}
+            className="relative overflow-hidden bg-primary text-primary-foreground border-none rounded-2xl shadow-md cursor-pointer"
+          >
+            <CardContent className="p-4 sm:p-5 flex flex-col justify-between h-full">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs sm:text-sm font-medium text-primary-foreground/80 truncate">
+                  A Entregar en Caja
+                </p>
+                <div className="h-8 w-8 rounded-full bg-white/15 flex items-center justify-center text-white shrink-0">
+                  <IconCoins className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-4">
+                <p className="text-2xl sm:text-3xl font-extrabold tracking-tight truncate">
+                  <span className="sm:hidden">{formatCurrencyCompact(grossToDeliver)}</span>
+                  <span className="hidden sm:inline">{formatCurrency(grossToDeliver)}</span>
+                </p>
+                <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/20 text-white px-2.5 py-0.5 text-[10px] font-semibold">
+                  <span>
+                    X: {formatCurrencyCompact(xProducts)} + Y: {formatCurrencyCompact(yDelivery)}
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card
+            onClick={() => setView("orders")}
+            className="rounded-2xl border border-border/80 shadow-xs hover:border-primary/40 transition-colors cursor-pointer"
+          >
+            <CardContent className="p-4 sm:p-5 flex flex-col justify-between h-full">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs sm:text-sm font-medium text-muted-foreground truncate">
+                  Disponibles
+                </p>
+                <div className="h-8 w-8 rounded-full border border-border/80 bg-muted/40 flex items-center justify-center text-muted-foreground shrink-0">
+                  <IconTruckDelivery className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-4">
+                <p className="text-2xl sm:text-3xl font-extrabold tracking-tight">{driverData.counts.available}</p>
+                <p className="text-[11px] text-muted-foreground mt-1.5 truncate">
+                  Sin conductor asignado
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card
+            onClick={() => setView("orders")}
+            className="rounded-2xl border border-border/80 shadow-xs hover:border-primary/40 transition-colors cursor-pointer"
+          >
+            <CardContent className="p-4 sm:p-5 flex flex-col justify-between h-full">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs sm:text-sm font-medium text-muted-foreground truncate">
+                  Mis Envíos Activos
+                </p>
+                <div className="h-8 w-8 rounded-full border border-border/80 bg-muted/40 flex items-center justify-center text-muted-foreground shrink-0">
+                  <IconMotorbike className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-4">
+                <p className="text-2xl sm:text-3xl font-extrabold tracking-tight">{driverData.counts.active}</p>
+                <p className="text-[11px] text-muted-foreground mt-1.5 truncate">
+                  En tienda o en camino
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card
+            onClick={() => setView("driver_settlement")}
+            className="rounded-2xl border border-border/80 shadow-xs hover:border-primary/40 transition-colors cursor-pointer"
+          >
+            <CardContent className="p-4 sm:p-5 flex flex-col justify-between h-full">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs sm:text-sm font-medium text-muted-foreground truncate">
+                  Liquidado Hoy
+                </p>
+                <div className="h-8 w-8 rounded-full border border-border/80 bg-muted/40 flex items-center justify-center text-emerald-600 shrink-0">
+                  <IconCircleCheck className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-4">
+                <p className="text-2xl sm:text-3xl font-extrabold tracking-tight truncate">
+                  <span className="sm:hidden">{formatCurrencyCompact(settledTodayGross)}</span>
+                  <span className="hidden sm:inline">{formatCurrency(settledTodayGross)}</span>
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-1.5 truncate">
+                  {settledTodayCount} pedido(s) liquidados
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Dos Columnas: Próximas Entregas + Desglose de Cuadre & Historial */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Card className="rounded-2xl shadow-xs border-border/80">
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-base font-bold flex items-center gap-2">
+                  <IconTruckDelivery className="h-4 w-4 text-primary" />
+                  Próximas Entregas (Libres & Activas)
+                </CardTitle>
+                <CardDescription>Toca para ir al portal y tomar o completar pedidos</CardDescription>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setView("orders")} className="text-xs">
+                Ver todos <IconArrowRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-2.5">
+              {upcomingOrders.length === 0 ? (
+                <div className="py-8 text-center text-xs text-muted-foreground">
+                  No hay entregas pendientes o libres en este momento.
+                </div>
+              ) : (
+                upcomingOrders.map((ord) => (
+                  <div
+                    key={ord.id}
+                    className="flex items-start justify-between gap-3 p-3 rounded-xl border bg-muted/20 hover:bg-muted/40 transition-colors"
+                  >
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-bold text-xs">#{ord.orderNumber}</span>
+                        <Badge variant="outline" className="text-[10px]">
+                          {!ord.deliveryDriverId ? "Disponible" : ord.status === "en_camino" ? "En Camino" : ord.status}
+                        </Badge>
+                      </div>
+                      <p className="text-xs font-semibold truncate">{ord.customerName}</p>
+                      <p className="text-[11px] text-muted-foreground flex items-center gap-1 truncate">
+                        <IconMapPin className="h-3 w-3 shrink-0 text-rose-500" />
+                        {ord.deliveryAddress || "Recoger en tienda"}
+                      </p>
+                      {ord.deliveryLatitude && ord.deliveryLongitude && (
+                        <a
+                          href={`https://www.google.com/maps?q=${ord.deliveryLatitude},${ord.deliveryLongitude}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          <IconBrandGoogleMaps className="h-3 w-3 text-red-500" />
+                          Abrir GPS ↗
+                        </a>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-mono font-bold text-xs">{formatCurrency(ord.total)}</p>
+                      <p className="text-[10px] text-muted-foreground uppercase">{ord.paymentMethod}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl shadow-xs border-border/80">
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-base font-bold flex items-center gap-2">
+                  <IconCalculator className="h-4 w-4 text-primary" />
+                  Desglose de Cuadre & Liquidaciones
+                </CardTitle>
+                <CardDescription>Efectivo acumulado sin liquidar (X + Y) y cierres recientes</CardDescription>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setView("driver_settlement")} className="text-xs">
+                Detalle <IconArrowRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-xl border bg-muted/20 p-2.5">
+                  <p className="text-[10px] font-semibold text-muted-foreground">Pedidos (X)</p>
+                  <p className="font-mono font-black text-sm mt-0.5 tabular-nums">{formatCurrency(xProducts)}</p>
+                </div>
+                <div className="rounded-xl border bg-muted/20 p-2.5">
+                  <p className="text-[10px] font-semibold text-muted-foreground">Domicilios (Y)</p>
+                  <p className="font-mono font-black text-sm mt-0.5 tabular-nums">{formatCurrency(yDelivery)}</p>
+                </div>
+                <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-2.5">
+                  <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300">Total Caja</p>
+                  <p className="font-mono font-black text-sm text-amber-900 dark:text-amber-200 mt-0.5 tabular-nums">
+                    {formatCurrency(grossToDeliver)}
+                  </p>
+                </div>
+              </div>
+
+              {nonCashPendingCount > 0 && (
+                <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-[11px] text-sky-900 dark:text-sky-200">
+                  📲 Tienes <strong>{nonCashPendingCount}</strong> entrega(s) por transferencia/tarjeta ({formatCurrency(nonCashPendingAmount)}) pendientes de verificación administrativa.
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
+                  <IconHistory className="h-3.5 w-3.5" />
+                  Últimos Cuadres en Caja
+                </div>
+                {history.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-3 text-center border rounded-xl border-dashed">
+                    Aún no registras cuadres liquidados en este periodo.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {history.slice(0, 4).map((h) => (
+                      <div key={h.id} className="flex items-center justify-between gap-2 p-2.5 rounded-xl border text-xs">
+                        <div className="min-w-0">
+                          <p className="font-mono font-bold truncate">{h.settlementRef}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">
+                            {h.orderCount} ped. · Recibió: {h.settledBy} · {formatDateTime(h.settledAt || h.createdAt)}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                            {formatCurrency(h.receivedCash)}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">
+                            X:{formatCurrencyCompact(h.productsTotal)} Y:{formatCurrencyCompact(h.deliveryFeeTotal)}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
 
   if (loading || !data) {
     return (

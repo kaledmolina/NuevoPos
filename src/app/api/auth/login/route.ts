@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import {
-  hashPin, verifyPin, setSessionCookie, checkRateLimit, resetRateLimit, logAudit,
+  hashPin, verifyPin, setSessionCookie, checkRateLimit, resetRateLimit, logAudit, type Role,
 } from "@/lib/auth"
 import { getUserAllowedBranches } from "@/lib/branch"
 
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
       },
     })
     return setSessionCookie(res, {
-      role: user.role as "superadmin" | "admin" | "vendedor",
+      role: user.role as Role,
       name: user.name,
       uid: user.id,
       tenantId: user.tenantId,

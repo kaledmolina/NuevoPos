@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getSession, logAudit } from "@/lib/auth"
+import { verifyEntityBranchAccess } from "@/lib/branch"
 import { apiSuccess, apiError } from "@/lib/api-response"
 import { syncOrderToSale } from "@/lib/order-sale-sync"
 import { notifyCustomerOrderStatus } from "@/lib/order-notifications"
@@ -75,14 +76,30 @@ export async function PATCH(
     }
 
     // Si es domiciliario, puede cambiar entre en_preparacion -> en_camino -> entregado,
-    // pero NUNCA puede marcar el pedido como 'pagado' (eso corresponde únicamente a caja/admin al recibir el dinero).
-    if (session && (session.role === "domiciliario" || session.role === "cliente") && paymentStatus === "pagado") {
-      return apiError("Solo el personal de caja o administrador puede confirmar que un pedido fue pagado al recibir el efectivo.", 403)
+    // pero NUNCA puede alterar manualmente el estado de pago (ni marcar 'pagado' ni revertirlo — eso corresponde únicamente a caja/admin al recibir el dinero).
+    if (session && (session.role === "domiciliario" || session.role === "cliente") && paymentStatus) {
+      return apiError("Solo el personal de caja o administrador puede modificar o confirmar el estado de pago de un pedido.", 403)
     }
 
     if (session && session.role === "domiciliario") {
+      const hasBranchAccess = await verifyEntityBranchAccess(session.uid, order.branchId)
+      if (!hasBranchAccess) {
+        return apiError("No tienes autorización para actualizar pedidos de esta sede", 403)
+      }
+      if (!order.deliveryDriverId) {
+        return apiError("Primero debes tomar este pedido antes de cambiar su estado", 403)
+      }
+      if (order.deliveryDriverId !== session.uid) {
+        return apiError("Solo el repartidor asignado puede actualizar este pedido", 403)
+      }
       if (rawStatus && !["en_camino", "entregado"].includes(rawStatus)) {
         return apiError("Los domiciliarios solo pueden actualizar pedidos a 'en_camino' o 'entregado'", 403)
+      }
+      if (rawDeliveryFee !== null) {
+        return apiError("Solo el comercio puede modificar la tarifa de domicilio", 403)
+      }
+      if (paymentMethod) {
+        return apiError("Solo el comercio puede modificar el método de pago del pedido", 403)
       }
     }
 

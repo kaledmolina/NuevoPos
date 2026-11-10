@@ -51,6 +51,7 @@ export interface BranchItem {
 interface AppState {
   // Autenticación (sesión validada server-side vía cookie httpOnly)
   hydrated: boolean
+  userId: string | null
   role: Role | null
   userName: string | null
   userEmail: string | null
@@ -127,6 +128,7 @@ export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       hydrated: false,
+      userId: null,
       role: null,
       userName: null,
       userEmail: null,
@@ -186,6 +188,7 @@ export const useAppStore = create<AppState>()(
           const [authData, branchList] = await Promise.all([
             apiFetch<{
               user: {
+                uid?: string
                 name: string
                 role: Role
                 email?: string | null
@@ -220,6 +223,7 @@ export const useAppStore = create<AppState>()(
             }
 
             set({
+              userId: authData.user.uid ?? null,
               role: authData.user.role,
               userName: authData.user.name,
               userEmail: authData.user.email ?? null,
@@ -240,6 +244,7 @@ export const useAppStore = create<AppState>()(
         }
         set({
           hydrated: true,
+          userId: null,
           role: null,
           userName: null,
           userEmail: null,
@@ -257,6 +262,7 @@ export const useAppStore = create<AppState>()(
         const data = await apiFetch<{
           ok: boolean
           user: {
+            id?: string
             name: string
             role: Role
             email?: string | null
@@ -285,6 +291,7 @@ export const useAppStore = create<AppState>()(
         }
 
         set({
+          userId: data.user.id ?? null,
           role: data.user.role,
           userName: data.user.name,
           userEmail: data.user.email ?? null,
@@ -317,6 +324,7 @@ export const useAppStore = create<AppState>()(
           /* noop */
         }
         set({
+          userId: null,
           role: null,
           userName: null,
           userEmail: null,

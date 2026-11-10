@@ -59,6 +59,9 @@ import {
   IconX,
   IconLoader2,
   IconLock,
+  IconBrandGoogleMaps,
+  IconTruckDelivery,
+  IconInfoCircle,
 } from "@tabler/icons-react"
 
 export interface SettlementOrderSummary {
@@ -67,6 +70,8 @@ export interface SettlementOrderSummary {
   customerName: string
   customerPhone: string
   deliveryAddress: string | null
+  deliveryLatitude?: number | null
+  deliveryLongitude?: number | null
   paymentMethod: string
   paymentStatus: string
   status: string
@@ -130,6 +135,7 @@ export interface DriverSettlementRecord {
 
 export interface DriverSettlementApiResponse {
   ok: boolean
+  isDriverSelf?: boolean
   openSession: {
     id: string
     openedAt: string
@@ -154,6 +160,7 @@ export interface DriverSettlementApiResponse {
     totalInTransitAmount: number
     driversWithDebtCount: number
   }
+  mySettlement?: DriverSettlementBucket | null
   drivers: DriverSettlementBucket[]
   history: DriverSettlementRecord[]
 }
@@ -161,13 +168,18 @@ export interface DriverSettlementApiResponse {
 export function DriverSettlementView({
   onSettled,
   compactHeader = false,
+  driverSelfMode = false,
 }: {
   onSettled?: () => void
   compactHeader?: boolean
+  driverSelfMode?: boolean
 }) {
   const activeBranch = useAppStore((s) => s.activeBranch)
   const refreshKey = useAppStore((s) => s.refreshKey)
   const triggerRefresh = useAppStore((s) => s.triggerRefresh)
+  const role = useAppStore((s) => s.role)
+  const setView = useAppStore((s) => s.setView)
+  const isDriverSelf = driverSelfMode || role === "domiciliario"
 
   const [data, setData] = useState<DriverSettlementApiResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -194,11 +206,13 @@ export function DriverSettlementView({
   // Modal de detalle de pedidos en ruta (solo lectura)
   const [inTransitDriver, setInTransitDriver] = useState<DriverSettlementBucket | null>(null)
 
+  const branchId = activeBranch?.id
+
   const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const branchQuery = activeBranch?.id ? `&branchId=${encodeURIComponent(activeBranch.id)}` : ""
+      const branchQuery = branchId ? `&branchId=${encodeURIComponent(branchId)}` : ""
       const res = await apiFetch<DriverSettlementApiResponse>(
         `/api/cash/driver-settlement?range=${range}${branchQuery}`
       )
@@ -208,23 +222,29 @@ export function DriverSettlementView({
     } finally {
       setLoading(false)
     }
-  }, [activeBranch?.id, range])
+  }, [branchId, range])
 
   useEffect(() => {
     loadData()
   }, [loadData, refreshKey])
 
   const filteredDrivers = useMemo(() => {
-    if (!data?.drivers) return []
+    const drivers = data?.drivers
+    if (!drivers) return []
     const q = driverSearch.trim().toLowerCase()
-    if (!q) return data.drivers
-    return data.drivers.filter(
+    if (!q) return drivers
+    return drivers.filter(
       (d) =>
         d.driverName.toLowerCase().includes(q) ||
         (d.driverPhone && d.driverPhone.toLowerCase().includes(q)) ||
         (d.telegramUsername && d.telegramUsername.toLowerCase().includes(q))
     )
-  }, [data?.drivers, driverSearch])
+  }, [data, driverSearch])
+
+  const myBucket = useMemo(
+    () => data?.mySettlement || data?.drivers?.[0] || null,
+    [data]
+  )
 
   const driversWithPendingAction = useMemo(
     () =>
@@ -529,7 +549,7 @@ export function DriverSettlementView({
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-lg font-bold flex items-center gap-2 text-foreground">
                 <IconMotorbike className="h-5 w-5 text-primary" />
-                Cuadre de Caja con Domiciliarios
+                {isDriverSelf ? "Mi Cuadre de Caja y Resumen" : "Cuadre de Caja con Domiciliarios"}
               </h3>
               {data?.branch?.name && (
                 <Badge variant="outline" className="text-[11px] gap-1 font-medium">
@@ -540,17 +560,19 @@ export function DriverSettlementView({
               {data?.openSession ? (
                 <Badge className="text-[11px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20 gap-1 font-semibold">
                   <IconCircleCheck className="h-3 w-3" />
-                  Caja Abierta (Ingresa directo al arqueo)
+                  {isDriverSelf ? "Caja de sede abierta (puedes liquidar)" : "Caja Abierta (Ingresa directo al arqueo)"}
                 </Badge>
               ) : (
                 <Badge variant="outline" className="text-[11px] text-amber-700 dark:text-amber-400 border-amber-500/30 bg-amber-500/10 gap-1">
                   <IconLock className="h-3 w-3" />
-                  Caja Cerrada (Solo liquida pedidos)
+                  {isDriverSelf ? "Caja de sede cerrada" : "Caja Cerrada (Solo liquida pedidos)"}
                 </Badge>
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Desglose exacto por repartidor: cuánto debe entregar por valor en pedidos (X) y por domicilios (Y) antes de marcar como pagado.
+              {isDriverSelf
+                ? "Consulta cuánto efectivo debes entregar en caja: valor en pedidos (X) más valor en domicilios (Y)."
+                : "Desglose exacto por repartidor: cuánto debe entregar por valor en pedidos (X) y por domicilios (Y) antes de marcar como pagado."}
             </p>
           </div>
         ) : (
@@ -558,12 +580,12 @@ export function DriverSettlementView({
             {data?.openSession ? (
               <Badge className="text-[11px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 gap-1 font-semibold">
                 <IconCircleCheck className="h-3 w-3" />
-                Caja Abierta · Ingresará al arqueo
+                {isDriverSelf ? "Caja abierta" : "Caja Abierta · Ingresará al arqueo"}
               </Badge>
             ) : (
               <Badge variant="outline" className="text-[11px] text-amber-700 dark:text-amber-400 border-amber-500/30 bg-amber-500/10 gap-1">
                 <IconLock className="h-3 w-3" />
-                Caja Cerrada · Solo marca pagados
+                {isDriverSelf ? "Caja cerrada" : "Caja Cerrada · Solo marca pagados"}
               </Badge>
             )}
           </div>
@@ -595,8 +617,97 @@ export function DriverSettlementView({
         </div>
       </div>
 
+      {/* Aviso normativo para repartidores */}
+      {isDriverSelf && (
+        <div className="p-3 rounded-2xl border border-amber-500/30 bg-amber-500/5 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
+          <IconInfoCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="leading-relaxed">
+            <strong>Importante:</strong> Cuando marcas un pedido contraentrega como <strong>Entregado</strong>, pasa a <strong>Sin Liquidar</strong> en tu cuadre. Únicamente el cajero o administrador lo marcará como <strong>Pagado</strong> al recibir físicamente tu dinero en Caja.
+          </div>
+        </div>
+      )}
+
       {/* KPI Strip: X en pedidos, Y en domicilios, Total X+Y, En ruta */}
       {summary && (
+        isDriverSelf ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Card className="rounded-2xl border bg-primary text-primary-foreground shadow-sm">
+              <CardContent className="p-4 flex flex-col justify-between h-full gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-primary-foreground/85 uppercase tracking-wider">
+                    Total a Entregar en Caja
+                  </span>
+                  <IconCoins className="h-4 w-4 text-primary-foreground/85 shrink-0" />
+                </div>
+                <div>
+                  <p className="text-2xl font-extrabold tabular-nums tracking-tight">
+                    {formatCurrency(myBucket?.unsettledCashGrossTotal ?? 0)}
+                  </p>
+                  <p className="text-[11px] text-primary-foreground/85 mt-0.5">
+                    {myBucket?.unsettledCashCount ?? 0} entrega(s) en efectivo sin liquidar
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border bg-card shadow-xs">
+              <CardContent className="p-4 flex flex-col justify-between h-full gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    Valor en Pedidos (X)
+                  </span>
+                  <IconPackage className="h-4 w-4 text-muted-foreground shrink-0" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold tabular-nums tracking-tight text-foreground">
+                    {formatCurrency(myBucket?.unsettledCashProductsTotal ?? 0)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Mercancía recaudada
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border bg-card shadow-xs">
+              <CardContent className="p-4 flex flex-col justify-between h-full gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    Valor en Domicilios (Y)
+                  </span>
+                  <IconMotorbike className="h-4 w-4 text-muted-foreground shrink-0" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold tabular-nums tracking-tight text-foreground">
+                    {formatCurrency(myBucket?.unsettledCashDeliveryTotal ?? 0)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Tarifas de envío cobradas
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border bg-card shadow-xs">
+              <CardContent className="p-4 flex flex-col justify-between h-full gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    Liquidado Hoy / En Ruta
+                  </span>
+                  <IconCircleCheck className="h-4 w-4 text-emerald-500 shrink-0" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold tabular-nums tracking-tight text-foreground">
+                    {formatCurrency(myBucket?.settledTodayGrossTotal ?? 0)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {myBucket?.settledTodayCount ?? 0} pagado(s) hoy · {myBucket?.inTransitCount ?? 0} en camino
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        ) : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <Card className="rounded-2xl border bg-primary text-primary-foreground shadow-sm">
             <CardContent className="p-4 flex flex-col justify-between h-full gap-2">
@@ -674,6 +785,7 @@ export function DriverSettlementView({
             </CardContent>
           </Card>
         </div>
+        )
       )}
 
       {/* Sub-navegación y buscador */}
@@ -690,10 +802,10 @@ export function DriverSettlementView({
             )}
           >
             <IconCalculator className="h-3.5 w-3.5" />
-            Pendientes por Cuadrar
-            {(summary?.totalUnsettledCashOrders ?? 0) > 0 && (
+            {isDriverSelf ? "Por Entregar en Caja" : "Pendientes por Cuadrar"}
+            {(isDriverSelf ? (myBucket?.unsettledCashCount ?? 0) : (summary?.totalUnsettledCashOrders ?? 0)) > 0 && (
               <Badge className="h-4 px-1.5 text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 font-bold">
-                {summary?.totalUnsettledCashOrders}
+                {isDriverSelf ? myBucket?.unsettledCashCount : summary?.totalUnsettledCashOrders}
               </Badge>
             )}
           </button>
@@ -709,11 +821,11 @@ export function DriverSettlementView({
             )}
           >
             <IconHistory className="h-3.5 w-3.5" />
-            Historial de Cuadres ({data?.history?.length || 0})
+            {isDriverSelf ? "Historial de Mis Cuadres" : "Historial de Cuadres"} ({data?.history?.length || 0})
           </button>
         </div>
 
-        {activeTab === "pending" && (
+        {activeTab === "pending" && !isDriverSelf && (
           <div className="relative w-full sm:w-64">
             <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
@@ -737,7 +849,202 @@ export function DriverSettlementView({
       </div>
 
       {/* ==================== PESTAÑA 1: PENDIENTES POR CUADRAR ==================== */}
-      {activeTab === "pending" && (
+      {activeTab === "pending" && isDriverSelf && (
+        <div className="space-y-4">
+          {/* Resumen propio del domiciliario */}
+          {myBucket && (
+            <Card className="rounded-2xl border shadow-xs">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center shrink-0">
+                      <IconMotorbike className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-sm font-bold text-foreground truncate">{myBucket.driverName}</h4>
+                        {myBucket.telegramConnected && (
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] px-1.5 py-0 h-4 border-sky-500/30 text-sky-700 dark:text-sky-400 bg-sky-500/10 gap-0.5"
+                          >
+                            <IconBrandTelegram className="h-2.5 w-2.5" /> Telegram Activo
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {myBucket.driverPhone ? `Tel: ${myBucket.driverPhone} · ` : ""}
+                        {myBucket.settledTodayCount > 0
+                          ? `${myBucket.settledTodayCount} entrega(s) cuadradas hoy por ${formatCurrency(myBucket.settledTodayGrossTotal)}`
+                          : "Sin liquidaciones registradas hoy aún"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {myBucket.inTransitCount > 0 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setInTransitDriver(myBucket)}
+                        className="h-8 rounded-xl text-xs gap-1.5"
+                      >
+                        <IconClock className="h-3.5 w-3.5" />
+                        {myBucket.inTransitCount} en ruta ({formatCurrency(myBucket.inTransitTotal)})
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setView("orders")}
+                      className="h-8 rounded-xl text-xs gap-1.5"
+                    >
+                      <IconTruckDelivery className="h-3.5 w-3.5" />
+                      Ir a Mis Pedidos
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Desglose de pedidos en efectivo entregados y pendientes por liquidar */}
+          <Card className="rounded-2xl border overflow-hidden shadow-xs">
+            <CardHeader className="border-b py-3.5 px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-sm font-bold flex items-center gap-2">
+                  <IconCoins className="h-4 w-4 text-primary" />
+                  Mis Entregas en Efectivo Sin Liquidar ({myBucket?.unsettledCashCount ?? 0})
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Detalle pedido por pedido del dinero que debes entregar al cajero para cerrar tu turno.
+                </CardDescription>
+              </div>
+              {(myBucket?.unsettledCashCount ?? 0) > 0 && (
+                <div className="text-left sm:text-right">
+                  <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+                    Total X + Y a entregar
+                  </span>
+                  <span className="text-base font-extrabold font-mono text-primary tabular-nums">
+                    {formatCurrency(myBucket?.unsettledCashGrossTotal ?? 0)}
+                  </span>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
+              {!myBucket || myBucket.unsettledCashOrders.length === 0 ? (
+                <div className="p-8 text-center space-y-2">
+                  <div className="h-11 w-11 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
+                    <IconCircleCheck className="h-6 w-6" />
+                  </div>
+                  <p className="text-sm font-bold text-foreground">¡Estás al día con Caja!</p>
+                  <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                    No tienes pedidos en efectivo pendientes por entregar. Cuando completes entregas contraentrega, aparecerán aquí sumando Productos (X) + Domicilio (Y).
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader className="bg-muted/30">
+                      <TableRow>
+                        <TableHead className="text-xs">Orden</TableHead>
+                        <TableHead className="text-xs">Cliente / Dirección</TableHead>
+                        <TableHead className="text-xs">Entregado</TableHead>
+                        <TableHead className="text-xs text-right">Pedidos (X)</TableHead>
+                        <TableHead className="text-xs text-right">Domicilio (Y)</TableHead>
+                        <TableHead className="text-xs text-right">Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {myBucket.unsettledCashOrders.map((o) => (
+                        <TableRow key={o.id} className="hover:bg-muted/20">
+                          <TableCell className="text-xs font-mono font-bold whitespace-nowrap">
+                            {o.orderNumber}
+                            <span className="block text-[10px] font-sans font-normal text-muted-foreground capitalize">
+                              {o.paymentMethod} · {o.itemsCount} item(s)
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-xs max-w-[230px]">
+                            <p className="font-semibold text-foreground truncate">{o.customerName}</p>
+                            <p className="text-[11px] text-muted-foreground truncate">{o.deliveryAddress || "Sin dirección"}</p>
+                            {o.deliveryLatitude && o.deliveryLongitude && (
+                              <a
+                                href={`https://www.google.com/maps?q=${o.deliveryLatitude},${o.deliveryLongitude}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline mt-0.5"
+                              >
+                                <IconBrandGoogleMaps className="h-3 w-3 text-red-500" />
+                                Ver GPS ↗
+                              </a>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                            {o.deliveredAt ? formatDateTime(o.deliveredAt) : formatDateTime(o.createdAt)}
+                          </TableCell>
+                          <TableCell className="text-xs text-right font-mono tabular-nums">
+                            {formatCurrency(o.productsAmount)}
+                          </TableCell>
+                          <TableCell className="text-xs text-right font-mono tabular-nums text-muted-foreground">
+                            {formatCurrency(o.deliveryFee)}
+                          </TableCell>
+                          <TableCell className="text-xs text-right font-mono font-bold tabular-nums text-foreground">
+                            {formatCurrency(o.total)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow className="bg-muted/30 font-bold border-t-2">
+                        <TableCell colSpan={3} className="text-xs uppercase text-muted-foreground">
+                          Totales a Entregar ({myBucket.unsettledCashCount} pedidos)
+                        </TableCell>
+                        <TableCell className="text-xs text-right font-mono tabular-nums">
+                          {formatCurrency(myBucket.unsettledCashProductsTotal)}
+                        </TableCell>
+                        <TableCell className="text-xs text-right font-mono tabular-nums">
+                          {formatCurrency(myBucket.unsettledCashDeliveryTotal)}
+                        </TableCell>
+                        <TableCell className="text-sm text-right font-mono font-extrabold text-primary tabular-nums">
+                          {formatCurrency(myBucket.unsettledCashGrossTotal)}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Transferencias / Tarjetas entregadas pendientes de verificación administrativa */}
+          {myBucket && myBucket.unsettledNonCashOrders.length > 0 && (
+            <Card className="rounded-2xl border border-sky-500/30 bg-sky-500/5 overflow-hidden">
+              <CardHeader className="py-3 px-4 border-b border-sky-500/20">
+                <CardTitle className="text-xs font-bold text-sky-900 dark:text-sky-200 flex items-center gap-1.5">
+                  <IconCreditCard className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                  Transferencias / Tarjetas Entregadas Pendientes de Verificación en Caja ({myBucket.unsettledNonCashCount})
+                </CardTitle>
+                <CardDescription className="text-[11px]">
+                  Estos pedidos no suman efectivo a entregar; Caja los verificará en la cuenta bancaria ({formatCurrency(myBucket.unsettledNonCashTotal)}).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-3 space-y-1.5">
+                {myBucket.unsettledNonCashOrders.map((o) => (
+                  <div key={o.id} className="flex items-center justify-between gap-2 text-xs p-2 rounded-xl bg-background/80 border">
+                    <div className="min-w-0">
+                      <span className="font-mono font-bold">{o.orderNumber}</span>
+                      <span className="text-muted-foreground ml-2">{o.customerName} · {o.paymentMethod}</span>
+                    </div>
+                    <span className="font-mono font-bold tabular-nums">{formatCurrency(o.total)}</span>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {activeTab === "pending" && !isDriverSelf && (
         <div className="space-y-4">
           {driversWithPendingAction.length === 0 ? (
             <Card className="rounded-2xl border-dashed">
@@ -1514,6 +1821,17 @@ export function DriverSettlementView({
                       <TableCell className="text-xs">
                         <p className="font-medium">{o.customerName}</p>
                         <p className="text-[10px] text-muted-foreground truncate max-w-[180px]">{o.deliveryAddress}</p>
+                        {o.deliveryLatitude && o.deliveryLongitude && (
+                          <a
+                            href={`https://www.google.com/maps?q=${o.deliveryLatitude},${o.deliveryLongitude}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline mt-0.5"
+                          >
+                            <IconBrandGoogleMaps className="h-3 w-3 text-red-500" />
+                            GPS ↗
+                          </a>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs capitalize">
                         <Badge variant="outline" className="text-[10px]">{o.status.replace("_", " ")}</Badge>

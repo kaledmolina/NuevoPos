@@ -240,6 +240,7 @@ const SECTIONS_CATALOG: Array<{ group: string; items: DocSection[] }> = [
           { id: "orders-create", label: "POST /api/v1/orders" },
           { id: "orders-list", label: "GET /api/v1/orders" },
           { id: "orders-assign", label: "POST /api/v1/orders/{id}/assign" },
+          { id: "orders-status", label: "PATCH /api/v1/orders/{id}/status" },
         ],
       },
       {
@@ -249,6 +250,9 @@ const SECTIONS_CATALOG: Array<{ group: string; items: DocSection[] }> = [
         category: "endpoints",
         subHeadings: [
           { id: "delivery-orders", label: "GET /api/v1/delivery/orders" },
+          { id: "delivery-accept", label: "POST /api/v1/delivery/orders/{id}/accept" },
+          { id: "delivery-complete", label: "POST /api/v1/delivery/orders/{id}/complete" },
+          { id: "delivery-settlement", label: "GET /api/v1/delivery/settlement" },
         ],
       },
       {
@@ -424,12 +428,13 @@ const DETAILED_ENDPOINTS: Record<string, EndpointDef[]> = {
       method: "GET",
       path: "/api/v1/orders",
       title: "Listar Pedidos en Curso",
-      description: "Consulta los pedidos. Se filtra de forma inteligente según el rol autenticado: clientes ven sus pedidos, los comercios ven los de su tienda y los domiciliarios ven sus repartos asignados.",
+      description: "Consulta los pedidos. Se filtra de forma inteligente según el rol autenticado: clientes ven sus pedidos, los comercios ven los de su sede y los domiciliarios ven sus envíos asignados más los pedidos libres disponibles de su sede.",
       category: "orders",
       roles: ["Autenticado (Cliente, Domiciliario, Vendedor, Admin)"],
       headers: { Authorization: "Bearer <TU_TOKEN_AQUI>" },
       queryParams: [
-        { name: "status", type: "string", required: false, description: "Filtrar por estado: 'pendiente', 'confirmado', 'en_preparacion', 'en_camino', 'entregado', 'cancelado'" }
+        { name: "status", type: "string", required: false, description: "Filtrar por estado: 'pendiente', 'confirmado', 'en_preparacion', 'en_camino', 'entregado', 'cancelado'" },
+        { name: "branchId", type: "string", required: false, description: "ID de sede (validado contra sedes autorizadas)" },
       ],
       responseStatus: 200,
       responseExample: {
@@ -453,7 +458,7 @@ const DETAILED_ENDPOINTS: Record<string, EndpointDef[]> = {
       method: "POST",
       path: "/api/v1/orders/{id}/assign",
       title: "Asignar Conductor / Repartidor al Pedido",
-      description: "Asigna un repartidor dedicado al pedido. Opcionalmente actualiza el estado a 'en_camino' y guarda la hora exacta de salida a reparto.",
+      description: "Asigna un repartidor dedicado al pedido (o permite al domiciliario auto-asignarse con protección atómica 409). Opcionalmente actualiza el estado a 'en_camino' y guarda la hora exacta de salida a reparto.",
       category: "orders",
       roles: ["admin", "superadmin", "vendedor", "domiciliario"],
       headers: {
@@ -482,6 +487,35 @@ const DETAILED_ENDPOINTS: Record<string, EndpointDef[]> = {
         },
         message: "Conductor Andrés Repartidor asignado con éxito"
       }
+    },
+    {
+      id: "orders-status",
+      method: "PATCH",
+      path: "/api/v1/orders/{id}/status",
+      title: "Actualizar Estado de Envío o Pago del Pedido",
+      description: "Permite cambiar el estado logístico del pedido. Un domiciliario solo puede modificar pedidos asignados a su cuenta y únicamente hacia 'en_camino' o 'entregado' (sin permiso para marcar 'pagado'). Admin/Vendedor puede confirmar pago recibido ('pagado') al cuadrar caja.",
+      category: "orders",
+      roles: ["admin", "superadmin", "vendedor", "domiciliario"],
+      headers: {
+        Authorization: "Bearer <TU_TOKEN_AQUI>",
+        "Content-Type": "application/json"
+      },
+      requestBody: {
+        status: "en_camino"
+      },
+      responseStatus: 200,
+      responseExample: {
+        ok: true,
+        data: {
+          order: {
+            id: "ord_20261105_1001",
+            orderNumber: "PED-20261105-1001",
+            status: "en_camino",
+            paymentStatus: "pendiente",
+            dispatchedAt: "2026-11-10T14:20:00.000Z"
+          }
+        }
+      }
     }
   ],
   "ep-delivery": [
@@ -489,24 +523,169 @@ const DETAILED_ENDPOINTS: Record<string, EndpointDef[]> = {
       id: "delivery-orders",
       method: "GET",
       path: "/api/v1/delivery/orders",
-      title: "Listar Pedidos para Domiciliarios",
-      description: "Endpoint principal para la App del Repartidor: lista pedidos listos para recoger en sede y despachos en curso asignados a su cuenta.",
+      title: "Listar Pedidos Disponibles y Asignados al Repartidor",
+      description: "Endpoint principal para el Portal Web y App Móvil de Domiciliarios: retorna pedidos libres sin conductor para tomar (Primero en Aceptar), envíos activos en ruta y entregas históricas del repartidor autenticado, junto con contadores resumen.",
       category: "delivery",
-      roles: ["domiciliario", "admin", "superadmin"],
+      roles: ["domiciliario", "vendedor", "admin", "superadmin"],
       headers: { Authorization: "Bearer <TOKEN_DEL_DOMICILIARIO>" },
+      queryParams: [
+        { name: "scope", type: "string", required: false, description: "'all' (por defecto), 'available' (sin conductor), 'active' (mis envíos en curso), 'delivered' (entregados), 'mine' (todos los míos)" },
+        { name: "status", type: "string", required: false, description: "Filtrar por estado: 'pendiente', 'confirmado', 'en_preparacion', 'en_camino', 'entregado'" },
+        { name: "paymentStatus", type: "string", required: false, description: "'unsettled' / 'por_liquidar', 'pendiente', 'por_cobrar' o 'pagado'" },
+        { name: "branchId", type: "string", required: false, description: "ID de sede autorizada (opcional; usa sede por defecto o todas las asignadas)" },
+        { name: "q", type: "string", required: false, description: "Búsqueda por # orden, cliente, teléfono o dirección" }
+      ],
       responseStatus: 200,
       responseExample: {
         ok: true,
         data: {
           orders: [
             {
-              id: "ord_20261105_1001",
-              orderNumber: "PED-20261105-1001",
-              customerName: "Carlos Gómez",
-              deliveryAddress: "Carrera 7 # 120-45, Apto 502",
-              total: 37000,
+              id: "ord_20261110_6158",
+              orderNumber: "PED-20261110-6158",
+              customerName: "Kaled Molina",
+              customerPhone: "573004200048",
+              deliveryAddress: "Calle 6 carrera 7, Barrio La Granja",
+              deliveryLatitude: 8.7559,
+              deliveryLongitude: -75.8881,
+              subtotal: 9200,
+              deliveryFee: 5000,
+              total: 14200,
               paymentMethod: "contraentrega",
-              status: "en_camino"
+              paymentStatus: "pendiente",
+              status: "pendiente",
+              deliveryDriverId: null
+            }
+          ],
+          counts: {
+            available: 1,
+            active: 2,
+            delivered: 14,
+            unsettled: 3
+          },
+          pagination: {
+            total: 17,
+            page: 1,
+            pageSize: 30,
+            totalPages: 1
+          }
+        }
+      }
+    },
+    {
+      id: "delivery-accept",
+      method: "POST",
+      path: "/api/v1/delivery/orders/{id}/accept",
+      title: "Tomar Pedido Disponible (Adjudicación Atómica Primero en Aceptar)",
+      description: "Adjudica el pedido al domiciliario de forma atómica con protección contra condiciones de carrera (HTTP 409 si otro repartidor ya lo tomó). Con dispatchNow: false o mode: 'claim' lo reserva en estado 'confirmado'; por defecto lo marca 'en_camino' y notifica al cliente.",
+      category: "delivery",
+      roles: ["domiciliario", "admin", "superadmin"],
+      headers: {
+        Authorization: "Bearer <TOKEN_DEL_DOMICILIARIO>",
+        "Content-Type": "application/json"
+      },
+      requestBody: {
+        dispatchNow: true,
+        mode: "pickup"
+      },
+      responseStatus: 200,
+      responseExample: {
+        ok: true,
+        data: {
+          order: {
+            id: "ord_20261110_6158",
+            orderNumber: "PED-20261110-6158",
+            status: "en_camino",
+            deliveryDriverId: "usr_domi_1",
+            deliveryDriverName: "kaled_domi",
+            assignedAt: "2026-11-10T14:05:00.000Z",
+            dispatchedAt: "2026-11-10T14:05:00.000Z"
+          },
+          message: "¡Pedido aceptado y en camino! Dirígete a entregarlo a Kaled Molina."
+        }
+      }
+    },
+    {
+      id: "delivery-complete",
+      method: "POST",
+      path: "/api/v1/delivery/orders/{id}/complete",
+      title: "Marcar Pedido como Entregado (Pasa a Sin Liquidar en Cuadre)",
+      description: "Finaliza la entrega logística registrando deliveredAt. Regla contable: el estado de pago pasa a 'por_cobrar' (Sin Liquidar) salvo que ya estuviera verificado como 'pagado'; solo Caja/Admin confirma 'pagado' al recibir el efectivo del cuadre.",
+      category: "delivery",
+      roles: ["domiciliario", "admin", "superadmin"],
+      headers: {
+        Authorization: "Bearer <TOKEN_DEL_DOMICILIARIO>",
+        "Content-Type": "application/json"
+      },
+      responseStatus: 200,
+      responseExample: {
+        ok: true,
+        data: {
+          order: {
+            id: "ord_20261110_6158",
+            orderNumber: "PED-20261110-6158",
+            status: "entregado",
+            paymentStatus: "por_cobrar",
+            deliveredAt: "2026-11-10T14:22:00.000Z"
+          },
+          message: "Entrega finalizada (#PED-20261110-6158). El cobro quedó registrado como Sin Liquidar hasta realizar tu Cuadre de Caja."
+        }
+      }
+    },
+    {
+      id: "delivery-settlement",
+      method: "GET",
+      path: "/api/v1/delivery/settlement",
+      title: "Resumen & Cuadre de Caja del Domiciliario (Pedidos X + Domicilios Y)",
+      description: "Consulta el estado financiero del reparto con aislamiento estricto: un domiciliario solo ve su propio cuadre (mySettlement) e historial de liquidaciones, con desglose exacto de Valor en Pedidos (X) + Valor en Domicilios (Y) = Total a Entregar en Caja, entregas en ruta, transferencias por verificar y recibos históricos.",
+      category: "delivery",
+      roles: ["domiciliario", "vendedor", "admin", "superadmin"],
+      headers: { Authorization: "Bearer <TOKEN_DEL_DOMICILIARIO>" },
+      queryParams: [
+        { name: "range", type: "string", required: false, description: "'all' (por defecto), 'today', 'yesterday', '7d'" },
+        { name: "branchId", type: "string", required: false, description: "ID de sede o 'all' para todas las sedes autorizadas" },
+        { name: "driverId", type: "string", required: false, description: "Solo Admin/Vendedor: filtrar un domiciliario específico" }
+      ],
+      responseStatus: 200,
+      responseExample: {
+        ok: true,
+        data: {
+          role: "domiciliario",
+          range: "all",
+          cashRegisterOpen: true,
+          summary: {
+            totalUnsettledCashOrders: 3,
+            totalUnsettledProductsAmount: 45000,
+            totalUnsettledDeliveryFees: 15000,
+            totalUnsettledGrossAmount: 60000,
+            totalUnsettledNonCashOrders: 1,
+            totalUnsettledNonCashAmount: 22000,
+            totalInTransitOrders: 1,
+            totalInTransitAmount: 14200
+          },
+          mySettlement: {
+            driverId: "usr_domi_1",
+            driverName: "kaled_domi",
+            unsettledCashCount: 3,
+            unsettledCashProductsTotal: 45000,
+            unsettledCashDeliveryTotal: 15000,
+            unsettledCashGrossTotal: 60000,
+            unsettledNonCashCount: 1,
+            unsettledNonCashTotal: 22000,
+            inTransitCount: 1,
+            settledTodayCount: 4,
+            settledTodayGrossTotal: 84000
+          },
+          history: [
+            {
+              settlementRef: "CUA-DOM-20261110-1200",
+              orderCount: 4,
+              productsTotal: 64000,
+              deliveryFeeTotal: 20000,
+              expectedCash: 84000,
+              receivedCash: 84000,
+              difference: 0,
+              settledBy: "Admin Principal"
             }
           ]
         }
@@ -1276,7 +1455,7 @@ export default function ApiDocsView() {
                       <tr className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
                         <td className="p-3 font-mono font-bold text-zinc-700 dark:text-zinc-300">domiciliario</td>
                         <td className="p-3 font-semibold text-slate-900 dark:text-white">Repartidor o conductor</td>
-                        <td className="p-3">Visualizar sus pedidos asignados, confirmar recogida y marcar entregas finalizadas.</td>
+                        <td className="p-3">Tomar pedidos disponibles (Primero en Aceptar), pasar sus envíos a en_camino/entregado y consultar su Cuadre de Caja (X + Y) sin acceso a marcar pagado ni datos globales de caja.</td>
                       </tr>
                       <tr className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
                         <td className="p-3 font-mono font-bold text-zinc-700 dark:text-zinc-300">cliente</td>

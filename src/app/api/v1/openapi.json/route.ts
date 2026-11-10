@@ -125,10 +125,10 @@ export async function GET() {
       },
       "/auth/me": {
         get: {
-          summary: "Obtener perfil del usuario autenticado",
+          summary: "Obtener perfil del usuario autenticado (incluye deliveryStats para domiciliarios)",
           tags: ["Autenticación"],
           security: [{ BearerAuth: [] }],
-          responses: { 200: { description: "Perfil de usuario" } },
+          responses: { 200: { description: "Perfil de usuario y estadísticas de reparto si aplica" } },
         },
       },
       "/businesses": {
@@ -229,9 +229,38 @@ export async function GET() {
           responses: { 200: { description: "Detalle y línea de tiempo del pedido" } },
         },
       },
+      "/orders/{id}/assign": {
+        post: {
+          summary: "Asignar o auto-asignar conductor/repartidor al pedido",
+          tags: ["Pedidos"],
+          security: [{ BearerAuth: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          requestBody: {
+            required: false,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    deliveryDriverId: { type: "string" },
+                    deliveryDriverName: { type: "string" },
+                    deliveryDriverPhone: { type: "string" },
+                    dispatchNow: { type: "boolean", default: false },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Conductor asignado" },
+            403: { description: "Sin autorización de sede o rol" },
+            409: { description: "Otro repartidor ya tomó el pedido" },
+          },
+        },
+      },
       "/orders/{id}/status": {
         patch: {
-          summary: "Actualizar estado del pedido (Confirmar, Preparar, En Camino, Entregar, Cancelar)",
+          summary: "Actualizar estado del pedido (domiciliario solo puede en_camino o entregado sobre sus pedidos)",
           tags: ["Pedidos"],
           security: [{ BearerAuth: [] }],
           parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
@@ -244,39 +273,86 @@ export async function GET() {
                   required: ["status"],
                   properties: {
                     status: { type: "string", enum: ["confirmado", "en_preparacion", "en_camino", "entregado", "cancelado"] },
+                    paymentStatus: { type: "string", enum: ["pendiente", "por_cobrar", "pagado"], description: "Solo Admin/Vendedor" },
+                    paymentMethod: { type: "string", description: "Solo Admin/Vendedor" },
                     cancelReason: { type: "string" },
                   },
                 },
               },
             },
           },
-          responses: { 200: { description: "Estado actualizado" } },
+          responses: {
+            200: { description: "Estado actualizado" },
+            403: { description: "Acción no permitida para el rol actual" },
+          },
         },
       },
       "/delivery/orders": {
         get: {
-          summary: "Listar pedidos disponibles o asignados al domiciliario",
+          summary: "Listar pedidos disponibles y asignados al domiciliario",
           tags: ["Domiciliarios"],
           security: [{ BearerAuth: [] }],
-          responses: { 200: { description: "Lista de pedidos para reparto" } },
+          parameters: [
+            { name: "scope", in: "query", schema: { type: "string", enum: ["all", "available", "active", "delivered", "mine"], default: "all" } },
+            { name: "status", in: "query", schema: { type: "string" } },
+            { name: "paymentStatus", in: "query", schema: { type: "string", enum: ["unsettled", "por_liquidar", "pendiente", "por_cobrar", "pagado"] } },
+            { name: "branchId", in: "query", schema: { type: "string" } },
+            { name: "q", in: "query", schema: { type: "string" } },
+            { name: "page", in: "query", schema: { type: "integer", default: 1 } },
+            { name: "pageSize", in: "query", schema: { type: "integer", default: 30 } },
+          ],
+          responses: { 200: { description: "Lista de pedidos para reparto y contadores (counts)" } },
         },
       },
       "/delivery/orders/{id}/accept": {
         post: {
-          summary: "Tomar pedido para entrega inmediata",
+          summary: "Tomar pedido disponible con adjudicación atómica (Primero en Aceptar)",
           tags: ["Domiciliarios"],
           security: [{ BearerAuth: [] }],
           parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
-          responses: { 200: { description: "Pedido asignado al repartidor" } },
+          requestBody: {
+            required: false,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    dispatchNow: { type: "boolean", default: true },
+                    mode: { type: "string", enum: ["pickup", "claim"] },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Pedido asignado al repartidor" },
+            409: { description: "El pedido ya fue tomado por otro repartidor" },
+          },
         },
       },
       "/delivery/orders/{id}/complete": {
         post: {
-          summary: "Marcar pedido como entregado y cobrado",
+          summary: "Marcar pedido como entregado (deja paymentStatus en por_cobrar para Cuadre de Caja)",
           tags: ["Domiciliarios"],
           security: [{ BearerAuth: [] }],
           parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
-          responses: { 200: { description: "Entrega completada" } },
+          responses: { 200: { description: "Entrega completada y registrada como Sin Liquidar" } },
+        },
+      },
+      "/delivery/settlement": {
+        get: {
+          summary: "Consultar resumen y Cuadre de Caja del domiciliario (Pedidos X + Domicilios Y)",
+          tags: ["Domiciliarios"],
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            { name: "range", in: "query", schema: { type: "string", enum: ["all", "today", "yesterday", "7d"], default: "all" } },
+            { name: "branchId", in: "query", schema: { type: "string" }, description: "ID de sede o 'all'" },
+            { name: "driverId", in: "query", schema: { type: "string" }, description: "Solo Admin/Vendedor" },
+          ],
+          responses: {
+            200: { description: "Resumen de cuadre (mySettlement, summary, openSession, history)" },
+            403: { description: "Sin autorización de sede" },
+          },
         },
       },
       "/sales": {

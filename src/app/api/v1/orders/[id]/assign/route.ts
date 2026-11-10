@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getSession, logAudit } from "@/lib/auth"
+import { verifyEntityBranchAccess } from "@/lib/branch"
 import { apiSuccess, apiError } from "@/lib/api-response"
 import { notifyCustomerOrderStatus } from "@/lib/order-notifications"
 import { notifyDriverAssignedOrder } from "@/lib/telegram-driver"
@@ -46,32 +47,90 @@ export async function POST(
       return apiError("Los domiciliarios no pueden auto-asignarse un pedido que ya figura como entregado", 403)
     }
 
-    let driverId = (body.driverId || "").toString().trim()
-    let driverName = (body.driverName || "").toString().trim()
-    let driverPhone = (body.driverPhone || "").toString().trim()
+    let driverId = (body.driverId || body.deliveryDriverId || "").toString().trim()
+    let driverName = (body.driverName || body.deliveryDriverName || "").toString().trim()
+    let driverPhone = (body.driverPhone || body.deliveryDriverPhone || "").toString().trim()
+    const dispatchNow = Boolean(body.dispatchNow)
 
-    // Si el usuario autenticado es un domiciliario, auto-asignarse
+    // Si el usuario autenticado es un domiciliario, validar sede, First-to-Claim y auto-asignarse
     if (session && session.role === "domiciliario") {
+      const hasBranchAccess = await verifyEntityBranchAccess(session.uid, order.branchId)
+      if (!hasBranchAccess) {
+        return apiError("No tienes autorización para tomar pedidos de esta sede", 403)
+      }
+      if (order.deliveryDriverId && order.deliveryDriverId !== session.uid) {
+        return apiError(
+          `Este pedido ya fue tomado por otro repartidor (${order.deliveryDriverName})`,
+          409
+        )
+      }
       driverId = session.uid
       driverName = session.name
-      // buscar teléfono del domiciliario si existe
-      const driverUser = await db.user.findUnique({ where: { id: session.uid } })
-      driverPhone = driverPhone || driverUser?.email || ""
+      const driverUser = await db.user.findUnique({
+        where: { id: session.uid },
+        select: { phone: true, name: true },
+      })
+      driverName = driverUser?.name || driverName
+      driverPhone = driverPhone || driverUser?.phone || ""
     }
 
     if (!driverName) {
       return apiError("Debes especificar el nombre o ID del repartidor ('driverName')", 400)
     }
 
-    const updated = await db.order.update({
+    const now = new Date()
+    const targetStatus = dispatchNow
+      ? "en_camino"
+      : order.status === "pendiente"
+      ? "confirmado"
+      : order.status
+
+    // Adjudicación atómica cuando el domiciliario se auto-asigna un pedido libre
+    if (session.role === "domiciliario" && !order.deliveryDriverId) {
+      const claimed = await db.order.updateMany({
+        where: {
+          id: order.id,
+          deliveryDriverId: null,
+          status: { notIn: ["cancelado", "entregado"] },
+        },
+        data: {
+          deliveryDriverId: driverId || null,
+          deliveryDriverName: driverName,
+          deliveryDriverPhone: driverPhone || null,
+          assignedAt: now,
+          ...(dispatchNow ? { dispatchedAt: now } : {}),
+          status: targetStatus,
+        },
+      })
+
+      if (claimed.count === 0) {
+        const latest = await db.order.findUnique({
+          where: { id: order.id },
+          select: { deliveryDriverName: true },
+        })
+        return apiError(
+          latest?.deliveryDriverName
+            ? `Este pedido acaba de ser tomado por otro repartidor (${latest.deliveryDriverName})`
+            : "El pedido ya no está disponible",
+          409
+        )
+      }
+    } else {
+      await db.order.update({
+        where: { id: order.id },
+        data: {
+          deliveryDriverId: driverId || null,
+          deliveryDriverName: driverName,
+          deliveryDriverPhone: driverPhone || null,
+          assignedAt: order.assignedAt || now,
+          ...(dispatchNow && !order.dispatchedAt ? { dispatchedAt: now } : {}),
+          status: targetStatus,
+        },
+      })
+    }
+
+    const updated = await db.order.findUniqueOrThrow({
       where: { id: order.id },
-      data: {
-        deliveryDriverId: driverId || null,
-        deliveryDriverName: driverName,
-        deliveryDriverPhone: driverPhone || null,
-        assignedAt: new Date(),
-        status: order.status === "pendiente" ? "confirmado" : order.status,
-      },
       include: {
         items: true,
         tenant: { select: { id: true, name: true, ownerPhone: true } },
@@ -89,11 +148,19 @@ export async function POST(
     })
 
     // Notificar al cliente que ya tiene repartidor asignado (Telegram o WhatsApp, sin IA)
-    notifyCustomerOrderStatus({
-      orderId: updated.id,
-      newStatus: "asignado",
-      customMessage: `🛵 *¡Repartidor asignado!*\n\nHola ${updated.customerName || "Cliente"}, tu pedido *#${updated.orderNumber}* fue asignado al repartidor *${driverName}*. Pronto saldrá en camino.`,
-    }).catch(() => {})
+    if (dispatchNow && order.status !== "en_camino") {
+      notifyCustomerOrderStatus({
+        orderId: updated.id,
+        newStatus: "en_camino",
+        oldStatus: order.status,
+      }).catch(() => {})
+    } else {
+      notifyCustomerOrderStatus({
+        orderId: updated.id,
+        newStatus: "asignado",
+        customMessage: `🛵 *¡Repartidor asignado!*\n\nHola ${updated.customerName || "Cliente"}, tu pedido *#${updated.orderNumber}* fue asignado al repartidor *${driverName}*. Pronto saldrá en camino.`,
+      }).catch(() => {})
+    }
 
     // Notificar al domiciliario asignado vía Telegram (si tiene cuenta vinculada)
     notifyDriverAssignedOrder(updated.id).catch((err) => {

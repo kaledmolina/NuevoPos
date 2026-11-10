@@ -57,6 +57,7 @@ import {
   IconMail,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
+  IconCalculator,
 } from "@tabler/icons-react"
 import { cn } from "@/lib/utils"
 
@@ -82,6 +83,7 @@ import StaffManager from "@/components/pos/staff-manager"
 import SuperadminPanel from "@/components/pos/superadmin-panel"
 import ApiDocsView from "@/components/pos/api-docs"
 import WhatsAppAgentView from "@/components/pos/whatsapp-agent"
+import { DriverSettlementView } from "@/components/pos/driver-settlement"
 import { NotificationsBell } from "@/components/pos/notifications-bell"
 import { ThemeToggle } from "@/components/theme-toggle"
 
@@ -107,6 +109,7 @@ const NAV: NavGroup[] = [
     label: "Comercial",
     items: [
       { key: "orders", label: "Pedidos & Domicilios", icon: IconTruckDelivery },
+      { key: "driver_settlement", label: "Mi Cuadre de Caja", icon: IconCalculator },
       { key: "whatsapp", label: "WhatsApp IA", icon: IconBrandWhatsapp },
       { key: "sales", label: "Ventas", icon: IconReceipt2 },
       { key: "clients", label: "Clientes", icon: IconUsers },
@@ -302,7 +305,7 @@ export default function Home() {
   // Redirección de seguridad si un usuario sin rol superadmin cae en la vista superadmin
   useEffect(() => {
     if (view === "superadmin" && (role !== "superadmin" || (userEmail !== "kaledmoly@gmail.com" && userName !== "Superadmin Kaled"))) {
-      setView(role === "admin" ? "dashboard" : "pos")
+      setView(role ? defaultViewFor(role) : "dashboard")
     }
   }, [view, role, userEmail, userName, setView])
 
@@ -320,9 +323,12 @@ export default function Home() {
       .catch(() => {})
   }, [role, refreshKey])
 
-  // Verificar si hay caja abierta (para avisar al cerrar sesión)
+  // Verificar si hay caja abierta (para avisar al cerrar sesión) - solo roles que operan caja
   useEffect(() => {
-    if (!role) return
+    if (!role || role === "domiciliario" || role === "cliente") {
+      setCashOpen(false)
+      return
+    }
     let active = true
     const checkCash = () => {
       apiFetch<{ status?: string } | null>("/api/cash")
@@ -429,9 +435,14 @@ export default function Home() {
 
   const TITLES: Record<ViewKey, { title: string; subtitle: string }> = {
     superadmin: { title: "Panel Superadministrador SaaS", subtitle: "Control global de plataforma, aprobación de negocios y ranking de ventas" },
-    dashboard: { title: "Panel principal", subtitle: `Resumen general de tu ${getRubroLabel(storeRubro).toLowerCase()}` },
+    dashboard: role === "domiciliario"
+      ? { title: "Mi Resumen de Reparto", subtitle: "Pedidos disponibles, entregas activas y total pendiente por entregar en caja" }
+      : { title: "Panel principal", subtitle: `Resumen general de tu ${getRubroLabel(storeRubro).toLowerCase()}` },
     pos: { title: "Punto de venta", subtitle: "Registra ventas y cobra de forma rápida" },
-    orders: { title: "Gestión de Pedidos & Domicilios", subtitle: "Asignación de conductores, seguimiento de despachos y estado de entregas en tiempo real" },
+    orders: role === "domiciliario"
+      ? { title: "Portal de Reparto & Pedidos", subtitle: "Toma pedidos disponibles (Primero en Aceptar), actualiza entregas y consulta tu cuadre" }
+      : { title: "Gestión de Pedidos & Domicilios", subtitle: "Asignación de conductores, seguimiento de despachos y estado de entregas en tiempo real" },
+    driver_settlement: { title: "Mi Cuadre de Caja y Resumen", subtitle: "Desglose de valor en pedidos (X), domicilios (Y), saldo pendiente por entregar e historial de cuadres" },
     products: { title: "Inventario de productos", subtitle: "Gestiona catálogo, precios, stock y categorías" },
     purchases: { title: "Compras y proveedores", subtitle: "Registro de entradas de mercancía" },
     clients: { title: "Directorio de clientes", subtitle: "Administración de clientes y crédito" },
@@ -467,7 +478,11 @@ export default function Home() {
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className={cn("inline-block w-2 h-2 rounded-full shrink-0", cashOpen ? "bg-zinc-950 dark:bg-white" : "bg-muted-foreground/40")} />
               <p className="text-[11px] font-medium text-muted-foreground truncate">
-                {getRubroLabel(storeRubro)} · {cashOpen ? "Caja abierta" : "Caja cerrada"}
+                {role === "domiciliario"
+                  ? "Portal de Repartidores"
+                  : role === "cliente"
+                  ? "Portal de Clientes"
+                  : `${getRubroLabel(storeRubro)} · ${cashOpen ? "Caja abierta" : "Caja cerrada"}`}
               </p>
             </div>
           </div>
@@ -848,7 +863,9 @@ export default function Home() {
           )}
 
           {/* Centro de Notificaciones y Alertas (Campanita) */}
-          <NotificationsBell onNavigate={handleSetView} />
+          {role !== "domiciliario" && role !== "cliente" && (
+            <NotificationsBell onNavigate={handleSetView} />
+          )}
 
           {/* Botón selector de tema claro/oscuro */}
           <ThemeToggle />
@@ -902,9 +919,11 @@ export default function Home() {
                   <IconUsers className="h-4 w-4 mr-2 text-primary" /> Personal & Sedes
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem onClick={() => handleSetView("settings")}>
-                <IconSettings className="h-4 w-4 mr-2" /> Configuración
-              </DropdownMenuItem>
+              {canAccessView(role, "settings") && (
+                <DropdownMenuItem onClick={() => handleSetView("settings")}>
+                  <IconSettings className="h-4 w-4 mr-2" /> Configuración
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={handleLogout}>
                 <IconLogout className="h-4 w-4 mr-2" /> Cerrar sesión
               </DropdownMenuItem>
@@ -924,27 +943,32 @@ export default function Home() {
               className="min-h-full w-full min-w-0 flex flex-col"
             >
               {view === "superadmin" && role === "superadmin" && (userEmail === "kaledmoly@gmail.com" || userName === "Superadmin Kaled") && <SuperadminPanel />}
-              {view === "dashboard" && (
+              {view === "dashboard" && canAccessView(role, "dashboard") && (
                 <>
                   <SetupChecklist />
                   <DashboardView />
                 </>
               )}
-              {view === "pos" && <PosTerminal />}
-              {view === "products" && <ProductsView />}
-              {view === "purchases" && <PurchasesView />}
-              {view === "clients" && <ClientsView />}
-              {view === "suppliers" && <SuppliersView />}
-              {view === "orders" && <OrdersView />}
-              {view === "sales" && <SalesView />}
-              {view === "cash" && <CashView />}
-              {view === "finance" && <FinanceView />}
-              {view === "credit" && <CreditView />}
-              {view === "reports" && <ReportsView />}
-              {view === "personal" && <StaffManager />}
-              {view === "settings" && <SettingsView />}
-              {view === "whatsapp" && <WhatsAppAgentView />}
-              {view === "api_docs" && <ApiDocsView />}
+              {view === "pos" && canAccessView(role, "pos") && <PosTerminal />}
+              {view === "products" && canAccessView(role, "products") && <ProductsView />}
+              {view === "purchases" && canAccessView(role, "purchases") && <PurchasesView />}
+              {view === "clients" && canAccessView(role, "clients") && <ClientsView />}
+              {view === "suppliers" && canAccessView(role, "suppliers") && <SuppliersView />}
+              {view === "orders" && canAccessView(role, "orders") && <OrdersView />}
+              {view === "driver_settlement" && canAccessView(role, "driver_settlement") && (
+                <div className="p-4 sm:p-6 max-w-7xl mx-auto w-full pb-28 lg:pb-8">
+                  <DriverSettlementView driverSelfMode />
+                </div>
+              )}
+              {view === "sales" && canAccessView(role, "sales") && <SalesView />}
+              {view === "cash" && canAccessView(role, "cash") && <CashView />}
+              {view === "finance" && canAccessView(role, "finance") && <FinanceView />}
+              {view === "credit" && canAccessView(role, "credit") && <CreditView />}
+              {view === "reports" && canAccessView(role, "reports") && <ReportsView />}
+              {view === "personal" && canAccessView(role, "personal") && <StaffManager />}
+              {view === "settings" && canAccessView(role, "settings") && <SettingsView />}
+              {view === "whatsapp" && canAccessView(role, "whatsapp") && <WhatsAppAgentView />}
+              {view === "api_docs" && canAccessView(role, "api_docs") && <ApiDocsView />}
             </motion.div>
           </AnimatePresence>
         </main>
@@ -961,9 +985,8 @@ export default function Home() {
             aria-label="Navegación móvil rápida"
             className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-card/95 backdrop-blur-md border-t border-border shadow-lg safe-pad"
           >
-            <div className="grid grid-cols-5 items-center justify-around px-1 py-1.5">
-              {/* Botón 1: Pedidos para domiciliarios, o POS para ventas */}
-              {role === "domiciliario" ? (
+            {role === "domiciliario" ? (
+              <div className="grid grid-cols-5 items-center justify-around px-1 py-1.5">
                 <button
                   data-tour="mobile-nav-orders"
                   onClick={() => handleSetView("orders")}
@@ -975,23 +998,70 @@ export default function Home() {
                   <IconTruckDelivery className="h-5 w-5 stroke-[1.8]" />
                   <span className="mt-0.5">Pedidos</span>
                 </button>
-              ) : (
+
                 <button
-                  data-tour="mobile-nav-pos"
-                  onClick={() => handleSetView("pos")}
-                  className="flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors relative active:scale-95"
+                  data-tour="mobile-nav-settlement"
+                  onClick={() => handleSetView("driver_settlement")}
+                  className={cn(
+                    "flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium transition-colors active:scale-95",
+                    view === "driver_settlement" ? "text-primary font-bold" : "text-muted-foreground hover:text-foreground"
+                  )}
                 >
-                  <div className="relative">
-                    <IconShoppingCart className="h-5 w-5 stroke-[1.8]" />
-                    {cartCount > 0 && (
-                      <span className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-primary-foreground text-[9px] font-bold px-1">
-                        {cartCount}
-                      </span>
-                    )}
-                  </div>
-                  <span className="mt-0.5">Cobrar</span>
+                  <IconCalculator className="h-5 w-5 stroke-[1.8]" />
+                  <span className="mt-0.5">Mi Cuadre</span>
                 </button>
-              )}
+
+                <button
+                  data-tour="mobile-nav-dashboard"
+                  onClick={() => handleSetView("dashboard")}
+                  className={cn(
+                    "flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium transition-colors active:scale-95",
+                    view === "dashboard" ? "text-primary font-bold" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <IconLayoutDashboard className="h-5 w-5 stroke-[1.8]" />
+                  <span className="mt-0.5">Resumen</span>
+                </button>
+
+                <button
+                  data-tour="mobile-nav-apidocs"
+                  onClick={() => handleSetView("api_docs")}
+                  className={cn(
+                    "flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium transition-colors active:scale-95",
+                    view === "api_docs" ? "text-primary font-bold" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <IconCode className="h-5 w-5 stroke-[1.8]" />
+                  <span className="mt-0.5">API Docs</span>
+                </button>
+
+                <button
+                  data-tour="mobile-nav-menu"
+                  onClick={() => setSidebarOpen(true)}
+                  className="flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors active:scale-95"
+                >
+                  <IconMenu2 className="h-5 w-5 stroke-[1.8]" />
+                  <span className="mt-0.5">Menú</span>
+                </button>
+              </div>
+            ) : (
+            <div className="grid grid-cols-5 items-center justify-around px-1 py-1.5">
+              {/* Botón 1: Cobrar POS */}
+              <button
+                data-tour="mobile-nav-pos"
+                onClick={() => handleSetView("pos")}
+                className="flex flex-col items-center justify-center py-1 px-1 rounded-lg text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors relative active:scale-95"
+              >
+                <div className="relative">
+                  <IconShoppingCart className="h-5 w-5 stroke-[1.8]" />
+                  {cartCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-primary-foreground text-[9px] font-bold px-1">
+                      {cartCount}
+                    </span>
+                  )}
+                </div>
+                <span className="mt-0.5">Cobrar</span>
+              </button>
 
               {/* Botón 2: Panel / Ventas */}
               {role === "admin" ? (
@@ -1075,6 +1145,7 @@ export default function Home() {
                 <span className="mt-0.5">Menú</span>
               </button>
             </div>
+            )}
           </nav>
         )}
       </div>

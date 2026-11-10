@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getSession, logAudit } from "@/lib/auth"
+import { getUserAllowedBranches } from "@/lib/branch"
 import { apiSuccess, apiError } from "@/lib/api-response"
 import { broadcastNewOrderToDrivers } from "@/lib/telegram-driver"
 
@@ -43,17 +44,39 @@ export async function GET(req: NextRequest) {
           ]
         })
       } else if (session.role === "domiciliario") {
-        // Un repartidor ve los pedidos que le han sido asignados o los que están listos para despacho
-        if (status) {
-          andConditions.push({ status, deliveryDriverId: session.uid })
-        } else {
+        // Aislamiento multi-negocio y multi-sede estricto para repartidores
+        if (session.tenantId) {
           andConditions.push({
             OR: [
-              { deliveryDriverId: session.uid },
-              { status: { in: ["confirmado", "en_preparacion", "en_camino"] } },
-            ]
+              { tenantId: session.tenantId },
+              { branch: { tenantId: session.tenantId } },
+            ],
           })
         }
+        const allowedBranches = await getUserAllowedBranches(session.uid)
+        if (rawBranchId) {
+          if (!allowedBranches.includes(rawBranchId)) {
+            return apiError("No tienes autorización para consultar pedidos de esta sede", 403)
+          }
+        } else if (allowedBranches.length > 0) {
+          andConditions.push({
+            OR: [
+              { branchId: { in: allowedBranches } },
+              { branchId: null },
+            ],
+          })
+        }
+
+        // Un domiciliario SOLO ve pedidos asignados a su cuenta o pedidos disponibles sin conductor listos para tomar
+        andConditions.push({
+          OR: [
+            { deliveryDriverId: session.uid },
+            {
+              deliveryDriverId: null,
+              status: { in: ["pendiente", "confirmado", "en_preparacion"] },
+            },
+          ],
+        })
       } else if (session.role === "admin" || session.role === "vendedor") {
         // Administradores y vendedores ven los pedidos de su propio negocio
         if (session.tenantId) {

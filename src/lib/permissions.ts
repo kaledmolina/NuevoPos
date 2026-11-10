@@ -7,6 +7,7 @@ export type ViewKey =
   | "dashboard"
   | "pos"
   | "orders"
+  | "driver_settlement"
   | "products"
   | "clients"
   | "suppliers"
@@ -112,8 +113,8 @@ export const ROLE_CONFIG: Record<Role, RoleConfig> = {
   },
   domiciliario: {
     label: "Domiciliario / Repartidor",
-    description: "Acceso a la app de domicilios, pedidos asignados y actualización de estado de entregas.",
-    views: ["dashboard", "orders", "api_docs"],
+    description: "Tomar pedidos disponibles, actualizar entregas en camino/entregado, consultar mi cuadre de caja y API.",
+    views: ["dashboard", "orders", "driver_settlement", "api_docs"],
     canEditProducts: false,
     canManagePurchases: false,
     canManageClients: false,
