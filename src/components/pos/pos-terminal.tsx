@@ -959,7 +959,7 @@ export default function PosTerminal() {
                       <div className="flex gap-2 items-start mb-1">
                         {p.image && (
                           <div className="h-10 w-10 rounded-lg border bg-muted/20 overflow-hidden shrink-0 shadow-2xs img-outline">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            { }
                             <img src={p.image} alt={p.name} className="h-full w-full object-cover" />
                           </div>
                         )}

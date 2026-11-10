@@ -576,7 +576,7 @@ export default function ProductsView() {
                             <div className="flex items-center gap-2.5">
                               {p.image ? (
                                 <div className="h-9 w-9 rounded-lg border bg-muted/30 overflow-hidden shrink-0 shadow-xs">
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  { }
                                   <img src={p.image} alt={p.name} className="h-full w-full object-cover" />
                                 </div>
                               ) : (
@@ -711,7 +711,7 @@ export default function ProductsView() {
                     <div className="flex items-start gap-2.5 min-w-0 flex-1">
                       {p.image ? (
                         <div className="h-12 w-12 rounded-xl border bg-muted/30 overflow-hidden shrink-0 shadow-xs">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          { }
                           <img src={p.image} alt={p.name} className="h-full w-full object-cover" />
                         </div>
                       ) : (
@@ -925,7 +925,7 @@ export default function ProductsView() {
                 <div className="relative h-24 w-24 rounded-xl border bg-card shadow-xs overflow-hidden flex items-center justify-center shrink-0">
                   {form.image ? (
                     <>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      { }
                       <img
                         src={form.image}
                         alt="Vista previa"
@@ -1198,7 +1198,7 @@ export default function ProductsView() {
                 <div className="flex items-start gap-4">
                   {detailProduct.image && (
                     <div className="h-20 w-20 rounded-xl border bg-card shadow-xs overflow-hidden shrink-0">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      { }
                       <img
                         src={detailProduct.image}
                         alt={detailProduct.name}
