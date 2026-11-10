@@ -1,6 +1,6 @@
 import { db, ensureMySqlTextColumns } from "@/lib/db"
 import { getDeliveryConfig, resolveDeliveryFee, formatDeliveryPromptContext } from "@/lib/delivery-config"
-import { broadcastNewOrderToDrivers } from "@/lib/telegram-driver"
+import { broadcastNewOrderToDrivers, sendTelegramDirect } from "@/lib/telegram-driver"
 import {
   ensureActiveConversationSession,
   closeConversationSession,
@@ -41,6 +41,173 @@ export const GENERAL_QUERY_WORDS = new Set([
   "direccion", "barrio", "calle", "carrera", "cra", "cll", "av", "apto", "casa", "lote", "manzana",
   "saldo", "deuda", "debo", "cuenta", "fiado", "abono", "pagar", "pago", "cancelo", "cancelar"
 ])
+
+/**
+ * Detecta si el cliente pidió explícitamente un SEGUNDO pedido o pedido adicional distinto.
+ */
+function isExplicitNewOrderRequest(rawText: string): boolean {
+  const norm = (rawText || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  return /\b(otro\s+pedido|segundo\s+pedido|otra\s+orden|pedido\s+adicional|pedir\s+otro|quiero\s+otro|manda(?:me)?\s+otro|haz(?:me)?\s+otro|nuevo\s+pedido|pedido\s+aparte)\b/i.test(norm)
+}
+
+/**
+ * Detecta si el mensaje del cliente es una respuesta de seguimiento de pago/billete/confirmación
+ * (ej. "Un billete de 20", "monto exacto", "sí", "listo", "efectivo") y NO un nuevo pedido.
+ */
+function isFollowUpPaymentOrConfirmMessage(rawText: string): boolean {
+  const norm = (rawText || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
+  return (
+    /\b(billete|cambio|vuelto|vueltos|exacto|monto\s+exacto|justo|cabal|pago\s+con|pagar\s+con|te\s+pago\s+con|efectivo|transferencia|nequi|daviplata|contraentrega)\b/i.test(norm) ||
+    /^(?:si|ok|dale|listo|perfecto|claro|gracias|muchas\s+gracias|de\s+\d+|con\s+(?:uno\s+de\s+)?\d+|\$?\s*\d[\d\.,]*\s*(?:mil|k)?|un\s+billete\s+de\s+\d+|uno\s+de\s+\d+)$/i.test(norm)
+  )
+}
+
+/**
+ * Normaliza denominaciones abreviadas de billetes en pesos colombianos (ej: "20" -> 20000 cuando el pedido es >= 1000).
+ */
+function normalizeCashBillAmount(rawCash: number, orderTotal: number): number {
+  if (!Number.isFinite(rawCash) || rawCash <= 0) return 0
+  if (rawCash < 500 && orderTotal >= 1000 && [2, 5, 10, 20, 50, 100, 200].includes(Math.round(rawCash))) {
+    return Math.round(rawCash) * 1000
+  }
+  return Math.round(rawCash)
+}
+
+function parseCopNumericString(numStr: string): number {
+  const cleaned = numStr.trim()
+  if (/^\d{1,3}(?:[\.,]\d{3})+$/.test(cleaned)) {
+    return parseInt(cleaned.replace(/[\.,]/g, ""), 10) || 0
+  }
+  return parseFloat(cleaned.replace(/,/g, ".")) || 0
+}
+
+/**
+ * Extrae monto de billete o pago exacto desde texto natural (ej. "Un billete de 20", "con 50 mil", "monto exacto").
+ */
+function parseCashBillFromText(rawText: string, orderTotal: number): { detected: boolean; isExact: boolean; amount: number } {
+  const clean = (rawText || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
+  if (!clean) return { detected: false, isExact: false, amount: 0 }
+
+  // Excluir dosis médicas (ej. "500mg", "100ml")
+  if (/\d+\s*(?:mg|ml|mcg|ui|%)/i.test(clean)) {
+    return { detected: false, isExact: false, amount: 0 }
+  }
+
+  if (/\b(monto\s+exacto|pago\s+exacto|exacto|sin\s+cambio|no\s+necesito\s+cambio|no\s+requiero\s+cambio|cabal|lo\s+justo)\b/i.test(clean)) {
+    return { detected: true, isExact: true, amount: orderTotal }
+  }
+
+  const milMatch = clean.match(/\b(\d[\d\.,]*)\s*(?:mil|k)\b/i)
+  if (milMatch) {
+    const val = Math.round(parseCopNumericString(milMatch[1]) * 1000)
+    if (val > 0) return { detected: true, isExact: false, amount: val }
+  }
+
+  const cashPrefixMatch = clean.match(
+    /(?:billete\s+de|un\s+billete\s+de|uno\s+de|pago\s+con|pagar\s+con|pagare\s+con|con\s+(?:uno\s+de)?|con\s+billete\s+de|con)\s*\$?\s*(\d[\d\.,]*)/i
+  )
+  if (cashPrefixMatch) {
+    const rawVal = parseCopNumericString(cashPrefixMatch[1])
+    const norm = normalizeCashBillAmount(rawVal, Math.max(orderTotal, 1000))
+    if (norm >= 1000) {
+      return { detected: true, isExact: false, amount: norm }
+    }
+  }
+
+  const pureAmountMatch = clean.match(/^[\s\$]*(\d[\d\.,]*)[\s\.\!]*$/i)
+  if (pureAmountMatch) {
+    const rawVal = parseCopNumericString(pureAmountMatch[1])
+    const norm = normalizeCashBillAmount(rawVal, Math.max(orderTotal, 1000))
+    if (norm >= 2000) {
+      return { detected: true, isExact: false, amount: norm }
+    }
+  }
+
+  return { detected: false, isExact: false, amount: 0 }
+}
+
+/**
+ * Construye la nota legible de cobro y cambio para deliveryNotes.
+ */
+function buildPaymentDeliveryNote(
+  method: string,
+  total: number,
+  subtotal: number,
+  deliveryFee: number,
+  cashPaid?: number,
+  isExactCash?: boolean
+): string {
+  const isTransfer = method === "transferencia"
+  if (isTransfer) {
+    return `💳 Pago por Transferencia: Pendiente verificar comprobante por $${total.toLocaleString("es-CO")}. Una vez verificado por caja, el repartidor no cobra ($0).`
+  }
+
+  const normalizedCash = cashPaid ? normalizeCashBillAmount(cashPaid, total) : 0
+  if (normalizedCash > total) {
+    const cambio = normalizedCash - total
+    return `💵 Pago en Efectivo: Paga con $${normalizedCash.toLocaleString("es-CO")} (Llevar cambio de $${cambio.toLocaleString("es-CO")}). Cobrar $${total.toLocaleString("es-CO")} contraentrega.`
+  }
+  if (isExactCash || (normalizedCash > 0 && normalizedCash === total)) {
+    return `💵 Pago en Efectivo: Paga con monto exacto ($${total.toLocaleString("es-CO")}). Cobrar contraentrega ($${subtotal.toLocaleString("es-CO")} productos + $${deliveryFee.toLocaleString("es-CO")} envío).`
+  }
+  return `💵 Pago en Efectivo: Cobrar $${total.toLocaleString("es-CO")} contraentrega ($${subtotal.toLocaleString("es-CO")} productos + $${deliveryFee.toLocaleString("es-CO")} envío).`
+}
+
+/**
+ * Actualiza únicamente las líneas de pago en deliveryNotes preservando coordenadas GPS u otras notas.
+ */
+function mergePaymentIntoDeliveryNotes(
+  existingNotes: string | null | undefined,
+  newPaymentNote: string,
+  extraNote?: string
+): string {
+  const preservedLines = (existingNotes || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("💵 Pago en Efectivo:") && !l.startsWith("💳 Pago por Transferencia:"))
+
+  const parts = [newPaymentNote, ...preservedLines]
+  if (extraNote && extraNote.trim()) {
+    parts.push(`📝 Nota: ${extraNote.trim()}`)
+  }
+  return parts.join("\n")
+}
+
+/**
+ * Si un pedido actualizado ya tenía un domiciliario asignado con Telegram, le notifica el nuevo detalle de pago/cambio.
+ */
+async function notifyAssignedDriverPaymentUpdate(
+  order: { orderNumber: string; branchId: string | null; deliveryDriverId: string | null; total: number; paymentMethod: string },
+  newPaymentNote: string
+): Promise<void> {
+  if (!order.deliveryDriverId) return
+  try {
+    const driver = await db.user.findUnique({
+      where: { id: order.deliveryDriverId },
+      select: { telegramChatId: true },
+    })
+    if (!driver?.telegramChatId) return
+
+    let config = order.branchId
+      ? await db.whatsAppConfig.findUnique({ where: { branchId: order.branchId } })
+      : null
+    if (!config || !config.telegramBotToken) {
+      config = await db.whatsAppConfig.findFirst({
+        where: { telegramEnabled: true, telegramBotToken: { not: null } },
+      })
+    }
+    const botToken = config?.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN
+    if (!botToken) return
+
+    await sendTelegramDirect(
+      botToken,
+      driver.telegramChatId,
+      `🔄 *ACTUALIZACIÓN DE PAGO — Orden #${order.orderNumber}*\n\n${newPaymentNote}`
+    )
+  } catch (err) {
+    console.warn("[notifyAssignedDriverPaymentUpdate warning]:", err)
+  }
+}
 
 /**
  * Detecta si un mensaje es ajeno a la actividad comercial de la tienda
@@ -379,6 +546,7 @@ async function executeWhatsAppMessage(params: {
   const hasAnyAiKey = !!openrouterKey || !!deepseekKey
   const aiEnabled = config?.aiEnabled ?? true
 
+  // Intentar pasar por LLM; si devuelve pedido creado, aseguramos sesión actualizada con último número de orden
   if (aiEnabled && hasAnyAiKey) {
     try {
       result = await processWithLLMAI({
@@ -394,12 +562,15 @@ async function executeWhatsAppMessage(params: {
         channel: effectiveChannel,
       })
       if (result && result.orderNumber) {
-        // Encontrar el ID de la orden creada para vincularla al mensaje
+        // Encontrar el ID de la orden creada o actualizada para vincularla al mensaje
         const ord = await db.order.findUnique({
           where: { orderNumber: result.orderNumber },
           select: { id: true },
         })
         if (ord) createdOrderId = ord.id
+        if (result.actionTaken === "order_created") {
+          await closeConversationSession(cleanPhone, "order_created", result.orderNumber).catch(() => {})
+        }
       }
     } catch (aiErr) {
       console.warn("[LLM AI Fallback to Local Engine]", (aiErr as Error).message)
@@ -419,7 +590,6 @@ async function executeWhatsAppMessage(params: {
       : new Date(Date.now() - 3 * 60 * 60 * 1000)
 
     // Consultar el último mensaje del bot de la sesión activa para reconstruir el estado de la conversación
-    // (Solo de la sesión actual, NUNCA de pedidos pasados ya concluidos)
     const lastBotMsg = await db.whatsAppMessage.findFirst({
       where: {
         phone: cleanPhone,
@@ -431,7 +601,94 @@ async function executeWhatsAppMessage(params: {
     const lastBotText = (lastBotMsg?.text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     const deliveryConfig = await getDeliveryConfig(resolvedBranchId || undefined)
 
-    // Regla 0.1: Cliente elige método de pago ("Efectivo", "Transferencia", "Nequi") tras cotización
+    // Regla 0.0: Anti-Duplicado — Si el cliente ya tiene un pedido activo reciente (< 30 min)
+    // y envía el monto del billete ("Un billete de 20", "monto exacto") o confirmación, actualizar ESE pedido en lugar de duplicar.
+    if (!isExplicitNewOrderRequest(text)) {
+      const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000)
+      const recentActiveOrder = await db.order.findFirst({
+        where: {
+          OR: [{ customerPhone: cleanPhone }, { clientId: client.id }],
+          ...branchFilter,
+          status: { in: ["pendiente", "confirmado", "en_preparacion", "en_camino"] },
+          paymentStatus: { not: "pagado" },
+          createdAt: { gte: thirtyMinutesAgo },
+        },
+        include: { items: true },
+        orderBy: { createdAt: "desc" },
+      })
+
+      if (recentActiveOrder) {
+        const cashBill = parseCashBillFromText(text, recentActiveOrder.total)
+        if (cashBill.detected) {
+          const newPaymentNote = buildPaymentDeliveryNote(
+            "efectivo",
+            recentActiveOrder.total,
+            recentActiveOrder.subtotal,
+            recentActiveOrder.deliveryFee,
+            cashBill.isExact ? undefined : cashBill.amount,
+            cashBill.isExact
+          )
+          const updatedNotes = mergePaymentIntoDeliveryNotes(recentActiveOrder.deliveryNotes, newPaymentNote)
+
+          await db.order.update({
+            where: { id: recentActiveOrder.id },
+            data: {
+              paymentMethod: "efectivo",
+              deliveryNotes: updatedNotes,
+            },
+          })
+
+          notifyAssignedDriverPaymentUpdate(recentActiveOrder, newPaymentNote).catch(() => {})
+          createdOrderId = recentActiveOrder.id
+
+          const changeAmount = !cashBill.isExact && cashBill.amount > recentActiveOrder.total
+            ? cashBill.amount - recentActiveOrder.total
+            : 0
+          const cashLine = cashBill.isExact
+            ? `💵 Pago registrado con *monto exacto* ($${recentActiveOrder.total.toLocaleString("es-CO")}).`
+            : changeAmount > 0
+              ? `💵 Pagas con *$${cashBill.amount.toLocaleString("es-CO")}* → **Cambio: $${changeAmount.toLocaleString("es-CO")}**`
+              : `💵 Total a cobrar contraentrega: *$${recentActiveOrder.total.toLocaleString("es-CO")}*.`
+
+          result = {
+            reply: `✅ ¡Perfecto! Actualicé tu pedido *#${recentActiveOrder.orderNumber}*:\n\n${cashLine}\n\n¡Ya quedó listo para el domiciliario! 😊`,
+            actionTaken: "ai_answered",
+            orderNumber: recentActiveOrder.orderNumber,
+            total: recentActiveOrder.total,
+          }
+        } else if (
+          Date.now() - new Date(recentActiveOrder.createdAt).getTime() <= 5 * 60 * 1000 &&
+          /^(si|claro|dale|ok|listo|perfecto|correcto|efectivo|contraentrega|transferencia|nequi|daviplata|super|vale|bueno)$/i.test(cleanLowerText)
+        ) {
+          createdOrderId = recentActiveOrder.id
+          result = {
+            reply: `✅ Tu pedido *#${recentActiveOrder.orderNumber}* por *$${recentActiveOrder.total.toLocaleString("es-CO")}* ya se encuentra registrado en estado *${recentActiveOrder.status.toUpperCase()}*. ¡En breve coordinamos tu entrega! 😊`,
+            actionTaken: "ai_answered",
+            orderNumber: recentActiveOrder.orderNumber,
+            total: recentActiveOrder.total,
+          }
+        }
+      }
+    }
+
+    // Regla 0.1: Cliente elige método de pago ("Efectivo", "Transferencia", "Nequi") o responde cambio tras cotización
+    const thirtyMinMsgs = !result
+      ? await db.whatsAppMessage.findMany({
+          where: {
+            phone: cleanPhone,
+            sender: "bot",
+            createdAt: { gte: new Date(Date.now() - 30 * 60 * 1000) },
+          },
+          orderBy: { createdAt: "desc" },
+          take: 4,
+          select: { text: true },
+        })
+      : []
+    const recentBotCombined = thirtyMinMsgs
+      .map((m) => (m.text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""))
+      .join("\n")
+    const cashReplyInfo = parseCashBillFromText(text, 10000)
+
     const isPaymentResponse =
       /^(efectivo|transferencia|nequi|daviplata|contraentrega|pago en efectivo|por transferencia|en efectivo|transfer)$/i.test(cleanLowerText) ||
       (cleanLowerText.length < 30 && (cleanLowerText.includes("efectivo") || cleanLowerText.includes("transfer") || cleanLowerText.includes("nequi") || cleanLowerText.includes("davi")))
@@ -440,15 +697,22 @@ async function executeWhatsAppMessage(params: {
       lastBotText.includes("prefieres") ||
       lastBotText.includes("total a pagar") ||
       lastBotText.includes("cancelar:") ||
-      lastBotText.includes("contraentrega o por transferencia")
+      lastBotText.includes("contraentrega o por transferencia") ||
+      lastBotText.includes("efectivo contraentrega")
 
-    if (isPaymentResponse && isAwaitingPayment) {
+    const isAwaitingChangeQuestion =
+      cashReplyInfo.detected &&
+      (recentBotCombined.includes("monto exacto") || recentBotCombined.includes("requieres cambio") || recentBotCombined.includes("necesitas cambio") || recentBotCombined.includes("billete"))
+
+    const botQuoteSource = isAwaitingChangeQuestion ? recentBotCombined : lastBotText
+
+    if (!result && ((isPaymentResponse && isAwaitingPayment) || isAwaitingChangeQuestion)) {
       const isTransfer = cleanLowerText.includes("transf") || cleanLowerText.includes("nequi") || cleanLowerText.includes("davi")
       const paymentMethod = isTransfer ? "transferencia" : "efectivo"
 
       // Extraer total y costo de envío de la cotización previa del bot
-      const totalMatch = lastBotText.match(/total[^\$\d]*\$\s*([\d\.,]+)/i)
-      const deliveryMatch = lastBotText.match(/env[ií]o[^\$\d]*\$\s*([\d\.,]+)/i) || lastBotText.match(/domicilio[^\$\d]*\$\s*([\d\.,]+)/i)
+      const totalMatch = botQuoteSource.match(/total[^\$\d]*\$\s*([\d\.,]+)/i)
+      const deliveryMatch = botQuoteSource.match(/env[ií]o[^\$\d]*\$\s*([\d\.,]+)/i) || botQuoteSource.match(/domicilio[^\$\d]*\$\s*([\d\.,]+)/i)
 
       let total = 0
       if (totalMatch) {
@@ -472,9 +736,10 @@ async function executeWhatsAppMessage(params: {
       const itemsToCreate: { product: any; qty: number }[] = []
       for (const p of allActiveProds) {
         const pNorm = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        if (lastBotText.includes(pNorm)) {
+        if (botQuoteSource.includes(pNorm)) {
           let qty = 1
-          const qMatch = lastBotText.match(new RegExp(`(\\d+)\\s*x\\s*${pNorm.slice(0, 6)}`, "i"))
+          const escapedPrefix = pNorm.slice(0, 6).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+          const qMatch = botQuoteSource.match(new RegExp(`(\\d+)\\s*x\\s*${escapedPrefix}`, "i"))
           if (qMatch) qty = parseInt(qMatch[1], 10) || 1
           itemsToCreate.push({ product: p, qty })
         }
@@ -484,7 +749,7 @@ async function executeWhatsAppMessage(params: {
       if (itemsToCreate.length === 0) {
         for (const p of allActiveProds) {
           const pWords = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/).filter((w) => w.length >= 4)
-          if (pWords.some((w) => lastBotText.includes(w))) {
+          if (pWords.some((w) => botQuoteSource.includes(w))) {
             itemsToCreate.push({ product: p, qty: 1 })
             break
           }
@@ -495,18 +760,59 @@ async function executeWhatsAppMessage(params: {
         const subtotal = itemsToCreate.reduce((acc, it) => acc + it.product.price * it.qty, 0)
         if (total <= 0) total = subtotal + deliveryFee
 
+        const parsedBill = parseCashBillFromText(text, total)
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "")
         const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString()
         const genOrderNum = `PED-${dateStr}-${randomSuffix}`
         const finalAddress = client.address || (isTelegram ? "Dirección confirmada según Telegram" : "Dirección confirmada según WhatsApp")
 
-        let paymentNote = ""
-        if (!isTransfer) {
-          paymentNote = `💵 Pago en Efectivo: Cobrar $${total.toLocaleString("es-CO")} contraentrega ($${subtotal.toLocaleString("es-CO")} productos + $${deliveryFee.toLocaleString("es-CO")} envío).`
-        } else {
-          paymentNote = `💳 Pago por Transferencia: Pendiente verificar comprobante por $${total.toLocaleString("es-CO")}. Una vez verificado por caja, el repartidor no cobra ($0).`
-        }
+        const paymentNote = buildPaymentDeliveryNote(
+          paymentMethod,
+          total,
+          subtotal,
+          deliveryFee,
+          parsedBill.detected && !parsedBill.isExact ? parsedBill.amount : undefined,
+          parsedBill.detected && parsedBill.isExact
+        )
 
+        const totalFormatted = `$${total.toLocaleString("es-CO")}`
+        const isExplicitRepeat = isExplicitNewOrderRequest(text)
+        const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000)
+        const duplicateExisting = !isExplicitRepeat
+          ? await db.order.findFirst({
+              where: {
+                OR: [{ customerPhone: cleanPhone }, { clientId: client.id }],
+                ...branchFilter,
+                status: { not: "cancelado" },
+                createdAt: { gte: fifteenMinutesAgo },
+              },
+              include: { items: true },
+              orderBy: { createdAt: "desc" },
+            })
+          : null
+
+        const newSig = itemsToCreate.map((it) => `${it.product.id}:${it.qty}`).sort().join("|")
+        const dupSig = duplicateExisting
+          ? duplicateExisting.items.map((it) => `${it.productId}:${it.quantity}`).sort().join("|")
+          : ""
+
+        if (duplicateExisting && dupSig === newSig) {
+          if (parsedBill.detected && duplicateExisting.paymentStatus !== "pagado" && duplicateExisting.status !== "entregado") {
+            const updatedNotes = mergePaymentIntoDeliveryNotes(duplicateExisting.deliveryNotes, paymentNote)
+            await db.order.update({
+              where: { id: duplicateExisting.id },
+              data: { deliveryNotes: updatedNotes },
+            })
+            notifyAssignedDriverPaymentUpdate(duplicateExisting, paymentNote).catch(() => {})
+          }
+          createdOrderId = duplicateExisting.id
+          result = {
+            reply: `✅ Tu pedido *#${duplicateExisting.orderNumber}* ya estaba registrado por *${totalFormatted}*. ¡En breve coordinamos el despacho! 😊`,
+            actionTaken: "ai_answered",
+            orderNumber: duplicateExisting.orderNumber,
+            total: duplicateExisting.total,
+          }
+        } else {
         const createdOrder = await db.order.create({
           data: {
             orderNumber: genOrderNum,
@@ -545,15 +851,19 @@ async function executeWhatsAppMessage(params: {
           .map((it) => `• ${it.qty}x *${it.product.name}* ($${(it.qty * it.product.price).toLocaleString("es-CO")})`)
           .join("\n")
         const feeLine = deliveryFee > 0 ? `\n🛵 *Costo Domicilio:* $${deliveryFee.toLocaleString("es-CO")}` : ""
+        const cambioCalc = parsedBill.detected && !parsedBill.isExact && parsedBill.amount > total ? parsedBill.amount - total : 0
         const paymentSummary = isTransfer
           ? "💳 *Método de Pago:* Transferencia previa (Un asesor humano de nuestro equipo se comunicará por este chat en breve para compartirte los datos oficiales de la cuenta y validar tu comprobante para confirmar el pedido)"
-          : `💵 *Método de Pago:* Efectivo ($${total.toLocaleString("es-CO")} a cobrar contraentrega)`
+          : cambioCalc > 0
+            ? `💵 *Método de Pago:* Efectivo contraentrega — Pagas con *$${parsedBill.amount.toLocaleString("es-CO")}* → **Cambio: $${cambioCalc.toLocaleString("es-CO")}**`
+            : `💵 *Método de Pago:* Efectivo ($${total.toLocaleString("es-CO")} a cobrar contraentrega)`
 
         result = {
           reply: `📋 *¡Pedido Registrado con Éxito!*\n🏬 *Sede:* ${branch?.name || "Principal"}\n📦 *Orden:* #${createdOrder.orderNumber}\n👤 *Cliente:* ${client.name}\n📍 *Entrega:* ${finalAddress}\n\n🛒 *Productos:*\n${itemsSummary}${feeLine}\n💵 *Total a Pagar:* *$${total.toLocaleString("es-CO")}*\n${paymentSummary}\n\n⏱️ *Estado:* Pendiente (Un asesor humano validará el pago o confirmará la orden para su despacho).`,
           actionTaken: "order_created",
           orderNumber: createdOrder.orderNumber,
           total: createdOrder.total,
+        }
         }
       }
     }
@@ -793,6 +1103,36 @@ async function executeWhatsAppMessage(params: {
       }
 
       if (detectedItems.length > 0) {
+        const isExplicitRepeat = isExplicitNewOrderRequest(message)
+        const newSig = detectedItems.map((it) => `${it.product.id}:${it.quantity}`).sort().join("|")
+        const recentRule3Orders = !isExplicitRepeat
+          ? await db.order.findMany({
+              where: {
+                OR: [{ customerPhone: cleanPhone }, { clientId: client.id }],
+                ...branchFilter,
+                status: { not: "cancelado" },
+                createdAt: { gte: new Date(Date.now() - 15 * 60 * 1000) },
+              },
+              include: { items: true },
+              orderBy: { createdAt: "desc" },
+              take: 5,
+            })
+          : []
+
+        const duplicateRule3 = recentRule3Orders.find((ord) => {
+          const dupSig = ord.items.map((it) => `${it.productId}:${it.quantity}`).sort().join("|")
+          return dupSig === newSig
+        })
+
+        if (duplicateRule3) {
+          createdOrderId = duplicateRule3.id
+          result = {
+            reply: `✅ Tu pedido *#${duplicateRule3.orderNumber}* ya estaba registrado por *$${duplicateRule3.total.toLocaleString("es-CO")}*. ¡En breve coordinamos la entrega! 😊`,
+            actionTaken: "ai_answered",
+            orderNumber: duplicateRule3.orderNumber,
+            total: duplicateRule3.total,
+          }
+        } else {
         let address = client.address || "Dirección según chat"
         const addrMatch = message.match(/(calle|carrera|cra|cll|av|diagonal|transversal)[^,\n.]+/i)
         if (addrMatch) address = addrMatch[0].trim()
@@ -835,6 +1175,7 @@ async function executeWhatsAppMessage(params: {
 
         createdOrderId = order.id
         broadcastNewOrderToDrivers(order.id).catch(() => {})
+        await closeConversationSession(cleanPhone, "order_created", order.orderNumber)
 
         const itemsSummary = detectedItems
           .map((it) => `• ${it.quantity} × *${it.product.name}* ($${it.subtotal.toLocaleString("es-CO")})`)
@@ -852,6 +1193,7 @@ async function executeWhatsAppMessage(params: {
             quantity: i.quantity,
             subtotal: i.subtotal,
           })),
+        }
         }
       }
     }
@@ -1018,7 +1360,8 @@ export const WHATSAPP_MCP_TOOLS = [
     type: "function" as const,
     function: {
       name: "crear_pedido",
-      description: "Registra oficialmente el pedido a domicilio en OmniPOS una vez confirmados los productos, la dirección y el método de pago.",
+      description:
+        "Registra oficialmente UN pedido nuevo a domicilio en OmniPOS una vez confirmados productos, dirección, método de pago y (si es efectivo) con cuánto paga o si paga exacto. NO usar si ya existe un pedido creado hace poco para este cliente (para agregar billete, cambio o actualizar pago usa actualizar_pago_pedido).",
       parameters: {
         type: "object",
         properties: {
@@ -1049,10 +1392,44 @@ export const WHATSAPP_MCP_TOOLS = [
           },
           paga_con_efectivo: {
             type: "number",
-            description: "Monto en efectivo con el que paga el cliente para calcular y enviar el cambio exacto (ej: 50000). Opcional.",
+            description: "Monto completo en pesos con el que paga el cliente para calcular y enviar el cambio exacto (ej: 20000 para un billete de 20 mil, 50000 para 50 mil). Opcional.",
           },
         },
         required: ["items", "direccion", "metodo_pago"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "actualizar_pago_pedido",
+      description:
+        "Actualiza el método de pago, el billete con el que paga el cliente (para calcular el cambio exacto), pago exacto o notas en un pedido que YA fue registrado recientemente, SIN crear un pedido duplicado.",
+      parameters: {
+        type: "object",
+        properties: {
+          orden: {
+            type: "string",
+            description: "Número de orden existente (ej: PED-20261110-2468). Si se omite, actualiza el pedido activo más reciente del cliente.",
+          },
+          metodo_pago: {
+            type: "string",
+            enum: ["efectivo", "transferencia"],
+            description: "Método de pago actualizado (opcional).",
+          },
+          paga_con_efectivo: {
+            type: "number",
+            description: "Monto completo en pesos con el que paga el cliente en efectivo (ej: 20000 o 50000). Opcional.",
+          },
+          monto_exacto: {
+            type: "boolean",
+            description: "true si el cliente confirmó que pagará con el monto exacto y no requiere cambio.",
+          },
+          nota: {
+            type: "string",
+            description: "Nota o aclaración adicional para el repartidor (opcional).",
+          },
+        },
       },
     },
   },
@@ -1098,9 +1475,12 @@ async function executeMcpTool(
     branchFilter: any
     deliveryConfig: any
     channelLabel: string
+    customerMessage?: string
+    alreadyCreatedOrderInTurn?: any
   }
-): Promise<{ result: any; createdOrder?: any }> {
-  const { client, branch, cleanPhone, branchFilter, deliveryConfig, channelLabel } = context
+): Promise<{ result: any; createdOrder?: any; updatedOrder?: any }> {
+  const { client, branch, cleanPhone, branchFilter, deliveryConfig, channelLabel, customerMessage = "", alreadyCreatedOrderInTurn } = context
+  const orderBranchFilter = branch?.id ? { branchId: branch.id } : {}
 
   if (toolName === "consultar_catalogo") {
     const q = (args.busqueda || "").toLowerCase().trim()
@@ -1172,6 +1552,17 @@ async function executeMcpTool(
   }
 
   if (toolName === "crear_pedido") {
+    // Capa A: Bloqueo en el mismo turno (evita 2 crear_pedido seguidos o en paralelo dentro de la misma respuesta)
+    if (alreadyCreatedOrderInTurn) {
+      return {
+        result: {
+          ...alreadyCreatedOrderInTurn,
+          duplicado_evitado: true,
+          instruccion_importante: `El pedido #${alreadyCreatedOrderInTurn.orderNumber} YA fue creado en este turno. NO vuelvas a llamar crear_pedido; confirma al cliente únicamente este número de orden.`,
+        },
+      }
+    }
+
     const allProds = await db.product.findMany({
       where: { active: true, ...branchFilter },
       select: { id: true, name: true, price: true, stock: true, unit: true },
@@ -1212,31 +1603,135 @@ async function executeMcpTool(
     }
 
     const subtotal = itemsToCreate.reduce((acc, it) => acc + it.subtotal, 0)
-    const fullAddress = args.barrio && !args.direccion.toLowerCase().includes(args.barrio.toLowerCase())
-      ? `${args.direccion}, Barrio ${args.barrio}`
-      : args.direccion
+    const rawAddr = String(args.direccion || client.address || "Dirección según chat").trim()
+    const fullAddress = args.barrio && !rawAddr.toLowerCase().includes(String(args.barrio).toLowerCase())
+      ? `${rawAddr}, Barrio ${args.barrio}`
+      : rawAddr
 
     const feeRes = resolveDeliveryFee(fullAddress, deliveryConfig)
     const deliveryFee = feeRes.fee
     const total = subtotal + deliveryFee
     const isTransfer = args.metodo_pago === "transferencia"
+
+    // Normalizar billete recibido por argumento o por texto natural del mensaje del cliente
+    const billFromMsg = parseCashBillFromText(customerMessage, total)
+    const rawCashArg = Number(args.paga_con_efectivo) || 0
+    const cashPaid = rawCashArg > 0
+      ? normalizeCashBillAmount(rawCashArg, total)
+      : (billFromMsg.detected && !billFromMsg.isExact ? billFromMsg.amount : 0)
+    const isExactCash = Boolean(billFromMsg.detected && billFromMsg.isExact)
+
+    // Capa B: Bloqueo Anti-Duplicados entre turnos contra la base de datos (15 min mismos productos / 3 min en seguimiento)
+    const isExplicitNew = isExplicitNewOrderRequest(customerMessage)
+    const isFollowUpMsg = isFollowUpPaymentOrConfirmMessage(customerMessage)
+    const newSig = itemsToCreate.map((it) => `${it.product.id}:${it.qty}`).sort().join("|")
+
+    if (!isExplicitNew) {
+      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000)
+      const recentOrders = await db.order.findMany({
+        where: {
+          OR: [{ customerPhone: cleanPhone }, { clientId: client.id }],
+          ...orderBranchFilter,
+          status: { not: "cancelado" },
+          createdAt: { gte: fifteenMinutesAgo },
+        },
+        include: { items: true },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      })
+
+      const sameItemsOrder = recentOrders.find((ord) => {
+        const dupSig = ord.items.map((it) => `${it.productId}:${it.quantity}`).sort().join("|")
+        return dupSig === newSig
+      })
+
+      const threeMinutesAgo = Date.now() - 3 * 60 * 1000
+      const veryRecentFollowUpOrder = isFollowUpMsg
+        ? recentOrders.find((ord) => new Date(ord.createdAt).getTime() >= threeMinutesAgo)
+        : undefined
+
+      const dupOrder = sameItemsOrder || veryRecentFollowUpOrder
+      if (dupOrder) {
+        let updatedMethod = dupOrder.paymentMethod || "efectivo"
+        let updatedCambio = 0
+        let finalCashForDup = 0
+
+        const canUpdatePayment =
+          dupOrder.paymentStatus !== "pagado" &&
+          ["pendiente", "confirmado", "en_preparacion", "en_camino"].includes(dupOrder.status)
+
+        if (canUpdatePayment) {
+          updatedMethod = args.metodo_pago || dupOrder.paymentMethod || "efectivo"
+          const dupCashArg = rawCashArg > 0 ? normalizeCashBillAmount(rawCashArg, dupOrder.total) : 0
+          const dupMsgBill = parseCashBillFromText(customerMessage, dupOrder.total)
+          finalCashForDup = dupCashArg > 0 ? dupCashArg : (dupMsgBill.detected && !dupMsgBill.isExact ? dupMsgBill.amount : 0)
+          const dupIsExact = Boolean(dupMsgBill.detected && dupMsgBill.isExact)
+
+          if (finalCashForDup > dupOrder.total || dupIsExact || updatedMethod !== dupOrder.paymentMethod) {
+            const newPayNote = buildPaymentDeliveryNote(
+              updatedMethod,
+              dupOrder.total,
+              dupOrder.subtotal,
+              dupOrder.deliveryFee,
+              finalCashForDup > 0 ? finalCashForDup : undefined,
+              dupIsExact
+            )
+            const mergedNotes = mergePaymentIntoDeliveryNotes(dupOrder.deliveryNotes, newPayNote)
+            await db.order.update({
+              where: { id: dupOrder.id },
+              data: {
+                paymentMethod: updatedMethod,
+                deliveryNotes: mergedNotes,
+              },
+            })
+            notifyAssignedDriverPaymentUpdate(
+              { ...dupOrder, paymentMethod: updatedMethod },
+              newPayNote
+            ).catch(() => {})
+            if (finalCashForDup > dupOrder.total) {
+              updatedCambio = finalCashForDup - dupOrder.total
+            }
+          }
+        }
+
+        const existingSummary = {
+          exito: true,
+          duplicado_evitado: true,
+          ya_existia: true,
+          orden_id: dupOrder.id,
+          orderNumber: dupOrder.orderNumber,
+          estado_orden: dupOrder.status,
+          subtotal: dupOrder.subtotal,
+          deliveryFee: dupOrder.deliveryFee,
+          total: dupOrder.total,
+          total_formateado: `$${dupOrder.total.toLocaleString("es-CO")}`,
+          paga_con: finalCashForDup > 0 ? finalCashForDup : undefined,
+          cambio: updatedCambio,
+          direccion_entrega: dupOrder.deliveryAddress || fullAddress,
+          metodo_pago: updatedMethod,
+          instruccion_importante: `¡IMPORTANTE! El pedido #${dupOrder.orderNumber} YA había sido registrado anteriormente y se actualizó su información de pago/cambio (NO se creó duplicado). Confirma al cliente únicamente su orden #${dupOrder.orderNumber}.`,
+        }
+
+        return {
+          result: existingSummary,
+          updatedOrder: existingSummary,
+        }
+      }
+    }
+
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "")
     const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString()
     const genOrderNum = `PED-${dateStr}-${randomSuffix}`
 
-    const cashPaid = Number(args.paga_con_efectivo) || 0
-    let paymentNote = ""
-    let cambio = 0
-    if (!isTransfer) {
-      if (cashPaid > total) {
-        cambio = cashPaid - total
-        paymentNote = `💵 Pago en Efectivo: Paga con $${cashPaid.toLocaleString("es-CO")} (Llevar cambio de $${cambio.toLocaleString("es-CO")}). Cobrar $${total.toLocaleString("es-CO")} contraentrega.`
-      } else {
-        paymentNote = `💵 Pago en Efectivo: Cobrar $${total.toLocaleString("es-CO")} contraentrega.`
-      }
-    } else {
-      paymentNote = `💳 Pago por Transferencia: Pendiente de verificar comprobante por $${total.toLocaleString("es-CO")}. Una vez verificado por el asesor humano, se pasa a confirmado y se despacha.`
-    }
+    const cambio = !isTransfer && cashPaid > total ? cashPaid - total : 0
+    const paymentNote = buildPaymentDeliveryNote(
+      args.metodo_pago,
+      total,
+      subtotal,
+      deliveryFee,
+      cashPaid > 0 ? cashPaid : undefined,
+      isExactCash
+    )
 
     if (fullAddress && !client.address) {
       await db.client.update({
@@ -1286,6 +1781,7 @@ async function executeMcpTool(
       deliveryFee,
       total,
       total_formateado: `$${total.toLocaleString("es-CO")}`,
+      paga_con: cashPaid > total ? cashPaid : undefined,
       cambio: cambio > 0 ? cambio : 0,
       direccion_entrega: fullAddress,
       metodo_pago: args.metodo_pago,
@@ -1302,6 +1798,87 @@ async function executeMcpTool(
     return {
       result: orderSummary,
       createdOrder: orderSummary,
+    }
+  }
+
+  if (toolName === "actualizar_pago_pedido") {
+    const cleanOrdenArg = String(args.orden || "").replace(/^#/, "").trim()
+    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000)
+
+    const targetOrder = await db.order.findFirst({
+      where: {
+        OR: [{ customerPhone: cleanPhone }, { clientId: client.id }],
+        ...(cleanOrdenArg ? { orderNumber: { contains: cleanOrdenArg } } : {}),
+        ...orderBranchFilter,
+        status: { in: ["pendiente", "confirmado", "en_preparacion", "en_camino"] },
+        paymentStatus: { not: "pagado" },
+        createdAt: { gte: twelveHoursAgo },
+      },
+      orderBy: { createdAt: "desc" },
+    })
+
+    if (!targetOrder) {
+      return {
+        result: {
+          existe: false,
+          mensaje: "No hay un pedido activo pendiente de cobro reciente para actualizar en este momento.",
+        },
+      }
+    }
+
+    const updatedMethod = args.metodo_pago || targetOrder.paymentMethod || "efectivo"
+    const msgBill = parseCashBillFromText(customerMessage, targetOrder.total)
+    const rawCashArg = Number(args.paga_con_efectivo) || 0
+    const normalizedCash = rawCashArg > 0
+      ? normalizeCashBillAmount(rawCashArg, targetOrder.total)
+      : (msgBill.detected && !msgBill.isExact ? msgBill.amount : 0)
+    const isExact = Boolean(args.monto_exacto) || Boolean(msgBill.detected && msgBill.isExact)
+
+    const newPaymentNote = buildPaymentDeliveryNote(
+      updatedMethod,
+      targetOrder.total,
+      targetOrder.subtotal,
+      targetOrder.deliveryFee,
+      normalizedCash > 0 ? normalizedCash : undefined,
+      isExact
+    )
+    const mergedNotes = mergePaymentIntoDeliveryNotes(targetOrder.deliveryNotes, newPaymentNote, args.nota)
+
+    await db.order.update({
+      where: { id: targetOrder.id },
+      data: {
+        paymentMethod: updatedMethod,
+        deliveryNotes: mergedNotes,
+      },
+    })
+
+    notifyAssignedDriverPaymentUpdate(
+      { ...targetOrder, paymentMethod: updatedMethod },
+      newPaymentNote
+    ).catch(() => {})
+
+    const cambio = updatedMethod !== "transferencia" && normalizedCash > targetOrder.total
+      ? normalizedCash - targetOrder.total
+      : 0
+
+    const updatedSummary = {
+      exito: true,
+      actualizado: true,
+      orden_id: targetOrder.id,
+      orderNumber: targetOrder.orderNumber,
+      estado_orden: targetOrder.status,
+      total: targetOrder.total,
+      total_formateado: `$${targetOrder.total.toLocaleString("es-CO")}`,
+      metodo_pago: updatedMethod,
+      paga_con: normalizedCash > targetOrder.total ? normalizedCash : undefined,
+      monto_exacto: isExact,
+      cambio,
+      instruccion_importante: `El pedido existente #${targetOrder.orderNumber} fue ACTUALIZADO (NO se creó un segundo pedido). Informa al cliente de manera breve y amable que su orden #${targetOrder.orderNumber} ya quedó actualizada${cambio > 0 ? ` (paga con $${normalizedCash.toLocaleString("es-CO")}, cambio a llevar: $${cambio.toLocaleString("es-CO")})` : isExact ? " (pago con monto exacto)" : ""}.`,
+    }
+
+    return {
+      result: updatedSummary,
+      updatedOrder: updatedSummary,
     }
   }
 
@@ -1417,6 +1994,32 @@ async function processWithLLMAI(params: {
   // 2. Configuración oficial de tarifas de domicilio para esta sede
   const deliveryConfig = await getDeliveryConfig(branchId)
 
+  // 2.1 Consultar pedidos recientes del cliente (últimas 2 horas) para evitar duplicaciones por respuestas de seguimiento
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
+  const recentClientOrders = await db.order.findMany({
+    where: {
+      OR: [{ customerPhone: cleanPhone }, { clientId: client.id }],
+      ...(branchId ? { branchId } : {}),
+      status: { not: "cancelado" },
+      createdAt: { gte: twoHoursAgo },
+    },
+    include: { items: true },
+    orderBy: { createdAt: "desc" },
+    take: 3,
+  })
+
+  const recentOrdersBlock = recentClientOrders.length > 0
+    ? `\n📌 PEDIDOS RECIENTES DE ESTE CLIENTE (ÚLTIMAS 2 HORAS — YA REGISTRADOS EN SISTEMA):\n` +
+      recentClientOrders
+        .map((ord) => {
+          const minsAgo = Math.max(0, Math.round((Date.now() - new Date(ord.createdAt).getTime()) / 60000))
+          const prods = ord.items.map((i) => `${i.quantity}x ${i.productName}`).join(", ")
+          return `- Orden #${ord.orderNumber} (hace ${minsAgo} min) | Estado: ${ord.status} | Total: $${ord.total.toLocaleString("es-CO")} | Pago: ${ord.paymentMethod} | Productos: ${prods}`
+        })
+        .join("\n") +
+      `\n⚠️ REGLA ANTI-DUPLICADOS OBLIGATORIA: Si el cliente responde indicando el billete con el que pagará ("un billete de 20", "con 50 mil", "monto exacto"), confirmando ("sí", "ok", "listo") o aclarando pago/notas sobre cualquiera de estos pedidos, USA "actualizar_pago_pedido" — PROHIBIDO volver a llamar "crear_pedido". Solo llama a "crear_pedido" si el cliente pide explícitamente productos nuevos distintos o un pedido adicional.`
+    : ""
+
   // 3. Prompt de sistema humano con MCP Tools y Blindaje Estricto de Rol Comercial
   const systemPrompt = `Eres el asesor comercial y de atención al cliente de "${branchName}" atendiendo por ${channelLabel}.
 Tu función y propósito es EXCLUSIVAMENTE comercial: venta de productos de la tienda, consulta de existencias y precios del catálogo, cotización de domicilios y toma de pedidos.
@@ -1439,32 +2042,33 @@ Tu función y propósito es EXCLUSIVAMENTE comercial: venta de productos de la t
    - Los asesores humanos del comercio son quienes validan los comprobantes de pago y pasan los pedidos a "confirmado".
    - Tu función como bot es ÚNICAMENTE registrar el pedido en el sistema en estado "PENDIENTE".
 3. CUANDO EL CLIENTE ELIJA "TRANSFERENCIA" (O NEQUI / DAVIPLATA / BANCOLOMBIA):
-   - Llama a la herramienta "crear_pedido" con metodo_pago: "transferencia". El pedido se registrará con estado "pendiente".
+   - Llama UNA SOLA VEZ a la herramienta "crear_pedido" con metodo_pago: "transferencia". El pedido se registrará con estado "pendiente".
    - Al responder al cliente, indícale CLARAMENTE:
      a) Que su pedido quedó REGISTRADO con éxito en estado PENDIENTE con su número de orden (#PED-...).
      b) Resumen claro de los productos, dirección y total a pagar.
      c) INFÓRMALE QUE UN ASESOR HUMANO DEL EQUIPO DE LA TIENDA SE COMUNICARÁ POR ESTE CHAT EN BREVE PARA COMPARTIRLE LOS NÚMEROS DE CUENTA OFICIALES PARA LA TRANSFERENCIA.
      d) Explícale que una vez el asesor humano valide su comprobante de pago, el pedido pasará a CONFIRMADO para coordinar el despacho.
    - NUNCA digas que el pedido ya fue confirmado ni despachado, y NUNCA entregues cuentas bancarias inventadas.
-4. CUANDO EL CLIENTE ELIJA "EFECTIVO":
-   - Pregúntale si pagará con el monto exacto o si requiere cambio (y con cuánto pagará).
-   - Llama a "crear_pedido" con metodo_pago: "efectivo".
-   - Infórmale que su pedido ha quedado REGISTRADO en estado PENDIENTE para cobro contraentrega.
+4. CUANDO EL CLIENTE ELIJA "EFECTIVO" (REGLA ANTI-DUPLICADOS):
+   - Si el cliente AÚN NO ha dicho con qué billete pagará ni si paga exacto: PRIMERO pregúntale "¿Pagarás con el monto exacto o necesitas cambio de algún billete?" y ESPERA su respuesta ANTES de llamar a "crear_pedido" (NO crees el pedido todavía para no crear luego un duplicado).
+   - Cuando responda ("un billete de 20", "monto exacto", etc.) o si ya lo indicó desde antes: llama UNA SOLA VEZ a "crear_pedido" pasando metodo_pago: "efectivo" y paga_con_efectivo con el valor completo en pesos (ej. 20000 si dijo "billete de 20").
+   - Si el pedido YA fue creado previamente y el cliente responde después el billete o cambio, usa "actualizar_pago_pedido" — JAMÁS vuelvas a llamar a "crear_pedido".
+   - Infórmale que su pedido quedó REGISTRADO en estado PENDIENTE para cobro contraentrega.
 
 TIENES HERRAMIENTAS (MCP Tools) CONECTADAS AL SISTEMA DE LA TIENDA:
 1. "consultar_catalogo": Úsala para consultar existencias, precios y presentaciones de productos o medicamentos. NUNCA inventes productos ni precios.
 2. "cotizar_domicilio": Úsala para calcular el valor del domicilio según la dirección y barrio del cliente.
-3. "crear_pedido": Úsala para registrar oficialmente el pedido en el sistema una vez que el cliente haya confirmado qué desea, su dirección/barrio y su método de pago (efectivo o transferencia). Recuerda: la orden siempre se crea en estado "pendiente".
-4. "consultar_estado_pedido": Úsala si el cliente pregunta por el estado de su orden o entrega.
-5. "consultar_saldo_fiado": Úsala si el cliente pregunta por su deuda, fiado o saldo.
+3. "crear_pedido": Úsala UNA SOLA VEZ por compra para registrar oficialmente un pedido NUEVO una vez confirmados productos, dirección, método de pago y (si es efectivo) monto/exacto.
+4. "actualizar_pago_pedido": Úsala para actualizar el billete, cambio, método de pago o notas de un pedido YA creado recientemente (NUNCA crees un segundo pedido para esto).
+5. "consultar_estado_pedido": Úsala si el cliente pregunta por el estado de su orden o entrega.
+6. "consultar_saldo_fiado": Úsala si el cliente pregunta por su deuda, fiado o saldo.
 
 INSTRUCCIONES CLAVE DE ATENCIÓN:
 - Si el cliente solo te saluda ("hola", "buenas"), salúdalo con calidez y pregúntale amablemente en qué producto le puedes colaborar. (No llames herramientas para un simple saludo).
 - Recuerda SIEMPRE el contexto de toda la conversación anterior: los productos solicitados, las direcciones y las notas que el cliente ya dio. NUNCA le vuelvas a preguntar lo que ya te dijo.
 - Si el cliente te pide un producto, consulta el catálogo ("consultar_catalogo"), dale el precio real y pregúntale amablemente cuántas unidades desea y a qué dirección y barrio se lo envías.
 - Cuando el cliente te dé su dirección y barrio, cotiza el domicilio ("cotizar_domicilio"), infórmale el total (productos + envío) y pregúntale si prefiere pagar en efectivo contraentrega o por transferencia previa.
-- Una vez que confirme su forma de pago, llama a "crear_pedido".
-- Habla siempre como un ser humano atento, respetuoso y servicial.
+- Habla siempre como un ser humano atento, respetuoso y servicial.${recentOrdersBlock}
 ${config.aiSystemPrompt ? `\nInstrucciones especiales de la sede: ${config.aiSystemPrompt}` : ""}`
 
   const maxTokens = Math.min(Math.max(config.maxTokensPerReply || 450, 150), 750)
@@ -1532,6 +2136,7 @@ ${config.aiSystemPrompt ? `\nInstrucciones especiales de la sede: ${config.aiSys
   const MAX_LOOPS = 4
   let finalRawReply = ""
   let capturedOrder: any = null
+  let updatedExistingOrder: any = null
   let totalTokensUsed = 0
   let actualModel = model
 
@@ -1566,10 +2171,14 @@ ${config.aiSystemPrompt ? `\nInstrucciones especiales de la sede: ${config.aiSys
             branchFilter,
             deliveryConfig,
             channelLabel,
+            customerMessage: message,
+            alreadyCreatedOrderInTurn: capturedOrder,
           })
 
           if (toolExec.createdOrder) {
             capturedOrder = toolExec.createdOrder
+          } else if (toolExec.updatedOrder) {
+            updatedExistingOrder = toolExec.updatedOrder
           }
 
           conversationMessages.push({
@@ -1614,7 +2223,7 @@ ${config.aiSystemPrompt ? `\nInstrucciones especiales de la sede: ${config.aiSys
     }
   }
 
-  finalRawReply = sanitizeBotReply(finalRawReply, client?.name)
+  finalRawReply = sanitizeBotReply(finalRawReply, client?.name, capturedOrder || updatedExistingOrder)
 
   // Registrar consumo de tokens para el cliente
   try {
@@ -1633,8 +2242,8 @@ ${config.aiSystemPrompt ? `\nInstrucciones especiales de la sede: ${config.aiSys
     /* noop */
   }
 
-  let orderNumber: string | undefined = capturedOrder?.orderNumber
-  let orderTotal: number | undefined = capturedOrder?.total
+  let orderNumber: string | undefined = capturedOrder?.orderNumber || updatedExistingOrder?.orderNumber
+  let orderTotal: number | undefined = capturedOrder?.total ?? updatedExistingOrder?.total
   let actionTaken: BotProcessResult["actionTaken"] = capturedOrder ? "order_created" : "ai_answered"
 
   // Si la respuesta del modelo no incluyó el resumen del pedido creado, agregar el ticket
@@ -1643,8 +2252,10 @@ ${config.aiSystemPrompt ? `\nInstrucciones especiales de la sede: ${config.aiSys
   }
 
   if (!finalRawReply || !finalRawReply.trim()) {
-    if (orderNumber) {
-      finalRawReply = `🎉 *¡Pedido Recibido con Éxito!*\nTu orden #${orderNumber} ha sido registrada.`
+    if (capturedOrder?.orderNumber) {
+      finalRawReply = `🎉 *¡Pedido Recibido con Éxito!*\nTu orden #${capturedOrder.orderNumber} ha sido registrada.`
+    } else if (updatedExistingOrder?.orderNumber) {
+      finalRawReply = `✅ ¡Listo! Actualicé tu pedido *#${updatedExistingOrder.orderNumber}* por *${updatedExistingOrder.total_formateado}* con los datos de pago.`
     } else {
       throw new Error("AI returned empty content after processing")
     }

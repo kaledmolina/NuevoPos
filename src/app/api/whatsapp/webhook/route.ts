@@ -50,8 +50,33 @@ export async function POST(req: NextRequest) {
     }
 
     const from = String(message.from || "").trim() // Teléfono del cliente
+    const messageId = String(message.id || "").trim()
     const text = (message.text?.body || "").trim()
     const customerName = value?.contacts?.[0]?.profile?.name || "Cliente WhatsApp"
+
+    // 0. Idempotencia anti-reintentos de Meta Cloud API (evitar procesar dos veces el mismo wamid)
+    if (messageId) {
+      const dedupKey = `wa_last_msg:${from}`
+      try {
+        const existingDedup = await db.setting.findUnique({ where: { key: dedupKey } })
+        let recentIds: string[] = []
+        if (existingDedup?.value) {
+          recentIds = JSON.parse(existingDedup.value)
+          if (Array.isArray(recentIds) && recentIds.includes(messageId)) {
+            console.log(`[WhatsApp Webhook] Mensaje duplicado ignorado (${messageId}) para ${from}`)
+            return NextResponse.json({ status: "duplicate_ignored", messageId })
+          }
+        }
+        const nextIds = [messageId, ...(Array.isArray(recentIds) ? recentIds : [])].slice(0, 15)
+        await db.setting.upsert({
+          where: { key: dedupKey },
+          update: { value: JSON.stringify(nextIds) },
+          create: { key: dedupKey, value: JSON.stringify(nextIds) },
+        })
+      } catch (dedupErr) {
+        console.warn("[WhatsApp Dedup Check Warning]:", dedupErr)
+      }
+    }
 
     // 1. Identificar a qué Sede pertenece este número de WhatsApp
     let branchId: string | null = null

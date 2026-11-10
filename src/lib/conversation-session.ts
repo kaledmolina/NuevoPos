@@ -139,12 +139,16 @@ export async function setConversationSessionStatus(
     return closeConversationSession(cleanPhone, reason || "manual")
   }
 
+  const current = await getConversationSession(cleanPhone)
+  const keepOpenedAt = current.status !== "cerrada" && current.openedAt ? current.openedAt : new Date().toISOString()
+
   const session: ConversationSession = {
     phone: cleanPhone,
     status,
-    openedAt: new Date().toISOString(),
+    openedAt: keepOpenedAt,
     closedAt: null,
     closedReason: null,
+    lastOrderNumber: current.status !== "cerrada" ? current.lastOrderNumber || null : null,
   }
 
   try {
