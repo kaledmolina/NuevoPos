@@ -28,8 +28,9 @@ import { toast } from "sonner"
 import {
   IconWallet, IconLock, IconLockOpen, IconPlus, IconMinus, IconCircleArrowDown, IconCircleArrowUp,
   IconReceipt2, IconCircleCheck, IconAlertTriangle, IconHistory, IconEye, IconCoins, IconCalculator,
-  IconUser, IconCircleX, IconClock, IconFileText, IconCreditCard,
+  IconUser, IconCircleX, IconClock, IconFileText, IconCreditCard, IconMotorbike, IconArrowRight,
 } from "@tabler/icons-react"
+import { DriverSettlementView, type DriverSettlementApiResponse } from "@/components/pos/driver-settlement"
 
 // ---------------------------------------------------------------------------
 // Tipos
@@ -129,7 +130,10 @@ function diferenciaInfo(diff: number) {
 export default function CashView() {
   const refreshKey = useAppStore((s) => s.refreshKey)
   const triggerRefresh = useAppStore((s) => s.triggerRefresh)
+  const activeBranch = useAppStore((s) => s.activeBranch)
 
+  const [activeSection, setActiveSection] = useState<"register" | "drivers">("register")
+  const [driverSummary, setDriverSummary] = useState<DriverSettlementApiResponse["summary"] | null>(null)
   const [current, setCurrent] = useState<CashSession | null>(null)
   const [history, setHistory] = useState<CashSession[]>([])
   const [loading, setLoading] = useState(true)
@@ -161,17 +165,20 @@ export default function CashView() {
   const load = useCallback(() => {
     setLoading(true)
     setError(null)
+    const branchQuery = activeBranch?.id ? `&branchId=${encodeURIComponent(activeBranch.id)}` : ""
     Promise.all([
       apiFetch<CashSession | null>("/api/cash"),
       apiFetch<CashSession[]>("/api/cash/history"),
+      apiFetch<DriverSettlementApiResponse>(`/api/cash/driver-settlement?range=all${branchQuery}`).catch(() => null),
     ])
-      .then(([c, h]) => {
+      .then(([c, h, drv]) => {
         setCurrent(c ?? null)
         setHistory(h ?? [])
+        setDriverSummary(drv?.summary ?? null)
       })
       .catch((e) => setError((e as Error).message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [activeBranch?.id])
 
   useEffect(() => {
     load()
@@ -333,8 +340,81 @@ export default function CashView() {
         )}
       </div>
 
+      {/* Sub-navegación principal: Caja del Turno vs Cuadre con Domiciliarios */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-xl bg-muted p-1 gap-1 border border-border/60">
+          <button
+            type="button"
+            onClick={() => setActiveSection("register")}
+            className={cn(
+              "px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-2 cursor-pointer",
+              activeSection === "register"
+                ? "bg-background text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <IconWallet className="h-4 w-4 text-primary" />
+            Caja del Turno y Arqueo
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSection("drivers")}
+            className={cn(
+              "px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-2 cursor-pointer",
+              activeSection === "drivers"
+                ? "bg-background text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <IconMotorbike className="h-4 w-4 text-primary" />
+            Cuadre con Domiciliarios
+            {(driverSummary?.totalUnsettledCashOrders ?? 0) > 0 && (
+              <Badge className="h-5 px-1.5 text-[10px] font-bold tabular-nums bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 hover:bg-amber-500/20">
+                {driverSummary?.totalUnsettledCashOrders} · {formatCurrency(driverSummary?.totalUnsettledGrossAmount ?? 0)}
+              </Badge>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {activeSection === "drivers" && (
+        <DriverSettlementView
+          compactHeader
+          onSettled={() => {
+            load()
+          }}
+        />
+      )}
+
+      {activeSection === "register" && driverSummary && driverSummary.totalUnsettledCashOrders > 0 && (
+        <div className="rounded-2xl border border-amber-500/35 bg-amber-500/10 p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 text-xs">
+            <IconMotorbike className="h-5 w-5 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <p className="font-bold text-amber-900 dark:text-amber-200">
+                Hay {driverSummary.totalUnsettledCashOrders} entrega(s) en efectivo pendientes por cuadrar con domiciliarios ({formatCurrency(driverSummary.totalUnsettledGrossAmount)})
+              </p>
+              <p className="text-amber-800/90 dark:text-amber-300/90 tabular-nums">
+                Desglose: <strong>{formatCurrency(driverSummary.totalUnsettledProductsAmount)}</strong> en pedidos (X) +{" "}
+                <strong>{formatCurrency(driverSummary.totalUnsettledDeliveryFees)}</strong> en domicilios (Y). No suman a Ventas ni a Caja hasta confirmar el cuadre.
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setActiveSection("drivers")}
+            className="rounded-xl text-xs font-bold border-amber-500/40 bg-background hover:bg-amber-500/15 text-amber-900 dark:text-amber-200 gap-1.5 shrink-0 cursor-pointer"
+          >
+            Ir a Cuadrar Domiciliarios
+            <IconArrowRight className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+
       {/* ===================== SESIÓN ABIERTA ===================== */}
-      {current && stats && (
+      {activeSection === "register" && current && stats && (
         <>
           {/* Tarjeta resumen de la sesión */}
           <Card className="overflow-hidden rounded-2xl shadow-xs border bg-card text-card-foreground">
@@ -491,7 +571,7 @@ export default function CashView() {
       )}
 
       {/* ===================== CAJA CERRADA ===================== */}
-      {!current && (
+      {activeSection === "register" && !current && (
         <Card className="border-dashed" data-tour="cash-open-card">
           <CardContent className="p-6 md:p-10 flex flex-col items-center text-center gap-4">
             <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center">
@@ -511,6 +591,7 @@ export default function CashView() {
       )}
 
       {/* ===================== HISTORIAL ===================== */}
+      {activeSection === "register" && (
       <div className="space-y-2" data-tour="cash-history-card">
         <h3 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground">
           <IconHistory className="h-4 w-4" /> Historial de sesiones
@@ -612,6 +693,7 @@ export default function CashView() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* ===================== DIALOG: ABRIR CAJA ===================== */}
       <Dialog open={openOpen} onOpenChange={setOpenOpen}>
@@ -779,6 +861,35 @@ export default function CashView() {
                     <span>Ventas a crédito del turno (por cobrar):</span>
                   </span>
                   <span className="font-bold tabular-nums text-sm shrink-0">{formatCurrency(stats.ventasCredito)}</span>
+                </div>
+              )}
+
+              {/* Alerta si quedan domiciliarios sin cuadrar antes de cerrar turno */}
+              {driverSummary && driverSummary.totalUnsettledCashOrders > 0 && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 space-y-2 text-xs">
+                  <div className="flex items-start gap-2 text-amber-900 dark:text-amber-200">
+                    <IconAlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">
+                        Faltan {driverSummary.totalUnsettledCashOrders} domicilio(s) por cuadrar ({formatCurrency(driverSummary.totalUnsettledGrossAmount)})
+                      </p>
+                      <p className="text-[11px] opacity-90 tabular-nums">
+                        {formatCurrency(driverSummary.totalUnsettledProductsAmount)} pedidos (X) + {formatCurrency(driverSummary.totalUnsettledDeliveryFees)} domicilios (Y).
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setOpenClose(false)
+                      setActiveSection("drivers")
+                    }}
+                    className="h-7 text-[11px] font-bold border-amber-500/40 bg-background hover:bg-amber-500/15 w-full"
+                  >
+                    Cuadrar domiciliarios antes de cerrar
+                  </Button>
                 </div>
               )}
 

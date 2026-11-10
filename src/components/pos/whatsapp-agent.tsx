@@ -1162,7 +1162,7 @@ export default function WhatsAppAgentView() {
         confirmado: "Confirmado",
         en_preparacion: "En Preparación",
         en_camino: "En Camino con Domiciliario",
-        entregado: "Entregado con Éxito",
+        entregado: "Entregado (pago queda pendiente por liquidar en caja)",
         cancelado: "Cancelado",
       }
       toast.success(`Estado de pedido actualizado a: ${labels[newStatus] || newStatus}`)
@@ -1174,7 +1174,11 @@ export default function WhatsAppAgentView() {
   }
 
   // Actualizar estado de pago en 1 clic (ej: Confirmar Pago / Marcar Pagado)
-  const handleQuickUpdatePaymentStatus = async (orderId: string, paymentStatus: "pagado" | "pendiente", paymentMethod?: string) => {
+  const handleQuickUpdatePaymentStatus = async (
+    orderId: string,
+    paymentStatus: "pagado" | "pendiente" | "por_cobrar",
+    paymentMethod?: string
+  ) => {
     try {
       await apiFetch(`/api/v1/orders/${orderId}/status`, {
         method: "PATCH",
@@ -2367,7 +2371,7 @@ export default function WhatsAppAgentView() {
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                              ⏳ Pendiente
+                              {selectedConv.latestOrder.status === "entregado" ? "⏳ Sin Liquidar" : "⏳ Pendiente"}
                             </span>
                           )}
                         </div>
@@ -2416,7 +2420,12 @@ export default function WhatsAppAgentView() {
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pendiente")}
+                                onClick={() =>
+                                  handleQuickUpdatePaymentStatus(
+                                    selectedConv.latestOrder!.id,
+                                    selectedConv.latestOrder!.status === "entregado" ? "por_cobrar" : "pendiente"
+                                  )
+                                }
                                 className="text-[10px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 underline cursor-pointer"
                               >
                                 Revertir pago
@@ -2433,6 +2442,15 @@ export default function WhatsAppAgentView() {
                             ) : selectedConv.latestOrder.paymentMethod === "transferencia" ? (
                               <span className="text-amber-600 dark:text-amber-400 font-medium">
                                 ⚠️ Verificar comprobante de transferencia
+                              </span>
+                            ) : selectedConv.latestOrder.status === "entregado" ? (
+                              <span className="text-amber-600 dark:text-amber-400 font-medium">
+                                ⏳ Entregado · Falta recibir {formatCurrency(selectedConv.latestOrder.total)} al domiciliario en Caja
+                                {(selectedConv.latestOrder.deliveryFee || 0) > 0 && (
+                                  <span className="text-[9px] text-zinc-500 block">
+                                    ({formatCurrency(selectedConv.latestOrder.subtotal || selectedConv.latestOrder.total - (selectedConv.latestOrder.deliveryFee || 0))} productos + {formatCurrency(selectedConv.latestOrder.deliveryFee || 0)} envío)
+                                  </span>
+                                )}
                               </span>
                             ) : (
                               <span className="text-blue-600 dark:text-blue-400 font-medium">
@@ -3880,7 +3898,12 @@ export default function WhatsAppAgentView() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleQuickUpdatePaymentStatus(selectedConv.latestOrder!.id, "pendiente")}
+                        onClick={() =>
+                          handleQuickUpdatePaymentStatus(
+                            selectedConv.latestOrder!.id,
+                            selectedConv.latestOrder!.status === "entregado" ? "por_cobrar" : "pendiente"
+                          )
+                        }
                         className="w-full h-7 text-[11px] text-zinc-600 dark:text-zinc-300 border-zinc-300 dark:border-zinc-700 cursor-pointer"
                       >
                         Revertir estado a Pendiente de Pago
@@ -4023,7 +4046,11 @@ export default function WhatsAppAgentView() {
                         </Badge>
                       ) : (
                         <Badge className="text-[9px] bg-amber-500 text-white font-mono">
-                          {ord.paymentMethod === "transferencia" ? "Transf. Pendiente" : "Efectivo Pendiente"}
+                          {ord.status === "entregado"
+                            ? "Sin Liquidar"
+                            : ord.paymentMethod === "transferencia"
+                            ? "Transf. Pendiente"
+                            : "Efectivo Pendiente"}
                         </Badge>
                       )}
                     </div>

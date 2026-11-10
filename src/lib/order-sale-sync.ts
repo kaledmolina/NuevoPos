@@ -2,7 +2,7 @@ import { db } from "@/lib/db"
 import { nextInvoiceNumber } from "@/lib/format"
 
 /**
- * Sincroniza un Pedido a una Venta oficial (Sale) si ya está pagado o entregado.
+ * Sincroniza un Pedido a una Venta oficial (Sale) ÚNICAMENTE cuando ya fue marcado como 'pagado' por caja/admin.
  * Garantiza idempotencia: si ya existe una venta para este pedido, no la duplica.
  */
 export async function syncOrderToSale(orderIdOrNumber: string, customDb?: any) {
@@ -30,8 +30,9 @@ export async function syncOrderToSale(orderIdOrNumber: string, customDb?: any) {
     return null
   }
 
-  // Solo se pasa a ventas si fue pagado o entregado
-  const isEligible = order.paymentStatus === "pagado" || order.status === "entregado"
+  // Solo se pasa a ventas oficiales si ya fue confirmado como PAGADO por un humano (caja/admin)
+  // Entregar un pedido NO significa que el domiciliario ya haya entregado el efectivo en caja.
+  const isEligible = order.paymentStatus === "pagado"
   if (!isEligible) {
     return null
   }
@@ -52,9 +53,10 @@ export async function syncOrderToSale(orderIdOrNumber: string, customDb?: any) {
 
   if (existingSale) {
     // Si la venta previa tenía el costo de domicilio sumado al total, ajustarla para que sea solo el valor del producto
+    const rawProducts = Number(order.subtotal || 0) - Number(order.discount || 0) + Number(order.tax || 0)
     const productOnlyTotal = Math.max(
       0,
-      Number(order.subtotal || 0) - Number(order.discount || 0) + Number(order.tax || 0)
+      rawProducts > 0 ? rawProducts : Number(order.total || 0) - Number(order.deliveryFee || 0)
     )
     if (existingSale.total !== productOnlyTotal && (order.deliveryFee || 0) > 0) {
       await client.sale.update({
@@ -173,9 +175,10 @@ export async function syncOrderToSale(orderIdOrNumber: string, customDb?: any) {
   const fullNotes = `Venta por Domicilio/Pedido ${orderMarker}.${deliveryNote} Cliente: ${order.customerName} - Tel: ${order.customerPhone}. Dirección: ${order.deliveryAddress || "N/A"}.`
 
   // 6.2 Total oficial de la venta: ÚNICAMENTE EL VALOR DEL PRODUCTO (el valor del domicilio no se incluye en la venta)
+  const rawProductsTotal = Number(order.subtotal || 0) - Number(order.discount || 0) + Number(order.tax || 0)
   const productOnlyTotal = Math.max(
     0,
-    Number(order.subtotal || 0) - Number(order.discount || 0) + Number(order.tax || 0)
+    rawProductsTotal > 0 ? rawProductsTotal : Number(order.total || 0) - Number(order.deliveryFee || 0)
   )
 
   // 7. Crear la venta
@@ -221,14 +224,11 @@ export async function syncOrderToSale(orderIdOrNumber: string, customDb?: any) {
 }
 
 /**
- * Sincroniza todos los pedidos elegibles (pagados o entregados) que aún no tengan venta registrada.
+ * Sincroniza todos los pedidos ya pagados que aún no tengan venta registrada.
  */
 export async function syncAllPaidOrders(branchId?: string | null) {
   const where: any = {
-    OR: [
-      { paymentStatus: "pagado" },
-      { status: "entregado" },
-    ],
+    paymentStatus: "pagado",
   }
   if (branchId) {
     where.branchId = branchId

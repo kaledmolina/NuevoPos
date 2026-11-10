@@ -74,7 +74,12 @@ export async function PATCH(
       }
     }
 
-    // Si es domiciliario, puede cambiar entre en_preparacion -> en_camino -> entregado
+    // Si es domiciliario, puede cambiar entre en_preparacion -> en_camino -> entregado,
+    // pero NUNCA puede marcar el pedido como 'pagado' (eso corresponde únicamente a caja/admin al recibir el dinero).
+    if (session && (session.role === "domiciliario" || session.role === "cliente") && paymentStatus === "pagado") {
+      return apiError("Solo el personal de caja o administrador puede confirmar que un pedido fue pagado al recibir el efectivo.", 403)
+    }
+
     if (session && session.role === "domiciliario") {
       if (rawStatus && !["en_camino", "entregado"].includes(rawStatus)) {
         return apiError("Los domiciliarios solo pueden actualizar pedidos a 'en_camino' o 'entregado'", 403)
@@ -140,12 +145,23 @@ export async function PATCH(
       })
     })
 
-    // Si el pedido quedó entregado o pagado, registrar o actualizar automáticamente su venta oficial
-    if (updated.paymentStatus === "pagado" || updated.status === "entregado") {
+    // ÚNICAMENTE registrar o actualizar la venta oficial cuando un humano confirma el pago ('pagado')
+    if (updated.paymentStatus === "pagado") {
       try {
         await syncOrderToSale(updated.id)
       } catch (err) {
         console.error("Error sincronizando pedido a venta oficial:", err)
+      }
+    } else if (paymentStatus && paymentStatus !== "pagado" && order.paymentStatus === "pagado") {
+      // Si un humano revirtió un pago confirmado a pendiente / por_cobrar, retirar la venta auto-sincronizada del pedido
+      try {
+        await db.sale.deleteMany({
+          where: {
+            notes: { contains: `[Pedido: ${order.orderNumber}]` },
+          },
+        })
+      } catch (err) {
+        console.error("Error revirtiendo venta auto-sincronizada del pedido:", err)
       }
     }
 

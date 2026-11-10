@@ -35,12 +35,15 @@ export async function POST(
     }
 
     const notes = body.notes ? String(body.notes).trim() : null
+    // Solo un humano en caja/admin reporta el pedido como 'pagado' al recibir el efectivo.
+    // Si ya estaba prepagado (ej. transferencia verificada), se conserva 'pagado'; de lo contrario pasa a 'por_cobrar'.
+    const nextPaymentStatus = order.paymentStatus === "pagado" ? "pagado" : "por_cobrar"
 
     const updated = await db.order.update({
       where: { id: order.id },
       data: {
         status: "entregado",
-        paymentStatus: "pagado",
+        paymentStatus: nextPaymentStatus,
         deliveredAt: new Date(),
         notes: notes ? `${order.notes ? order.notes + " | " : ""}Entrega: ${notes}` : order.notes,
       },
@@ -57,19 +60,24 @@ export async function POST(
       entityId: order.id,
       userName: session.name,
       role: session.role,
-      detail: `Domiciliario ${session.name} completó la entrega del pedido ${order.orderNumber}`,
+      detail: `Domiciliario ${session.name} completó la entrega del pedido ${order.orderNumber} (Pago: ${nextPaymentStatus})`,
     })
 
-    // Registrar en ventas de inmediato
-    try {
-      await syncOrderToSale(updated.id)
-    } catch (err) {
-      console.error("Error al registrar venta desde entrega:", err)
+    // Solo sincronizar a ventas si ya estaba previamente pagado
+    if (updated.paymentStatus === "pagado") {
+      try {
+        await syncOrderToSale(updated.id)
+      } catch (err) {
+        console.error("Error al registrar venta desde entrega:", err)
+      }
     }
 
     return apiSuccess({
       order: updated,
-      message: `¡Entrega finalizada con éxito! El pedido ${order.orderNumber} ha sido marcado como entregado y pagado.`,
+      message:
+        updated.paymentStatus === "pagado"
+          ? `¡Entrega finalizada con éxito! El pedido ${order.orderNumber} fue entregado (ya figuraba pagado).`
+          : `¡Entrega finalizada! El pedido ${order.orderNumber} quedó marcado como entregado y pendiente por liquidar en caja.`,
     })
   } catch (error) {
     console.error("Error en POST /api/v1/delivery/orders/[id]/complete:", error)

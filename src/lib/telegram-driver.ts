@@ -7,6 +7,26 @@ export interface SendTelegramOptions {
   parse_mode?: string
 }
 
+function isCashPaymentMethod(method?: string | null): boolean {
+  const m = (method || "contraentrega").toLowerCase().trim()
+  if (!m) return true
+  return m === "efectivo" || m === "contraentrega" || m.includes("efectivo") || m.includes("contra")
+}
+
+function getDriverCollectionLabel(order: { total?: number | null; paymentMethod?: string | null; paymentStatus?: string | null }): {
+  needsCash: boolean
+  label: string
+} {
+  const totalFormatted = `$${Number(order.total || 0).toLocaleString("es-CO")}`
+  if (order.paymentStatus === "pagado") {
+    return { needsCash: false, label: `✅ Ya Pagado ($0 a cobrar)` }
+  }
+  if (isCashPaymentMethod(order.paymentMethod)) {
+    return { needsCash: true, label: `💵 Cobrar en efectivo: *${totalFormatted}*` }
+  }
+  return { needsCash: false, label: `💳 Transferencia / Tarjeta (Verificar comprobante, no cobrar efectivo)` }
+}
+
 /**
  * Enviar mensaje directo por la API de Telegram Bot
  */
@@ -344,10 +364,7 @@ export async function notifyDriverAssignedOrder(orderId: string): Promise<{ noti
       .join("\n")
 
     const totalFormatted = `$${Number(order.total || 0).toLocaleString("es-CO")}`
-    const paymentLabel =
-      order.paymentMethod === "efectivo"
-        ? `💵 Efectivo contraentrega (*Cobrar ${totalFormatted}*)`
-        : `💳 Transferencia / Prepagado (*Ya pagado / No cobrar*)`
+    const { label: paymentLabel } = getDriverCollectionLabel(order)
 
     let gpsSection = ""
     if (order.deliveryLatitude && order.deliveryLongitude) {
@@ -468,7 +485,7 @@ export async function broadcastNewOrderToDrivers(orderId: string): Promise<{ not
 
     const totalFormatted = `$${Number(order.total || 0).toLocaleString("es-CO")}`
     const feeFormatted = `$${Number(order.deliveryFee || 0).toLocaleString("es-CO")}`
-    const paymentLabel = order.paymentMethod === "efectivo" ? `💵 Efectivo contraentrega (*Cobrar ${totalFormatted}*)` : `💳 Prepagado / Transferencia (*No cobrar*)`
+    const { label: paymentLabel } = getDriverCollectionLabel(order)
     const branchName = order.branch?.name || "Tienda Principal"
 
     let gpsNotice = ""
@@ -597,10 +614,7 @@ export async function handleDriverTelegramAction(params: {
 
         const totalFormatted = `$${Number(order.total || 0).toLocaleString("es-CO")}`
         const feeFormatted = `$${Number(order.deliveryFee || 0).toLocaleString("es-CO")}`
-        const paymentLabel =
-          order.paymentMethod === "efectivo"
-            ? `💵 Cobrar en efectivo: *${totalFormatted}*`
-            : `💳 Ya Pagado (No cobrar)`
+        const { label: paymentLabel } = getDriverCollectionLabel(order)
 
         const branchName = order.branch?.name || "Tienda Principal"
 
@@ -706,11 +720,12 @@ export async function handleDriverTelegramAction(params: {
 
       // Enviar confirmación al domiciliario con el botón de Entrega
       const totalFormatted = `$${Number(order.total || 0).toLocaleString("es-CO")}`
+      const { needsCash, label: collectionLabel } = getDriverCollectionLabel(order)
       let deliveryMsg =
         `🛵 *¡Pedido #${order.orderNumber} en camino!*\n\n` +
         `📍 *Dirección de entrega:* ${order.deliveryAddress || "A convenir"}\n` +
         `👤 *Cliente:* ${order.customerName} (${order.customerPhone})\n` +
-        `💰 *Valor a cobrar:* ${order.paymentMethod === "efectivo" ? totalFormatted : "$0 (Ya pagado)"}\n`
+        `💰 *Cobro:* ${needsCash ? `${totalFormatted} (Contraentrega)` : collectionLabel}\n`
 
       if (order.deliveryLatitude && order.deliveryLongitude) {
         const mapsUrl = `https://www.google.com/maps?q=${order.deliveryLatitude},${order.deliveryLongitude}`
@@ -759,9 +774,9 @@ export async function handleDriverTelegramAction(params: {
       }
 
       // Marcar orden como entregada
-      // REGLA CLAVE DE NEGOCIO: Si el pago fue en efectivo, se mantiene 'por_cobrar'
-      // hasta que el domiciliario entregue físicamente todo el dinero en la caja de la sede.
-      const isCash = order.paymentMethod === "efectivo"
+      // REGLA CLAVE DE NEGOCIO: Si el pago fue contraentrega/efectivo (y no prepagado),
+      // se conserva como 'por_cobrar' hasta que un humano en caja reciba el efectivo y haga el Cuadre.
+      const isCash = isCashPaymentMethod(order.paymentMethod) && order.paymentStatus !== "pagado"
       await db.order.update({
         where: { id: order.id },
         data: {
@@ -789,9 +804,11 @@ export async function handleDriverTelegramAction(params: {
       if (isCash) {
         completionMsg +=
           `\n💵 *Efectivo cobrado:* ${totalFormatted}\n` +
-          `⚠️ *IMPORTANTE:* Este dinero queda bajo tu custodia. Al finalizar tu recorrido, debes entregar el efectivo total en la caja física de la tienda para que el cajero liquide y cierre los pedidos.`
+          `⚠️ *IMPORTANTE:* Este dinero queda pendiente por liquidar hasta que lo entregues en caja física y el cajero confirme tu /cuadre.`
+      } else if (order.paymentStatus === "pagado") {
+        completionMsg += `\n✅ *Pago:* Confirmado previamente (No debes entregar efectivo por este pedido).`
       } else {
-        completionMsg += `\n💳 *Pago:* Verificado previamente por transferencia.`
+        completionMsg += `\n💳 *Pago:* ${order.paymentMethod || "Transferencia"} (Pendiente verificación en caja).`
       }
 
       completionMsg += `\n\nEscribe /pedidos para consultar tus próximas entregas.`
@@ -926,8 +943,7 @@ export async function handleDriverTelegramAction(params: {
     for (const ord of activeOrders) {
       const isEnCamino = ord.status === "en_camino"
       const statusIcon = isEnCamino ? "🛵 EN CAMINO" : "🏬 EN TIENDA (Pendiente recoger)"
-      const totalFormatted = `$${Number(ord.total || 0).toLocaleString("es-CO")}`
-      const paymentInfo = ord.paymentMethod === "efectivo" ? `💵 Cobrar: ${totalFormatted}` : `💳 Ya Pagado`
+      const { label: paymentInfo } = getDriverCollectionLabel(ord)
 
       let gpsPart = ""
       if (ord.deliveryLatitude && ord.deliveryLongitude) {
@@ -956,7 +972,7 @@ export async function handleDriverTelegramAction(params: {
     return { handled: true }
   }
 
-  if (cmd === "/estado" || cmd === "estado" || cmd === "/balance") {
+  if (cmd === "/estado" || cmd === "estado" || cmd === "/balance" || cmd === "/cuadre" || cmd === "cuadre") {
     // Pedidos en curso
     const enCaminoCount = await db.order.count({
       where: {
@@ -965,7 +981,7 @@ export async function handleDriverTelegramAction(params: {
       },
     })
 
-    // Pedidos entregados pendientes de liquidación en caja física
+    // Todos los pedidos entregados pendientes de liquidación en caja + liquidados de hoy
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
@@ -973,39 +989,60 @@ export async function handleDriverTelegramAction(params: {
       where: {
         deliveryDriverId: linkedDriver.id,
         status: "entregado",
-        deliveredAt: { gte: today },
+        OR: [
+          { paymentStatus: { not: "pagado" } },
+          { deliveredAt: { gte: today } },
+        ],
       },
       select: {
         total: true,
+        deliveryFee: true,
         paymentStatus: true,
         paymentMethod: true,
+        deliveredAt: true,
       },
     })
 
-    // Calcular efectivo cobrado que aún NO ha sido liquidado en caja
-    let cashToReconcile = 0
-    let totalCashCollectedToday = 0
+    let unsettledCashCount = 0
+    let unsettledProductsTotal = 0
+    let unsettledDeliveryTotal = 0
+    let unsettledGrossTotal = 0
+    let settledTodayCount = 0
 
     for (const ord of deliveredOrders) {
-      if (ord.paymentMethod === "efectivo") {
-        totalCashCollectedToday += Number(ord.total || 0)
-        if (ord.paymentStatus !== "pagado") {
-          cashToReconcile += Number(ord.total || 0)
+      const tot = Math.max(0, Number(ord.total || 0))
+      const fee = Math.min(tot, Math.max(0, Number(ord.deliveryFee || 0)))
+      const prod = Math.max(0, tot - fee)
+
+      if (ord.paymentStatus === "pagado") {
+        if (ord.deliveredAt && new Date(ord.deliveredAt) >= today) {
+          settledTodayCount += 1
         }
+        continue
+      }
+
+      if (isCashPaymentMethod(ord.paymentMethod)) {
+        unsettledCashCount += 1
+        unsettledProductsTotal += prod
+        unsettledDeliveryTotal += fee
+        unsettledGrossTotal += tot
       }
     }
 
-    const reconcileFormatted = `$${cashToReconcile.toLocaleString("es-CO")}`
-    const totalCollectedFormatted = `$${totalCashCollectedToday.toLocaleString("es-CO")}`
+    const prodFormatted = `$${unsettledProductsTotal.toLocaleString("es-CO")}`
+    const feeFormatted = `$${unsettledDeliveryTotal.toLocaleString("es-CO")}`
+    const grossFormatted = `$${unsettledGrossTotal.toLocaleString("es-CO")}`
 
     const balanceMsg =
-      `📊 *RESUMEN DE TURNO - ${linkedDriver.name}*\n\n` +
-      `🛵 *Entregas en camino:* ${enCaminoCount}\n` +
-      `✅ *Entregas completadas hoy:* ${deliveredOrders.length}\n\n` +
-      `💰 *EFECTIVO EN CUSTODIA (Por entregar en caja):*\n` +
-      `👉 *${reconcileFormatted}*\n` +
-      `(Total efectivo recaudado hoy: ${totalCollectedFormatted})\n\n` +
-      `⚠️ *Nota:* Este saldo debe ser entregado en efectivo al cajero de la sede al cerrar tu turno para que los pedidos queden liquidados.`
+      `📊 *CUADRE PENDIENTE - ${linkedDriver.name}*\n\n` +
+      `🛵 *En camino:* ${enCaminoCount}\n` +
+      `📦 *Entregas contraentrega por liquidar:* ${unsettledCashCount}\n` +
+      `✅ *Liquidados hoy en caja:* ${settledTodayCount}\n\n` +
+      `💵 *DESGLOSE A ENTREGAR EN CAJA:*\n` +
+      `• *Valor en Pedidos (X):* ${prodFormatted}\n` +
+      `• *Valor en Domicilios (Y):* ${feeFormatted}\n` +
+      `👉 *TOTAL A ENTREGAR:* *${grossFormatted}*\n\n` +
+      `⚠️ *Nota:* Entrega este efectivo al cajero de la sede para que confirme tu cuadre y marque los pedidos como Pagados.`
 
     await sendTelegramDirect(botToken, strChatId, balanceMsg)
     return { handled: true }
@@ -1030,7 +1067,7 @@ export async function handleDriverTelegramAction(params: {
       `🛵 *Menú de Domiciliario - OmniPOS*\n\n` +
       `Hola *${linkedDriver.name}*, estos son tus comandos disponibles:\n\n` +
       `• /pedidos - Ver lista de pedidos asignados y botones de acción\n` +
-      `• /estado - Ver pedidos completados y total de efectivo en mano para liquidar en caja\n` +
+      `• /cuadre (o /estado) - Ver cuánto debes entregar por pedidos (X) y domicilios (Y)\n` +
       `• /desvincular - Desconectar tu Telegram de este perfil\n` +
       `• /ayuda - Mostrar esta ayuda\n\n` +
       `💡 *Flujo de entrega:*\n` +

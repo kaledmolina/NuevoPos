@@ -60,8 +60,12 @@ export async function notifyCustomerOrderStatus(options: NotifyOrderStatusOption
             order.deliveryFee && order.deliveryFee > 0
               ? `\n🧾 *Productos:* $${Number(order.subtotal || order.total - order.deliveryFee).toLocaleString("es-CO")}\n🛵 *Costo Domicilio:* $${Number(order.deliveryFee).toLocaleString("es-CO")}`
               : ""
+          const isCashOrder =
+            !order.paymentMethod ||
+            order.paymentMethod.toLowerCase().includes("efectivo") ||
+            order.paymentMethod.toLowerCase().includes("contra")
           const paymentPart =
-            order.paymentStatus !== "pagado" && order.paymentMethod === "efectivo"
+            order.paymentStatus !== "pagado" && isCashOrder
               ? `\n💵 *A cobrar contraentrega:* ${totalFormatted}`
               : order.paymentStatus === "pagado"
               ? `\n✅ *Pago:* Ya verificado y liquidado.`

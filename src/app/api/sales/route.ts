@@ -152,7 +152,7 @@ export async function GET(req: NextRequest) {
 
   const branchId = await resolveBranchId(req)
 
-  // Sincronizar automáticamente cualquier pedido pagado o entregado hacia Ventas
+  // Sincronizar automáticamente cualquier pedido pagado hacia Ventas
   try {
     await syncAllPaidOrders(branchId)
   } catch (err) {

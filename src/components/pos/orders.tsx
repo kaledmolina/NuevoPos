@@ -70,9 +70,11 @@ import {
   IconTrash,
   IconSettings,
   IconSparkles,
+  IconCalculator,
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { DriverSettlementView } from "@/components/pos/driver-settlement"
 
 export interface OrderItem {
   id: string
@@ -208,6 +210,11 @@ export const PAYMENT_STATUS_CONFIG: Record<
     badgeClass: "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30",
     icon: "⏳",
   },
+  por_cobrar: {
+    label: "Sin Liquidar (Entregado)",
+    badgeClass: "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30",
+    icon: "⏳",
+  },
 }
 
 export const PAYMENT_METHOD_CONFIG: Record<
@@ -222,7 +229,7 @@ export const PAYMENT_METHOD_CONFIG: Record<
 }
 
 export default function OrdersView() {
-  const { role, userName, activeBranch, refreshKey, tenantId } = useAppStore()
+  const { role, userName, activeBranch, refreshKey, tenantId, triggerRefresh } = useAppStore()
 
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
@@ -272,6 +279,7 @@ export default function OrdersView() {
 
   // Modal de Ajustes de Tarifas de Domicilio & Tarifas por Barrio
   const [deliverySettingsModalOpen, setDeliverySettingsModalOpen] = useState(false)
+  const [driverSettlementModalOpen, setDriverSettlementModalOpen] = useState(false)
   const [loadingDeliverySettings, setLoadingDeliverySettings] = useState(false)
   const [savingDeliverySettings, setSavingDeliverySettings] = useState(false)
   const [globalDeliveryFee, setGlobalDeliveryFee] = useState<number>(5000)
@@ -511,7 +519,25 @@ export default function OrdersView() {
       .filter((o) => o.paymentStatus !== "pagado" && o.status !== "cancelado")
       .reduce((acc, o) => acc + (o.total || 0), 0)
 
-    return { total, pending, inPrep, inTransit, delivered, unassigned, countPaid, countPendingPayment, totalPendingMoney }
+    const unsettledDeliveredOrders = branchIsolatedOrders.filter(
+      (o) => o.status === "entregado" && o.paymentStatus !== "pagado"
+    )
+    const unsettledDeliveredCount = unsettledDeliveredOrders.length
+    const unsettledDeliveredTotal = unsettledDeliveredOrders.reduce((acc, o) => acc + (o.total || 0), 0)
+
+    return {
+      total,
+      pending,
+      inPrep,
+      inTransit,
+      delivered,
+      unassigned,
+      countPaid,
+      countPendingPayment,
+      totalPendingMoney,
+      unsettledDeliveredCount,
+      unsettledDeliveredTotal,
+    }
   }, [branchIsolatedOrders])
 
   const dedicatedDrivers = useMemo(() => staffDrivers.filter((s) => s.role === "domiciliario"), [staffDrivers])
@@ -667,23 +693,38 @@ export default function OrdersView() {
         method: "PATCH",
         body: JSON.stringify({ status: newStatus }),
       })
-      toast.success(`Estado actualizado a: ${STATUS_CONFIG[newStatus]?.label || newStatus}`)
+      if (newStatus === "entregado") {
+        toast.success(
+          "Pedido marcado Entregado · El pago queda pendiente por liquidar hasta recibir el efectivo en Caja"
+        )
+      } else {
+        toast.success(`Estado actualizado a: ${STATUS_CONFIG[newStatus]?.label || newStatus}`)
+      }
       fetchOrders()
+      triggerRefresh()
     } catch (e) {
       console.error(e)
       toast.error((e as Error).message || "Error al cambiar estado")
     }
   }
 
-  // Actualizar estado de pago (ej: verificar transferencia)
-  const handleUpdatePaymentStatus = async (orderId: string, paymentStatus: "pagado" | "pendiente") => {
+  // Actualizar estado de pago (ej: verificar transferencia o recibir efectivo en caja)
+  const handleUpdatePaymentStatus = async (
+    orderId: string,
+    paymentStatus: "pagado" | "pendiente" | "por_cobrar"
+  ) => {
     try {
       await apiFetch(`/api/v1/orders/${orderId}/status`, {
         method: "PATCH",
         body: JSON.stringify({ paymentStatus }),
       })
-      toast.success(paymentStatus === "pagado" ? "¡Pago verificado y marcado como pagado!" : "Pago marcado como pendiente")
+      toast.success(
+        paymentStatus === "pagado"
+          ? "¡Pago confirmado por caja y registrado en Ventas!"
+          : "Pago marcado como pendiente por liquidar"
+      )
       fetchOrders()
+      triggerRefresh()
       if (detailOrder && detailOrder.id === orderId) {
         setDetailOrder({ ...detailOrder, paymentStatus })
       }
@@ -902,6 +943,28 @@ export default function OrdersView() {
             Actualizar
           </Button>
 
+          {role !== "domiciliario" && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDriverSettlementModalOpen(true)}
+              className={cn(
+                "rounded-xl h-9 text-xs gap-1.5 shadow-2xs",
+                metrics.unsettledDeliveredCount > 0
+                  ? "border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-900 dark:text-amber-200 font-bold"
+                  : "border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-foreground"
+              )}
+            >
+              <IconCalculator className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+              Cuadre Domiciliarios
+              {metrics.unsettledDeliveredCount > 0 && (
+                <Badge className="h-4 px-1.5 text-[10px] font-bold tabular-nums bg-amber-500 text-white border-0">
+                  {metrics.unsettledDeliveredCount}
+                </Badge>
+              )}
+            </Button>
+          )}
+
           <Button
             variant="outline"
             size="sm"
@@ -1028,7 +1091,7 @@ export default function OrdersView() {
           </div>
         </Card>
 
-        {/* Métrica de Estado de Pago: Por Cobrar */}
+        {/* Métrica de Estado de Pago: Por Cobrar / Sin Liquidar */}
         <Card
           onClick={() => {
             setPaymentStatusFilter(paymentStatusFilter === "pendiente" ? "all" : "pendiente")
@@ -1039,9 +1102,9 @@ export default function OrdersView() {
           )}
         >
           <div className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1 truncate">
-            ⏳ Por Cobrar ({metrics.countPendingPayment})
+            ⏳ Sin Liquidar ({metrics.countPendingPayment})
           </div>
-          <div className="text-base sm:text-lg font-bold text-amber-800 dark:text-amber-300 mt-1 truncate">
+          <div className="text-base sm:text-lg font-bold text-amber-800 dark:text-amber-300 mt-1 truncate tabular-nums">
             {formatCurrency(metrics.totalPendingMoney)}
           </div>
         </Card>
@@ -1274,11 +1337,25 @@ export default function OrdersView() {
                         {order.paymentStatus === "pagado" ? (
                           <button
                             type="button"
-                            onClick={() => handleUpdatePaymentStatus(order.id, "pendiente")}
+                            onClick={() =>
+                              handleUpdatePaymentStatus(
+                                order.id,
+                                order.status === "entregado" ? "por_cobrar" : "pendiente"
+                              )
+                            }
                             className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 px-2 py-1 rounded-md cursor-pointer transition-all active:scale-95 shadow-2xs whitespace-nowrap"
-                            title="Pagado. Clic para cambiar a Pendiente"
+                            title="Pagado y liquidado en Caja. Clic para revertir"
                           >
                             💰 Pagado ($0 a cobrar)
+                          </button>
+                        ) : order.status === "entregado" ? (
+                          <button
+                            type="button"
+                            onClick={() => handleUpdatePaymentStatus(order.id, "pagado")}
+                            className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 dark:text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 px-2 py-1 rounded-md cursor-pointer transition-all active:scale-95 shadow-2xs whitespace-nowrap"
+                            title="Pedido entregado, pero aún falta liquidar el efectivo en Caja con el domiciliario. Clic para confirmar Pagado"
+                          >
+                            ⏳ Sin Liquidar ({formatCurrency(order.total)})
                           </button>
                         ) : (
                           <button
@@ -1936,6 +2013,8 @@ export default function OrdersView() {
                   <span className="font-bold flex items-center gap-1.5 uppercase text-[10px] tracking-wider">
                     {detailOrder.paymentStatus === "pagado"
                       ? "✅ Pago Confirmado / Liquidado"
+                      : detailOrder.status === "entregado"
+                      ? "⏳ Entregado · Pendiente de Liquidar en Caja"
                       : detailOrder.paymentMethod === "transferencia"
                       ? "⏳ Transferencia Pendiente por Verificar"
                       : "💵 Pago Contraentrega en Efectivo"}
@@ -1945,14 +2024,18 @@ export default function OrdersView() {
                       ? "Cobrar: $0"
                       : detailOrder.paymentMethod === "transferencia"
                       ? `Monto: ${formatCurrency(detailOrder.total)}`
+                      : detailOrder.status === "entregado"
+                      ? `Por Liquidar: ${formatCurrency(detailOrder.total)}`
                       : `Cobrar: ${formatCurrency(detailOrder.total)}`}
                   </span>
                 </div>
                 <p className="text-[11px] leading-relaxed">
                   {detailOrder.paymentStatus === "pagado"
-                    ? "✅ Este pedido ya fue verificado y pagado. El domiciliario NO debe cobrar dinero al cliente ni debe entregar dinero en caja ($0 COP)."
+                    ? "✅ Este pedido ya fue verificado y liquidado en caja. No hay saldo pendiente por cobrar."
+                    : detailOrder.status === "entregado" && detailOrder.paymentMethod !== "transferencia"
+                    ? `⚠️ El pedido ya fue entregado al cliente, pero el dinero aún NO ha ingresado a Caja ni a Ventas. Confirma el pago solo cuando el domiciliario entregue ${formatCurrency(detailOrder.total)} en caja o realiza su Cuadre de Caja.`
                     : detailOrder.paymentMethod === "transferencia"
-                    ? "⚠️ El cliente indicó pago por transferencia bancaria (Nequi/Daviplata). Verifica el comprobante en tu app bancaria o chat antes de despachar."
+                    ? "⚠️ El cliente indicó pago por transferencia bancaria (Nequi/Daviplata). Verifica el comprobante en tu app bancaria o chat antes de confirmar como Pagado."
                     : `⚠️ Cobro en efectivo contraentrega. El domiciliario DEBE cobrar ${formatCurrency(detailOrder.total)} al cliente y entregarlo en caja al regresar.`}
                 </p>
 
@@ -1984,16 +2067,21 @@ export default function OrdersView() {
                         onClick={() => handleUpdatePaymentStatus(detailOrder.id, "pagado")}
                         className="h-7 text-xs rounded-lg font-bold bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
                       >
-                        <IconCheck className="h-3.5 w-3.5" /> Marcar como Pagado
+                        <IconCheck className="h-3.5 w-3.5" /> Confirmar Pago Recibido
                       </Button>
                     ) : (
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleUpdatePaymentStatus(detailOrder.id, "pendiente")}
+                        onClick={() =>
+                          handleUpdatePaymentStatus(
+                            detailOrder.id,
+                            detailOrder.status === "entregado" ? "por_cobrar" : "pendiente"
+                          )
+                        }
                         className="h-7 text-xs rounded-lg border-emerald-500/40 text-emerald-700 dark:text-emerald-300 gap-1"
                       >
-                        Revertir a Pendiente
+                        Revertir a Sin Liquidar
                       </Button>
                     )}
                   </div>
@@ -2447,6 +2535,27 @@ export default function OrdersView() {
               {savingDeliverySettings ? "Guardando tarifas..." : "Guardar Tarifas"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL 5: CUADRE DE CAJA CON DOMICILIARIOS */}
+      <Dialog open={driverSettlementModalOpen} onOpenChange={setDriverSettlementModalOpen}>
+        <DialogContent className="sm:max-w-5xl max-h-[92vh] overflow-y-auto rounded-2xl p-5 sm:p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <IconCalculator className="h-5 w-5 text-primary" />
+              Cuadre de Caja con Domiciliarios
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Liquida aquí las entregas cobradas por cada repartidor. Visualiza cuánto debe entregar por Valor en Pedidos (X) y por Valor en Domicilios (Y) antes de marcar los pedidos como Pagados.
+            </DialogDescription>
+          </DialogHeader>
+          <DriverSettlementView
+            compactHeader
+            onSettled={() => {
+              fetchOrders()
+            }}
+          />
         </DialogContent>
       </Dialog>
     </div>
