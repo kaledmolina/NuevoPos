@@ -616,7 +616,7 @@ export default function OrdersView() {
       }
       finalDriverId = staffMember.id
       finalDriverName = staffMember.name
-      finalDriverPhone = staffMember.email || ""
+      finalDriverPhone = staffMember.phone || staffMember.email || ""
     } else {
       if (!customDriverName.trim()) {
         return toast.error("Por favor ingresa el nombre del conductor o mensajero")
@@ -1594,7 +1594,7 @@ export default function OrdersView() {
                                 </Badge>
                               ) : s.telegramUsername ? (
                                 <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/30 font-medium">
-                                  {s.telegramUsername} (Pendiente /start)
+                                  {s.telegramUsername} (Pendiente /vincular)
                                 </Badge>
                               ) : null}
                               {s.phone && <span className="text-[10px] text-muted-foreground">Tel: {s.phone}</span>}

@@ -55,6 +55,7 @@ import {
   IconChevronUp,
   IconRobot,
   IconCpu,
+  IconBrandTelegram,
 } from "@tabler/icons-react"
 import { McpTokenGenerator } from "@/components/pos/mcp-token-generator"
 
@@ -62,6 +63,9 @@ export interface StaffUser {
   id: string
   name: string
   email: string | null
+  phone?: string | null
+  telegramUsername?: string | null
+  telegramChatId?: string | null
   role: "superadmin" | "admin" | "vendedor" | "domiciliario"
   isPrimary: boolean
   allowedBranchIds?: string[]
@@ -96,6 +100,8 @@ export default function StaffManager() {
   const [newUserOpen, setNewUserOpen] = useState(false)
   const [newUserName, setNewUserName] = useState("")
   const [newUserEmail, setNewUserEmail] = useState("")
+  const [newUserPhone, setNewUserPhone] = useState("")
+  const [newUserTelegram, setNewUserTelegram] = useState("")
   const [newUserRole, setNewUserRole] = useState<"admin" | "vendedor" | "domiciliario">("vendedor")
   const [newUserPin, setNewUserPin] = useState("")
   const [newUserPinConfirm, setNewUserPinConfirm] = useState("")
@@ -108,6 +114,9 @@ export default function StaffManager() {
   const [selectedUser, setSelectedUser] = useState<StaffUser | null>(null)
   const [editName, setEditName] = useState("")
   const [editEmail, setEditEmail] = useState("")
+  const [editPhone, setEditPhone] = useState("")
+  const [editTelegram, setEditTelegram] = useState("")
+  const [editTelegramChatId, setEditTelegramChatId] = useState<string | null>(null)
   const [editRole, setEditRole] = useState<"admin" | "vendedor" | "domiciliario">("vendedor")
   const [editActive, setEditActive] = useState(true)
   const [editUserBranches, setEditUserBranches] = useState<string[]>([])
@@ -227,6 +236,8 @@ export default function StaffManager() {
   const handleOpenNewUser = () => {
     setNewUserName("")
     setNewUserEmail("")
+    setNewUserPhone("")
+    setNewUserTelegram("")
     setNewUserRole("vendedor")
     setNewUserPin("")
     setNewUserPinConfirm("")
@@ -264,11 +275,16 @@ export default function StaffManager() {
 
     setSavingNewUser(true)
     try {
+      let cleanTg = newUserTelegram.trim() || null
+      if (cleanTg && !cleanTg.startsWith("@")) cleanTg = `@${cleanTg}`
+
       const res = await apiFetch<{ ok: boolean; message: string }>("/api/users", {
         method: "POST",
         body: JSON.stringify({
           name: newUserName.trim(),
           email: newUserEmail.trim() || null,
+          phone: newUserPhone.trim() || null,
+          telegramUsername: cleanTg,
           role: newUserRole,
           pin: newUserPin.trim(),
           allowedBranchIds: newUserBranches,
@@ -278,6 +294,8 @@ export default function StaffManager() {
       setNewUserOpen(false)
       setNewUserName("")
       setNewUserEmail("")
+      setNewUserPhone("")
+      setNewUserTelegram("")
       setNewUserRole("vendedor")
       setNewUserPin("")
       setNewUserPinConfirm("")
@@ -294,6 +312,9 @@ export default function StaffManager() {
     setSelectedUser(user)
     setEditName(user.name)
     setEditEmail(user.email || "")
+    setEditPhone(user.phone || "")
+    setEditTelegram(user.telegramUsername || "")
+    setEditTelegramChatId(user.telegramChatId || null)
     setEditRole(user.role === "admin" ? "admin" : user.role === "domiciliario" ? "domiciliario" : "vendedor")
     setEditActive(user.active)
     const userTenantBranches = branches.filter((b) => (b.tenantId ?? b.tenant?.id ?? null) === (user.tenantId ?? null))
@@ -359,12 +380,18 @@ export default function StaffManager() {
     setSavingEditUser(true)
     setConfirmDialog((d) => ({ ...d, loading: true }))
     try {
+      let cleanTg = editTelegram.trim() || null
+      if (cleanTg && !cleanTg.startsWith("@")) cleanTg = `@${cleanTg}`
+
       const res = await apiFetch<{ ok: boolean; message: string; cascaded?: boolean }>("/api/users", {
         method: "PUT",
         body: JSON.stringify({
           id: selectedUser.id,
           name: editName.trim(),
           email: editEmail.trim() || null,
+          phone: editPhone.trim() || null,
+          telegramUsername: cleanTg,
+          telegramChatId: editTelegramChatId,
           role: editRole,
           active: (selectedUser.role === "superadmin" || selectedUser.email === "kaledmoly@gmail.com") ? true : editActive,
           allowedBranchIds: selectedUser.isPrimary ? undefined : editUserBranches,
@@ -1221,6 +1248,10 @@ export default function StaffManager() {
                                         >
                                           <IconShieldCheck className="h-3 w-3" /> Administrador
                                         </Badge>
+                                      ) : u.role === "domiciliario" ? (
+                                        <Badge className="text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 gap-1">
+                                          <IconMotorbike className="h-3 w-3" /> Domiciliario
+                                        </Badge>
                                       ) : (
                                         <Badge variant="secondary" className="text-[10px] font-semibold gap-1">
                                           <IconUserCheck className="h-3 w-3 text-muted-foreground" /> Vendedor
@@ -1273,7 +1304,7 @@ export default function StaffManager() {
                                     </TableCell>
 
                                     {/* Correo / Contacto */}
-                                    <TableCell className="py-3.5 px-4 text-xs text-muted-foreground">
+                                    <TableCell className="py-3.5 px-4 text-xs text-muted-foreground space-y-1">
                                       {u.email ? (
                                         <span className="flex items-center gap-1.5 font-medium text-foreground">
                                           <IconMail className="h-3.5 w-3.5 text-primary shrink-0" />
@@ -1287,6 +1318,32 @@ export default function StaffManager() {
                                           <IconMail className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
                                           <span className="text-muted-foreground/60">Admin:</span>
                                           <span className="truncate max-w-[180px]">{group.ownerEmail}</span>
+                                        </div>
+                                      )}
+                                      {u.phone && (
+                                        <div className="flex items-center gap-1.5 text-[11px] text-foreground">
+                                          <IconPhone className="h-3 w-3 text-muted-foreground shrink-0" />
+                                          <span>{u.phone}</span>
+                                        </div>
+                                      )}
+                                      {(u.role === "domiciliario" || u.telegramUsername || u.telegramChatId) && (
+                                        <div className="flex items-center gap-1.5 pt-0.5">
+                                          {u.telegramChatId ? (
+                                            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/30 gap-1 font-medium">
+                                              <IconBrandTelegram className="h-2.5 w-2.5" />
+                                              Telegram Activo {u.telegramUsername ? `(${u.telegramUsername})` : ""}
+                                            </Badge>
+                                          ) : u.telegramUsername ? (
+                                            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-500/30 text-amber-700 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/30 gap-1 font-medium">
+                                              <IconBrandTelegram className="h-2.5 w-2.5" />
+                                              {u.telegramUsername} (Pendiente /vincular)
+                                            </Badge>
+                                          ) : (
+                                            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-border text-muted-foreground gap-1 font-normal">
+                                              <IconBrandTelegram className="h-2.5 w-2.5" />
+                                              Sin Telegram vinculado
+                                            </Badge>
+                                          )}
                                         </div>
                                       )}
                                     </TableCell>
@@ -1442,6 +1499,8 @@ export default function StaffManager() {
                                             ? "Superadmin"
                                             : u.role === "admin"
                                             ? "Administrador"
+                                            : u.role === "domiciliario"
+                                            ? "Domiciliario"
                                             : "Colaborador"}
                                         </Badge>
                                         {u.isPrimary && (
@@ -1507,6 +1566,36 @@ export default function StaffManager() {
                                     )}
                                   </div>
                                 </div>
+
+                                {/* Contacto / Telegram Mobile */}
+                                {(u.phone || u.role === "domiciliario" || u.telegramUsername || u.telegramChatId) && (
+                                  <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                                    {u.phone && (
+                                      <span className="inline-flex items-center gap-1 text-foreground bg-muted/50 px-1.5 py-0.5 rounded">
+                                        <IconPhone className="h-2.5 w-2.5 text-muted-foreground" />
+                                        {u.phone}
+                                      </span>
+                                    )}
+                                    {(u.role === "domiciliario" || u.telegramUsername || u.telegramChatId) && (
+                                      u.telegramChatId ? (
+                                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/30 gap-1 font-medium">
+                                          <IconBrandTelegram className="h-2.5 w-2.5" />
+                                          Telegram Activo {u.telegramUsername ? `(${u.telegramUsername})` : ""}
+                                        </Badge>
+                                      ) : u.telegramUsername ? (
+                                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-500/30 text-amber-700 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/30 gap-1 font-medium">
+                                          <IconBrandTelegram className="h-2.5 w-2.5" />
+                                          {u.telegramUsername} (Pendiente /vincular)
+                                        </Badge>
+                                      ) : (
+                                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-border text-muted-foreground gap-1 font-normal">
+                                          <IconBrandTelegram className="h-2.5 w-2.5" />
+                                          Sin Telegram vinculado
+                                        </Badge>
+                                      )
+                                    )}
+                                  </div>
+                                )}
 
                                 {/* Correo y Acciones */}
                                 <div className="flex items-center justify-between pt-1 border-t border-border/50 text-xs">
@@ -1764,14 +1853,14 @@ export default function StaffManager() {
 
       {/* ==================== MODAL: NUEVO COLABORADOR ==================== */}
       <Dialog open={newUserOpen} onOpenChange={setNewUserOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl">
+        <DialogContent className="sm:max-w-md rounded-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-base font-bold flex items-center gap-2">
               <IconUserPlus className="h-5 w-5 text-primary" />
               Nuevo Colaborador
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Registra un vendedor para el punto de venta o un nuevo administrador con PIN de acceso.
+              Registra un vendedor, domiciliario (con alertas en Telegram) o administrador con PIN de acceso.
             </DialogDescription>
           </DialogHeader>
 
@@ -1779,7 +1868,7 @@ export default function StaffManager() {
             <div className="space-y-1">
               <Label className="text-xs font-semibold">Nombre de Usuario *</Label>
               <Input
-                placeholder="Ej. juan_ventas, maria_pos"
+                placeholder="Ej. juan_ventas, carlos_domi"
                 value={newUserName}
                 onChange={(e) => setNewUserName(e.target.value)}
                 className="h-9 text-xs rounded-xl"
@@ -1799,6 +1888,40 @@ export default function StaffManager() {
                 </SelectContent>
               </Select>
             </div>
+
+            {newUserRole === "domiciliario" && (
+              <div className="p-3 rounded-xl border border-sky-500/30 bg-sky-50/40 dark:bg-sky-950/20 space-y-2.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-sky-700 dark:text-sky-400">
+                  <IconBrandTelegram className="h-4 w-4" />
+                  Contacto y Vinculación con Telegram (Domiciliario)
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-semibold">Teléfono / Celular</Label>
+                    <Input
+                      placeholder="Ej. 3123456789"
+                      value={newUserPhone}
+                      onChange={(e) => setNewUserPhone(e.target.value.replace(/\D/g, "").slice(0, 12))}
+                      className="h-8 text-xs rounded-lg bg-background"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-semibold">Usuario Telegram (@usuario)</Label>
+                    <Input
+                      placeholder="Ej. @carlos_domi"
+                      value={newUserTelegram}
+                      onChange={(e) => setNewUserTelegram(e.target.value.trim())}
+                      className="h-8 text-xs rounded-lg bg-background"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground leading-snug">
+                  Para empezar a recibir pedidos y coordenadas GPS, el domiciliario solo debe enviar{" "}
+                  <strong className="text-foreground">/vincular {newUserPin || "SU_PIN"}</strong>
+                  {newUserPhone ? <> o <strong className="text-foreground">/vincular {newUserPhone}</strong></> : ""} al bot de Telegram.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-1">
               <Label className="text-xs font-semibold">
@@ -1927,14 +2050,14 @@ export default function StaffManager() {
 
       {/* ==================== MODAL: EDITAR COLABORADOR ==================== */}
       <Dialog open={editUserOpen} onOpenChange={setEditUserOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl">
+        <DialogContent className="sm:max-w-md rounded-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-base font-bold flex items-center gap-2">
               <IconPencil className="h-5 w-5 text-primary" />
               Editar Colaborador
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Modifica nombre de usuario, correo electrónico o rol en el sistema.
+              Modifica nombre, contacto Telegram, correo electrónico o rol en el sistema.
             </DialogDescription>
           </DialogHeader>
 
@@ -1985,6 +2108,72 @@ export default function StaffManager() {
                 </p>
               )}
             </div>
+
+            {(editRole === "domiciliario" || editPhone || editTelegram || editTelegramChatId) && (
+              <div className="p-3 rounded-xl border border-sky-500/30 bg-sky-50/40 dark:bg-sky-950/20 space-y-2.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-sky-700 dark:text-sky-400">
+                    <IconBrandTelegram className="h-4 w-4" />
+                    Contacto y Telegram (Domiciliario)
+                  </div>
+                  {editTelegramChatId ? (
+                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 bg-emerald-50/60 dark:bg-emerald-950/30">
+                      ● Vinculado
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-500/30 text-amber-700 dark:text-amber-400 bg-amber-50/60 dark:bg-amber-950/30">
+                      Pendiente /vincular
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-semibold">Teléfono / Celular</Label>
+                    <Input
+                      placeholder="Ej. 3123456789"
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(e.target.value.replace(/\D/g, "").slice(0, 12))}
+                      className="h-8 text-xs rounded-lg bg-background"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-semibold">Usuario Telegram (@usuario)</Label>
+                    <Input
+                      placeholder="Ej. @carlos_domi"
+                      value={editTelegram}
+                      onChange={(e) => setEditTelegram(e.target.value.trim())}
+                      className="h-8 text-xs rounded-lg bg-background"
+                    />
+                  </div>
+                </div>
+
+                {editTelegramChatId ? (
+                  <div className="flex items-center justify-between gap-2 pt-0.5">
+                    <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium">
+                      Chat ID conectado: {editTelegramChatId}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEditTelegramChatId(null)}
+                      className="h-6 px-2 text-[10px] text-destructive hover:text-destructive hover:bg-destructive/10 rounded-md"
+                    >
+                      Desvincular Telegram
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground leading-snug">
+                    Para recibir alertas y coordenadas GPS, el domiciliario debe enviar{" "}
+                    <strong className="text-foreground">
+                      /vincular {editPhone || "SU_PIN_O_CELULAR"}
+                    </strong>{" "}
+                    al bot de Telegram.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Sedes Asignadas */}
             {(() => {

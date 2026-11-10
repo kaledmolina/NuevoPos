@@ -329,9 +329,11 @@ export async function PUT(req: NextRequest) {
 
     // Si el usuario conectado es demo (admin / vendedor) y no superadmin:
     if (isSessionDemo && session?.role !== "superadmin") {
+      const normalizedReqEmail = body.email ? String(body.email).trim().toLowerCase() : null
+      const normalizedTargetEmail = targetUser.email ? targetUser.email.toLowerCase() : null
       if (
         body.pin ||
-        body.email !== undefined ||
+        (body.email !== undefined && normalizedReqEmail !== normalizedTargetEmail) ||
         (body.name && body.name !== targetUser.name) ||
         body.active === false
       ) {
