@@ -10,6 +10,9 @@ const config: Config = {
   ],
   theme: {
   	extend: {
+  		screens: {
+  			'xs': '400px', // Extra-small breakpoint for very small phones
+  		},
   		colors: {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',

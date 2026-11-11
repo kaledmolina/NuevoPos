@@ -357,22 +357,22 @@ export default function ProductsView() {
   const [detailProduct, setDetailProduct] = useState<Product | null>(null)
 
   return (
-    <div className="p-4 md:p-6 space-y-4">
+    <div className="p-3 sm:p-4 md:p-6 space-y-4">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-bold flex items-center gap-2"><IconBoxSeam className="h-5 w-5 text-primary" /> Inventario de productos</h2>
-          <p className="text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-start justify-between gap-2 sm:gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg sm:text-xl font-bold flex items-center gap-2 truncate"><IconBoxSeam className="h-5 w-5 text-primary shrink-0" /> Inventario de productos</h2>
+          <p className="text-xs sm:text-sm text-muted-foreground">
             {filtered.length} productos · {totalUnits} unidades en stock
             {!canEdit && <span className="ml-2 text-xs text-muted-foreground">· Solo lectura</span>}
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={exportCsv}><IconDownload className="h-4 w-4 mr-1" /> Exportar</Button>
+        <div className="flex flex-wrap gap-1.5 sm:gap-2 shrink-0">
+          <Button variant="outline" size="sm" onClick={exportCsv} className="h-8 text-xs px-2 sm:px-3"><IconDownload className="h-3.5 w-3.5 sm:mr-1" /><span className="hidden sm:inline">Exportar</span></Button>
           {canEdit && (
             <>
-              <Button variant="outline" size="sm" onClick={() => setCatManageOpen(true)}><IconTag className="h-4 w-4 mr-1" /> Categorías</Button>
-              <Button size="sm" onClick={openNew} data-tour="products-new-btn"><IconPlus className="h-4 w-4 mr-1" /> Nuevo producto</Button>
+              <Button variant="outline" size="sm" onClick={() => setCatManageOpen(true)} className="h-8 text-xs px-2 sm:px-3"><IconTag className="h-3.5 w-3.5 sm:mr-1" /><span className="hidden sm:inline">Categorías</span></Button>
+              <Button size="sm" onClick={openNew} data-tour="products-new-btn" className="h-8 text-xs px-2 sm:px-3"><IconPlus className="h-3.5 w-3.5 sm:mr-1" /><span className="hidden xs:inline">Nuevo</span><span className="hidden sm:inline"> producto</span></Button>
             </>
           )}
         </div>

@@ -118,6 +118,22 @@
   }
   body {
     @apply bg-background text-foreground;
+    overflow-x: hidden;
+    /* Prevent layout shift on scrollbar appear */
+    scrollbar-gutter: stable both-edges;
+  }
+}
+
+/* Touch target minimum size (WCAG 2.5.5) */
+@media (pointer: coarse) {
+  button, [role="button"], a[href], input[type="checkbox"], input[type="radio"], select {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Exceptions: inline icon-only buttons inside compact UI still need touch area */
+  .touch-target-sm {
+    min-height: 36px;
+    min-width: 36px;
   }
 }
 
@@ -234,4 +250,56 @@ html {
     size: 80mm auto;
   }
 }
+
+/* =====================================================
+   RESPONSIVE UTILITY HELPERS
+   ===================================================== */
+
+/* Card-based table layout for narrow screens — toggle with JS or CSS */
+/* Tables inside .table-responsive collapse to card rows on mobile */
+@media (max-width: 639px) {
+  .table-responsive table,
+  .table-responsive thead,
+  .table-responsive tbody,
+  .table-responsive th,
+  .table-responsive td,
+  .table-responsive tr {
+    display: block;
+  }
+  .table-responsive thead tr {
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+  }
+  .table-responsive tr {
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    margin-bottom: 0.75rem;
+    padding: 0.5rem;
+    background: var(--card);
+  }
+  .table-responsive td {
+    border: none;
+    padding: 0.3rem 0.5rem;
+    text-align: right;
+  }
+  .table-responsive td::before {
+    content: attr(data-label);
+    float: left;
+    font-weight: 600;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted-foreground);
+  }
+}
+
+/* Fluid font sizes via clamp for section headings */
+.text-fluid-sm  { font-size: clamp(0.75rem, 1.5vw, 0.875rem); }
+.text-fluid-base { font-size: clamp(0.875rem, 2vw, 1rem); }
+.text-fluid-lg  { font-size: clamp(1rem, 2.5vw, 1.25rem); }
+.text-fluid-xl  { font-size: clamp(1.25rem, 3vw, 1.75rem); }
+.text-fluid-2xl { font-size: clamp(1.5rem, 4vw, 2.25rem); }
+.text-fluid-3xl { font-size: clamp(1.75rem, 5vw, 3rem); }
+.text-fluid-4xl { font-size: clamp(2rem, 6vw, 3.75rem); }
 

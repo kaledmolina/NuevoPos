@@ -525,7 +525,7 @@ export default function SettingsView() {
       <Tabs defaultValue="negocio" className="w-full space-y-4">
         {/* Barra de navegación de pestañas responsive adaptada para móvil y escritorio */}
         <div className="w-full overflow-x-auto no-scrollbar pb-1">
-          <TabsList className="grid grid-cols-3 sm:grid-cols-7 h-auto p-1 bg-muted/60 border border-border/80 rounded-xl gap-1 w-full min-w-[340px]">
+          <TabsList className="grid grid-cols-2 xs:grid-cols-4 sm:grid-cols-7 h-auto p-1 bg-muted/60 border border-border/80 rounded-xl gap-1 w-full min-w-full">
             <TabsTrigger
               value="negocio"
               className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"

@@ -404,7 +404,7 @@ export default function DashboardView() {
               </Button>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="grid grid-cols-1 xs:grid-cols-3 gap-2 text-center">
                 <div className="rounded-xl border bg-muted/20 p-2.5">
                   <p className="text-[10px] font-semibold text-muted-foreground">Pedidos (X)</p>
                   <p className="font-mono font-black text-sm mt-0.5 tabular-nums">{formatCurrency(xProducts)}</p>

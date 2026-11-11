@@ -734,7 +734,7 @@ export default function Home() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         {/* Top Header */}
-        <header className="flex items-center gap-2.5 sm:gap-3 border-b bg-background/90 backdrop-blur-md px-3 sm:px-4 py-2.5 sm:py-3 sticky top-0 z-30 shrink-0">
+        <header className="flex items-center gap-2 sm:gap-2.5 md:gap-3 border-b bg-background/90 backdrop-blur-md px-2 sm:px-3 md:px-4 py-2 sm:py-2.5 md:py-3 sticky top-0 z-30 shrink-0 min-w-0">
           <button
             data-tour="mobile-menu-btn"
             className="lg:hidden p-2 rounded-lg hover:bg-muted text-foreground transition-colors shrink-0"
@@ -758,7 +758,7 @@ export default function Home() {
             )}
           </button>
 
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 overflow-hidden">
             <h1 className="text-sm sm:text-base md:text-lg font-bold leading-tight truncate">{meta.title}</h1>
             <p className="text-[11px] sm:text-xs text-muted-foreground truncate hidden sm:block">{meta.subtitle}</p>
           </div>
@@ -879,9 +879,11 @@ export default function Home() {
             </DropdownMenu>
           )}
 
-          {/* Centro de Notificaciones y Alertas (Campanita) */}
+          {/* Centro de Notificaciones y Alertas (Campanita) — oculto en pantallas muy pequeñas (<400px) */}
           {role !== "domiciliario" && role !== "cliente" && (
-            <NotificationsBell onNavigate={handleSetView} />
+            <span className="hidden xs:inline-flex">
+              <NotificationsBell onNavigate={handleSetView} />
+            </span>
           )}
 
           {/* Botón selector de tema claro/oscuro */}

@@ -1162,11 +1162,13 @@ export default function LandingPage() {
                 </div>
               </div>
 
-              {/* Cuerpo del Mockup: Categorías + Catálogo + Detalle de Orden */}
-              <div className="grid lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-zinc-100 dark:divide-zinc-800">
+          {/* Cuerpo del Mockup: Categorías + Catálogo + Detalle de Orden */}
+              <div className="grid lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-zinc-100 dark:divide-zinc-800 max-h-[520px] lg:max-h-[480px] overflow-hidden">
                 
                 {/* 1. Categorías laterales izquierdas (exacto como en la imagen) */}
-                <div className="lg:col-span-2 p-3 bg-zinc-50/40 dark:bg-zinc-900/40 flex lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible">
+                <div className="lg:col-span-2 p-3 bg-zinc-50/40 dark:bg-zinc-900/40 flex lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible lg:overflow-y-auto scrollbar-none"
+                  style={{ scrollbarWidth: "none" }}
+                >
                   <button
                     onClick={() => setMockCategory("all")}
                     className={cn(
@@ -1239,10 +1241,10 @@ export default function LandingPage() {
                     <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">
                       Productos ({filteredProducts.length}) · Haz clic para agregar
                     </p>
-                    <span className="text-[11px] text-zinc-950 dark:text-zinc-100 font-medium">Demostración en Vivo</span>
+                    <span className="text-[11px] text-zinc-950 dark:text-zinc-100 font-medium hidden sm:inline">Demostración en Vivo</span>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[380px] overflow-y-auto pr-1">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[280px] sm:max-h-[340px] lg:max-h-[380px] overflow-y-auto pr-1 scroll-thin">
                     {filteredProducts.map((prod) => {
                       const count = mockCart[prod.id] || 0
                       return (
@@ -1296,7 +1298,7 @@ export default function LandingPage() {
                 </div>
 
                 {/* 3. Panel Lateral Derecho: Detalle de la Orden (Order Details) */}
-                <div className="lg:col-span-4 p-4 bg-zinc-50/60 dark:bg-zinc-900/60 flex flex-col justify-between">
+                <div className="lg:col-span-4 p-4 bg-zinc-50/60 dark:bg-zinc-900/60 flex flex-col justify-between min-h-0">
                   <div>
                     <div className="flex items-center justify-between mb-2.5">
                       <p className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
@@ -1332,7 +1334,7 @@ export default function LandingPage() {
                     </div>
 
                     {/* Lista de artículos en la orden */}
-                    <div className="space-y-1.5 max-h-[190px] overflow-y-auto pr-1">
+                    <div className="space-y-1.5 max-h-[150px] lg:max-h-[190px] overflow-y-auto pr-1 scroll-thin">
                       {Object.keys(mockCart).length === 0 ? (
                         <div className="py-8 text-center text-xs text-muted-foreground">
                           El pedido está vacío. Haz clic en un producto para agregarlo.
@@ -1720,10 +1722,10 @@ export default function LandingPage() {
           </div>
 
           {/* Feature 1: Inventory & Stock Management (Reproducción exacta del lado derecho de la imagen) */}
-          <div className="grid lg:grid-cols-12 gap-10 items-center">
+          <div className="grid md:grid-cols-2 lg:grid-cols-12 gap-8 md:gap-10 items-center">
             
             {/* Columna izquierda: Información y Checklist */}
-            <div className="lg:col-span-6 space-y-5">
+            <div className="md:col-span-1 lg:col-span-6 space-y-5">
               <div className="inline-flex items-center gap-2 rounded-lg bg-zinc-100 dark:bg-zinc-900 text-zinc-950 dark:text-zinc-100 dark:text-zinc-200 px-3 py-1 text-xs font-bold">
                 <Package className="h-4 w-4" /> GESTIÓN INTELIGENTE
               </div>
@@ -1779,7 +1781,7 @@ export default function LandingPage() {
             </div>
 
             {/* Columna derecha: Tarjeta visual de Dashboard (Donut chart & metrics como en la imagen) */}
-            <div className="lg:col-span-6">
+            <div className="md:col-span-1 lg:col-span-6">
               <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-xl ring-1 ring-zinc-900/10 dark:ring-white/10 space-y-5">
                 
                 {/* Métricas superiores simuladas */}
@@ -1888,10 +1890,10 @@ export default function LandingPage() {
           </div>
 
           {/* Feature 2: Arqueos de Caja y Punto de Venta */}
-          <div className="grid lg:grid-cols-12 gap-10 items-center mt-20 sm:mt-28">
+          <div className="grid md:grid-cols-2 lg:grid-cols-12 gap-8 md:gap-10 items-center mt-20 sm:mt-28">
             
             {/* Visual a la izquierda */}
-            <div className="lg:col-span-6 order-2 lg:order-1">
+            <div className="md:col-span-1 lg:col-span-6 order-2 lg:order-1">
               <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-xl ring-1 ring-zinc-900/10 dark:ring-white/10 space-y-4">
                 <div className="flex items-center justify-between border-b pb-3">
                   <div className="flex items-center gap-2">
@@ -1938,7 +1940,7 @@ export default function LandingPage() {
             </div>
 
             {/* Texto a la derecha */}
-            <div className="lg:col-span-6 order-1 lg:order-2 space-y-5">
+            <div className="md:col-span-1 lg:col-span-6 order-1 lg:order-2 space-y-5">
               <div className="inline-flex items-center gap-2 rounded-lg bg-zinc-100 dark:bg-zinc-900 text-zinc-950 dark:text-zinc-100 dark:text-zinc-200 px-3 py-1 text-xs font-bold">
                 <ReceiptText className="h-4 w-4" /> PUNTO DE VENTA Y CAJA
               </div>
@@ -2034,9 +2036,9 @@ export default function LandingPage() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.3 }}
-              className="grid lg:grid-cols-12 gap-8 items-center bg-white dark:bg-zinc-900 p-6 sm:p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
+              className="grid md:grid-cols-2 lg:grid-cols-12 gap-8 items-center bg-white dark:bg-zinc-900 p-6 sm:p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
             >
-              <div className="lg:col-span-6 space-y-4">
+              <div className="md:col-span-1 lg:col-span-6 space-y-4">
                 <div className="inline-flex items-center gap-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-950 dark:text-zinc-100 px-3 py-1 text-xs font-bold border border-zinc-200 dark:border-zinc-700">
                   <activeRubroData.icon className="h-4 w-4" /> {activeRubroData.badge}
                 </div>
@@ -2064,7 +2066,7 @@ export default function LandingPage() {
               </div>
 
               {/* Catálogo de muestra del rubro */}
-              <div className="lg:col-span-6">
+              <div className="md:col-span-1 lg:col-span-6">
                 <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/80 p-4 space-y-2">
                   <div className="flex justify-between items-center pb-2 border-b border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase">
                     <span>Catálogo de Muestra</span>
@@ -2107,9 +2109,9 @@ export default function LandingPage() {
             </p>
           </div>
 
-          <div className="grid lg:grid-cols-12 gap-8 items-center">
+          <div className="grid md:grid-cols-2 lg:grid-cols-12 gap-8 items-center">
             {/* Visual Chat Mockup */}
-            <div className="lg:col-span-7 rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-7 shadow-2xl space-y-4 text-white">
+            <div className="md:col-span-1 lg:col-span-7 rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-7 shadow-2xl space-y-4 text-white">
               <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
                 <div className="flex items-center gap-2.5">
                   <div className="h-7 w-7 rounded-lg bg-zinc-950 dark:bg-white flex items-center justify-center text-white dark:text-zinc-950 font-bold text-xs">
@@ -2163,7 +2165,7 @@ export default function LandingPage() {
             </div>
 
             {/* Beneficios & Call To Action */}
-            <div className="lg:col-span-5 space-y-6">
+            <div className="md:col-span-1 lg:col-span-5 space-y-6">
               <div className="space-y-4">
                 <div className="p-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 space-y-1.5">
                   <h4 className="font-bold text-white text-sm flex items-center gap-2">
@@ -2485,10 +2487,10 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div className="grid lg:grid-cols-12 gap-6 items-start">
+          <div className="grid md:grid-cols-2 lg:grid-cols-12 gap-6 items-start">
             
             {/* Lista de pasos */}
-            <div className="lg:col-span-5 space-y-2">
+            <div className="md:col-span-1 lg:col-span-5 space-y-2">
               {guide.map((step, idx) => (
                 <button
                   key={idx}
@@ -2517,7 +2519,7 @@ export default function LandingPage() {
             </div>
 
             {/* Detalle ampliado del paso activo */}
-            <div className="lg:col-span-7">
+            <div className="md:col-span-1 lg:col-span-7">
               <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 sm:p-8 shadow-sm space-y-4">
                 <div className="flex items-start gap-4">
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-zinc-100 shrink-0">
