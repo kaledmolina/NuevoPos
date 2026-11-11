@@ -378,25 +378,25 @@ export default function PosTerminal() {
   const CartBody = (
     <CardContent className="flex-1 flex flex-col min-h-0 p-0 overflow-hidden">
       {/* Items del carrito (área scrollable dedicada) */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-2 scroll-thin">
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-1.5 scroll-thin">
         {cart.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-4 sm:py-6 text-muted-foreground">
-            <IconScan className="h-7 w-7 mb-1.5 opacity-40" />
-            <p className="text-sm font-medium">El carrito está vacío</p>
-            <p className="text-xs text-muted-foreground/80 mt-0.5">Selecciona o escanea productos para comenzar</p>
+          <div className="flex flex-col items-center justify-center py-5 text-muted-foreground">
+            <IconScan className="h-6 w-6 mb-1.5 opacity-30" />
+            <p className="text-xs font-medium">Carrito vacío</p>
+            <p className="text-[11px] text-muted-foreground/70 mt-0.5">Selecciona o escanea productos</p>
             {heldCarts.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
-                className="mt-2.5 text-xs gap-1.5 border-primary/30 text-primary"
+                className="mt-2 text-xs gap-1 h-7 border-primary/30 text-primary"
                 onClick={() => setQueueOpen(true)}
               >
-                <IconClock className="h-3.5 w-3.5" /> Hay {heldCarts.length} venta(s) en espera
+                <IconClock className="h-3 w-3" /> {heldCarts.length} en espera
               </Button>
             )}
           </div>
         ) : (
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <AnimatePresence initial={false}>
               {cart.map((it) => (
                 <motion.div
@@ -405,27 +405,27 @@ export default function PosTerminal() {
                   initial={{ opacity: 0, x: 20, height: 0 }}
                   animate={{ opacity: 1, x: 0, height: "auto" }}
                   exit={{ opacity: 0, x: -20, height: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="flex items-center gap-2 rounded-xl border p-2 bg-card shadow-xs"
+                  transition={{ duration: 0.15 }}
+                  className="flex items-center gap-1.5 rounded-lg border px-2 py-1.5 bg-card"
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold truncate leading-tight">{it.name}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {formatCurrency(it.price)} <span className="opacity-60">· {it.unit ?? "ud."}</span>
+                    <p className="text-xs font-semibold truncate leading-tight">{it.name}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {formatCurrency(it.price)} · {it.unit ?? "ud."}
                     </p>
                   </div>
-                  {/* Stepper ergonómico para dedos */}
-                  <div className="flex items-center gap-1 shrink-0">
+                  {/* Stepper compacto */}
+                  <div className="flex items-center gap-0.5 shrink-0">
                     <Button
                       size="icon"
                       variant="outline"
-                      className="h-7 w-7 rounded-lg active:scale-95"
+                      className="h-6 w-6 rounded-md active:scale-95"
                       onClick={() => updateCartQty(it.productId, it.quantity - 1)}
                     >
-                      <IconMinus className="h-3 w-3" />
+                      <IconMinus className="h-2.5 w-2.5" />
                     </Button>
                     <Input
-                      className="h-7 w-10 text-center px-0 text-xs font-bold"
+                      className="h-6 w-9 text-center px-0 text-xs font-bold border-x-0 rounded-none"
                       value={it.quantity}
                       onChange={(e) => {
                         const v = Math.max(0, Math.min(parseInt(e.target.value) || 0, it.stock))
@@ -435,25 +435,25 @@ export default function PosTerminal() {
                     <Button
                       size="icon"
                       variant="outline"
-                      className="h-7 w-7 rounded-lg active:scale-95"
+                      className="h-6 w-6 rounded-md active:scale-95"
                       onClick={() => {
-                        if (it.quantity >= it.stock) return toast.warning(`Sin stock disponible — solo hay ${it.stock} unidad(es)`)
+                        if (it.quantity >= it.stock) return toast.warning(`Solo hay ${it.stock} unid.`)
                         updateCartQty(it.productId, it.quantity + 1)
                       }}
                     >
-                      <IconPlus className="h-3 w-3" />
+                      <IconPlus className="h-2.5 w-2.5" />
                     </Button>
                   </div>
-                  <div className="w-16 text-right shrink-0">
-                    <p className="text-xs font-bold text-foreground">{formatCurrency(it.price * it.quantity)}</p>
+                  <div className="w-14 text-right shrink-0">
+                    <p className="text-xs font-bold tabular-nums">{formatCurrency(it.price * it.quantity)}</p>
                   </div>
                   <Button
                     size="icon"
                     variant="ghost"
-                    className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
+                    className="h-5 w-5 text-muted-foreground/50 hover:text-destructive shrink-0"
                     onClick={() => removeFromCart(it.productId)}
                   >
-                    <IconX className="h-3.5 w-3.5" />
+                    <IconX className="h-3 w-3" />
                   </Button>
                 </motion.div>
               ))}
@@ -462,22 +462,21 @@ export default function PosTerminal() {
         )}
       </div>
 
-      {/* Métodos de Pago y Datos de Venta */}
-      <div className="border-t p-3 space-y-2.5 shrink-0 bg-muted/10">
-        {/* Selector de Método de Pago por Chips Directos (1 solo toque) */}
-        <div>
-          <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
-            Forma de Pago
-          </Label>
-          <div className="grid grid-cols-2 gap-1.5">
+      {/* Panel inferior compacto: todo visible sin scroll */}
+      <div className="border-t shrink-0 bg-card">
+        {/* Fila: Método de pago (4 chips en 1 fila) + Cliente + Descuento */}
+        <div className="px-2.5 pt-2 pb-1.5 space-y-1.5">
+
+          {/* Chips de pago — 4 en fila, altura reducida */}
+          <div className="flex gap-1">
             {PAYMENTS.map((p) => {
               const Icon = p.icon
               const isSelected = payment === p.value
               const colorMap: Record<string, string> = {
-                emerald: isSelected ? "bg-emerald-600 border-emerald-600 text-white shadow-emerald-600/25" : "border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10",
-                blue: isSelected ? "bg-blue-600 border-blue-600 text-white shadow-blue-600/25" : "border-blue-500/30 text-blue-700 dark:text-blue-400 hover:bg-blue-500/10",
-                violet: isSelected ? "bg-violet-600 border-violet-600 text-white shadow-violet-600/25" : "border-violet-500/30 text-violet-700 dark:text-violet-400 hover:bg-violet-500/10",
-                amber: isSelected ? "bg-amber-600 border-amber-600 text-white shadow-amber-600/25" : "border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10",
+                emerald: isSelected ? "bg-emerald-600 border-emerald-600 text-white" : "border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10",
+                blue:    isSelected ? "bg-blue-600 border-blue-600 text-white"    : "border-blue-500/30 text-blue-700 dark:text-blue-400 hover:bg-blue-500/10",
+                violet:  isSelected ? "bg-violet-600 border-violet-600 text-white" : "border-violet-500/30 text-violet-700 dark:text-violet-400 hover:bg-violet-500/10",
+                amber:   isSelected ? "bg-amber-600 border-amber-600 text-white"   : "border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10",
               }
               return (
                 <button
@@ -485,189 +484,169 @@ export default function PosTerminal() {
                   type="button"
                   onClick={() => setPayment(p.value)}
                   className={cn(
-                    "flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl border text-xs font-semibold transition-all shadow-xs active:scale-[0.97] cursor-pointer",
-                    isSelected ? `shadow-md ${colorMap[p.color]}` : `bg-background ${colorMap[p.color]}`
+                    "flex-1 flex items-center justify-center gap-1 py-1 rounded-lg border text-[11px] font-semibold transition-all active:scale-[0.97] cursor-pointer",
+                    isSelected ? colorMap[p.color] : `bg-background ${colorMap[p.color]}`
                   )}
                 >
-                  <Icon className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{p.label}</span>
+                  <Icon className="h-3 w-3 shrink-0" />
+                  <span className="hidden xs:inline truncate">{p.label}</span>
                 </button>
               )
             })}
           </div>
-        </div>
 
-        {/* Cliente y Descuento */}
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <Label className="text-[11px] font-medium text-muted-foreground">Cliente</Label>
-            <Select value={clientId || "generic"} onValueChange={(v) => setClientId(v === "generic" ? "" : v)}>
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder="Consumidor Final" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="generic">Consumidor Final</SelectItem>
-                {clients.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-[11px] font-medium text-muted-foreground">Descuento ($)</Label>
-            <Input
-              className="h-9 text-xs font-medium"
-              type="number"
-              inputMode="decimal"
-              value={discount}
-              onChange={(e) => setDiscount(e.target.value)}
-              placeholder="0"
-            />
-          </div>
-        </div>
-
-        {/* Bloque especial de Efectivo con cambio y billetes rápidos */}
-        {payment === "efectivo" && (
-          <div className="space-y-2 pt-1 border-t border-dashed">
-            <div className="flex items-center justify-between text-xs">
-              <Label className="text-[11px] font-semibold text-muted-foreground">Efectivo Recibido</Label>
-              {received.trim() !== "" && (
-                <button
-                  type="button"
-                  onClick={() => setReceived("")}
-                  className="text-[11px] text-primary hover:underline font-medium"
-                >
-                  Pago exacto
-                </button>
-              )}
+          {/* Cliente + Descuento en una sola fila */}
+          <div className="flex gap-1.5">
+            <div className="flex-1 min-w-0">
+              <Select value={clientId || "generic"} onValueChange={(v) => setClientId(v === "generic" ? "" : v)}>
+                <SelectTrigger className="h-7 text-[11px] rounded-lg">
+                  <SelectValue placeholder="Consumidor Final" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="generic">Consumidor Final</SelectItem>
+                  {clients.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-
-            <div className="relative">
+            <div className="w-20 shrink-0">
               <Input
-                className="h-10 text-base font-bold pl-3 pr-8"
+                className="h-7 text-[11px] font-medium text-center"
                 type="number"
                 inputMode="decimal"
-                value={received}
-                onChange={(e) => setReceived(e.target.value)}
-                placeholder={`Exacto: ${formatCurrency(total)}`}
+                value={discount}
+                onChange={(e) => setDiscount(e.target.value)}
+                placeholder="Desc. $"
               />
-              {received && (
+            </div>
+          </div>
+
+          {/* Efectivo recibido (solo si pago = efectivo) */}
+          {payment === "efectivo" && (
+            <div className="space-y-1">
+              <div className="relative">
+                <Input
+                  className="h-8 text-sm font-bold pl-2.5 pr-8"
+                  type="number"
+                  inputMode="decimal"
+                  value={received}
+                  onChange={(e) => setReceived(e.target.value)}
+                  placeholder={`Efectivo — exacto: ${formatCurrency(total)}`}
+                />
+                {received && (
+                  <button
+                    type="button"
+                    onClick={() => setReceived("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <IconX className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Billetes rápidos en 1 fila compacta */}
+              <div className="flex gap-1">
                 <button
                   type="button"
-                  onClick={() => setReceived("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-1"
+                  onClick={() => setReceived(String(total))}
+                  className={cn(
+                    "flex-1 h-6 rounded-md border text-[10px] font-bold transition-all active:scale-95",
+                    received.trim() === "" || Number(received) === total
+                      ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-transparent"
+                      : "bg-background border-border hover:bg-muted"
+                  )}
                 >
-                  <IconX className="h-3.5 w-3.5" />
+                  Exacto
                 </button>
-              )}
-            </div>
+                {[
+                  Math.ceil(total / 5000) * 5000,
+                  Math.ceil(total / 10000) * 10000,
+                  Math.ceil(total / 20000) * 20000,
+                  Math.ceil(total / 50000) * 50000,
+                  10000, 20000, 50000, 100000,
+                ]
+                  .filter((v, i, a) => v > total && a.indexOf(v) === i)
+                  .sort((a, b) => a - b)
+                  .slice(0, 3)
+                  .map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setReceived(String(v))}
+                      className={cn(
+                        "flex-1 h-6 rounded-md border text-[10px] font-bold transition-all active:scale-95",
+                        Number(received) === v
+                          ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-transparent"
+                          : "bg-background border-border hover:bg-muted"
+                      )}
+                    >
+                      {formatCurrency(v)}
+                    </button>
+                  ))}
+              </div>
 
-            {/* Sugerencias de billetes rápidos (COP) */}
-            <div className="grid grid-cols-4 gap-1.5">
-              <Button
-                type="button"
-                variant={received.trim() === "" || Number(received) === total ? "default" : "outline"}
-                size="sm"
-                className="h-8 text-xs font-bold px-1 active:scale-[0.96]"
-                onClick={() => setReceived(String(total))}
-              >
-                Exacto
-              </Button>
-              {[
-                Math.ceil(total / 5000) * 5000,
-                Math.ceil(total / 10000) * 10000,
-                Math.ceil(total / 20000) * 20000,
-                Math.ceil(total / 50000) * 50000,
-                10000, 20000, 50000, 100000,
-              ]
-                .filter((v, i, a) => v > total && a.indexOf(v) === i)
-                .sort((a, b) => a - b)
-                .slice(0, 3)
-                .map((v) => (
-                  <Button
-                    key={v}
-                    type="button"
-                    variant={Number(received) === v ? "default" : "outline"}
-                    size="sm"
-                    className="h-8 text-xs font-bold px-1 active:scale-[0.96]"
-                    onClick={() => setReceived(String(v))}
-                  >
-                    {formatCurrency(v)}
-                  </Button>
-                ))}
-            </div>
-
-            {/* Banner de cambio a devolver con superficie de alta visibilidad */}
-            {receivedNum > total && (
-              <motion.div
-                initial={{ opacity: 0, y: 5 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-950 dark:text-emerald-100 shadow-2xs"
-              >
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
-                    Cambio a entregar
-                  </span>
-                  <span className="text-lg font-black text-emerald-600 dark:text-emerald-300">
+              {/* Cambio — aparece solo cuando hay excedente */}
+              {receivedNum > total && (
+                <motion.div
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/25"
+                >
+                  <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">Cambio</span>
+                  <span className="text-sm font-extrabold text-emerald-600 dark:text-emerald-300 tabular-nums">
                     {formatCurrency(change)}
                   </span>
-                </div>
-                <div className="h-8 w-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-300 shrink-0">
-                  <IconCash className="h-4.5 w-4.5" />
-                </div>
-              </motion.div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Total + Botón Cobrar pegados al final */}
-      <div className="border-t bg-card shrink-0 shadow-xs">
-        <div className="px-3 sm:px-4 pt-2.5 pb-1 space-y-1 text-sm">
-          <div className="flex justify-between text-muted-foreground text-xs">
-            <span>Subtotal</span>
-            <span>{formatCurrency(subtotal)}</span>
-          </div>
-          {disc > 0 && (
-            <div className="flex justify-between text-muted-foreground text-xs">
-              <span>Descuento</span>
-              <span>-{formatCurrency(disc)}</span>
+                </motion.div>
+              )}
             </div>
           )}
-          <div className="flex justify-between text-base sm:text-lg font-extrabold pt-0.5 border-t border-dashed">
-            <span>Total</span>
-            <span className="text-primary">{formatCurrency(total)}</span>
-          </div>
         </div>
-        <div className="p-3 space-y-2">
-          {cashOpen === false && (
-            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2 min-w-0">
-                <IconLock className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                <div className="min-w-0">
-                  <p className="font-bold text-amber-800 dark:text-amber-300 leading-tight">Caja Cerrada</p>
-                  <p className="text-[10px] text-muted-foreground truncate">Abre turno para permitir cobros</p>
-                </div>
+
+        {/* Total + Cobrar */}
+        <div className="px-2.5 pb-2.5 space-y-1.5">
+          {/* Totales compactos */}
+          <div className="flex items-center justify-between px-1">
+            {disc > 0 ? (
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span>Sub: {formatCurrency(subtotal)}</span>
+                <span className="text-rose-500">-{formatCurrency(disc)}</span>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-[11px] font-semibold border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 shrink-0"
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                {cart.length > 0 ? `${cartCount} ítem(s)` : ""}
+              </span>
+            )}
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xs font-semibold text-muted-foreground">Total</span>
+              <span className="text-lg font-extrabold text-primary tabular-nums">{formatCurrency(total)}</span>
+            </div>
+          </div>
+
+          {/* Aviso caja cerrada compacto */}
+          {cashOpen === false && (
+            <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs">
+              <div className="flex items-center gap-1.5">
+                <IconLock className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                <span className="font-semibold text-amber-800 dark:text-amber-300">Caja cerrada</span>
+              </div>
+              <button
+                type="button"
                 onClick={() => setView("cash")}
+                className="text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:underline"
               >
-                Abrir Caja
-              </Button>
+                Abrir →
+              </button>
             </div>
           )}
 
+          {/* Botón Cobrar */}
           <Button
             className={cn(
-              "w-full h-12 text-base font-bold shadow-md rounded-xl transition-all",
+              "w-full h-11 text-sm font-bold rounded-xl transition-all",
               cashOpen === false
-                ? "bg-muted text-muted-foreground hover:bg-muted border border-border/80 shadow-none cursor-not-allowed"
-                : "shadow-primary/25"
+                ? "bg-muted text-muted-foreground border border-border/80 shadow-none cursor-not-allowed"
+                : "shadow-md shadow-primary/20"
             )}
             disabled={cart.length === 0 || checkingOut || cashOpen === false}
             onClick={handleCheckout}
@@ -675,13 +654,13 @@ export default function PosTerminal() {
           >
             {cashOpen === false ? (
               <>
-                <IconLock className="h-5 w-5 mr-2 text-amber-600" />
-                Caja cerrada · No disponible
+                <IconLock className="h-4 w-4 mr-1.5 text-amber-600" />
+                No disponible — caja cerrada
               </>
             ) : (
               <>
-                <IconCircleCheck className="h-5 w-5 mr-2" />
-                <span>{checkingOut ? "Procesando…" : `Cobrar ${cart.length > 0 ? formatCurrency(total) : ""}`}</span>
+                <IconCircleCheck className="h-4 w-4 mr-1.5" />
+                {checkingOut ? "Procesando…" : cart.length > 0 ? `Cobrar ${formatCurrency(total)}` : "Cobrar"}
                 <kbd className="pos-key ml-2 bg-primary-foreground/20 text-primary-foreground border-primary-foreground/30 hidden sm:inline-flex">F4</kbd>
               </>
             )}
