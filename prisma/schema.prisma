@@ -112,21 +112,27 @@ model Client {
   orders           Order[]
   whatsappMessages WhatsAppMessage[]
   creditAccount    CreditAccount?
+  loyaltyAccounts  LoyaltyAccount[]
 
   @@index([branchId])
 }
 
-// Cuenta de crédito por cliente (cuentas por cobrar)
+// Cuenta de crédito por cliente (cuentas por cobrar) — AISLADA POR SEDE
+// NOTA: clientId sigue siendo @unique para compatibilidad. El campo branchId
+// permite saber a qué sede pertenece el crédito y filtrarlo correctamente.
 model CreditAccount {
   id          String           @id @default(cuid())
   clientId    String           @unique
   client      Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  branchId    String?          // Sede a la que pertenece el crédito (aislamiento por sede)
   creditLimit Float            @default(0) // límite máximo que el admin otorga
   balance     Float            @default(0) // saldo actual que debe el cliente (positivo = debe)
   active      Boolean          @default(true)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   movements   CreditMovement[]
+
+  @@index([branchId])
 }
 
 // Movimientos de crédito: ventas a crédito y abonos
@@ -450,4 +456,64 @@ model WhatsAppConfig {
   updatedAt           DateTime @updatedAt
 
   @@index([branchId])
+}
+
+// =====================================================
+// PROGRAMA DE PUNTOS / FIDELIZACIÓN POR SEDE
+// =====================================================
+
+// Configuración del programa de puntos de cada sede (1 config por sede)
+model LoyaltyProgram {
+  id                 String           @id @default(cuid())
+  branchId           String           @unique // Una configuración por sede
+  enabled            Boolean          @default(false)
+  pointsPerPurchase  Float            @default(1)   // puntos por cada 1000 pesos comprados
+  purchaseUnit       Float            @default(1000) // cada cuántos pesos se otorga 1 punto
+  pointValue         Float            @default(100)  // cuánto vale 1 punto en pesos al redimir
+  minPointsToRedeem  Int              @default(50)   // mínimo de puntos para poder redimir
+  maxRedeemPercent   Float            @default(50)   // % máximo del total que se puede pagar con puntos
+  expirationDays     Int?             // días antes de que caduquen los puntos (null = no caducan)
+  programName        String           @default("Programa de Puntos")
+  welcomePoints      Int              @default(0)   // puntos de bienvenida al registrarse
+  birthdayPoints     Int              @default(0)   // puntos extra en cumpleaños
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([branchId])
+}
+
+// Saldo de puntos de un cliente en una sede específica
+model LoyaltyAccount {
+  id         String              @id @default(cuid())
+  clientId   String
+  client     Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  branchId   String              // Sede — cada sede tiene su propio saldo de puntos
+  points     Float               @default(0) // puntos actuales disponibles
+  totalEarned Float              @default(0) // total histórico acumulado
+  totalRedeemed Float            @default(0) // total histórico canjeado
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  movements  LoyaltyMovement[]
+
+  @@unique([clientId, branchId]) // Un saldo único por cliente-sede
+  @@index([branchId])
+  @@index([clientId])
+}
+
+// Movimientos de puntos (gana / canjea / ajuste / vencimiento)
+model LoyaltyMovement {
+  id          String         @id @default(cuid())
+  accountId   String
+  account     LoyaltyAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  type        String         // "earn" | "redeem" | "adjust" | "expire" | "welcome" | "birthday"
+  points      Float          // positivo = ganó, negativo = canjeó/venció
+  concept     String         // descripción legible
+  saleId      String?        // referencia a la venta asociada
+  orderId     String?        // referencia a la orden asociada
+  registeredBy String?       // nombre del cajero o "sistema"
+  createdAt   DateTime       @default(now())
+
+  @@index([accountId])
+  @@index([saleId])
+  @@index([createdAt])
 }

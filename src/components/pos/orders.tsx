@@ -489,15 +489,16 @@ export default function OrdersView() {
 
   const fetchStaff = useCallback(async () => {
     try {
-      const res = await apiFetch<{ ok: boolean; users: StaffUser[] }>("/api/users")
+      // Filtrar staff por sede activa: solo domiciliarios asignados a esta sede
+      const branchParam = activeBranchId ? `?branchId=${encodeURIComponent(activeBranchId)}` : ""
+      const res = await apiFetch<{ ok: boolean; users: StaffUser[] }>(`/api/users${branchParam}`)
       if (res?.users) {
-        // filtrar staff activos
         setStaffDrivers(res.users)
       }
     } catch (e) {
       console.warn("No se pudo cargar la lista de personal:", e)
     }
-  }, [])
+  }, [activeBranchId])
 
   const fetchProducts = useCallback(async () => {
     try {

@@ -168,6 +168,66 @@ export default function SettingsView() {
   const [resetting, setResetting] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
 
+  // Programa de Puntos (Loyalty)
+  const activeBranch = useAppStore((s) => s.activeBranch)
+  const [loyaltyProgram, setLoyaltyProgram] = useState({
+    enabled: false,
+    pointsPerPurchase: 1,
+    purchaseUnit: 1000,
+    pointValue: 100,
+    minPointsToRedeem: 50,
+    maxRedeemPercent: 50,
+    expirationDays: "" as string | number,
+    programName: "Programa de Puntos",
+    welcomePoints: 0,
+    birthdayPoints: 0,
+  })
+  const [loyaltyStats, setLoyaltyStats] = useState({ totalAccounts: 0, totalPointsActive: 0, totalPointsEarned: 0, totalPointsRedeemed: 0 })
+  const [loyaltyTopClients, setLoyaltyTopClients] = useState<{ clientId: string; clientName: string; clientPhone: string | null; points: number; totalEarned: number }[]>([])
+  const [loadingLoyalty, setLoadingLoyalty] = useState(false)
+  const [savingLoyalty, setSavingLoyalty] = useState(false)
+
+  const loadLoyalty = useCallback(async () => {
+    setLoadingLoyalty(true)
+    try {
+      const branchId = activeBranch?.id
+      const branchParam = branchId ? `?branchId=${encodeURIComponent(branchId)}` : ""
+      const res = await apiFetch<{
+        ok: boolean
+        program: typeof loyaltyProgram
+        stats: typeof loyaltyStats
+        topClients: typeof loyaltyTopClients
+      }>(`/api/loyalty${branchParam}`)
+      if (res?.ok) {
+        setLoyaltyProgram({ ...res.program, expirationDays: res.program.expirationDays ?? "" })
+        setLoyaltyStats(res.stats)
+        setLoyaltyTopClients(res.topClients ?? [])
+      }
+    } catch { /* noop */ }
+    finally { setLoadingLoyalty(false) }
+  }, [activeBranch])
+
+  const handleSaveLoyalty = async () => {
+    setSavingLoyalty(true)
+    try {
+      const branchId = activeBranch?.id
+      const branchParam = branchId ? `?branchId=${encodeURIComponent(branchId)}` : ""
+      const res = await apiFetch<{ ok: boolean; message: string }>(`/api/loyalty${branchParam}`, {
+        method: "POST",
+        body: JSON.stringify({
+          ...loyaltyProgram,
+          branchId,
+          expirationDays: loyaltyProgram.expirationDays === "" ? null : Number(loyaltyProgram.expirationDays),
+        }),
+      })
+      toast.success(res.message || "Programa de puntos guardado")
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSavingLoyalty(false)
+    }
+  }
+
   // Cargar configuraciones iniciales
   const loadSettings = useCallback(() => {
     apiFetch<Record<string, string>>("/api/settings")
@@ -205,7 +265,8 @@ export default function SettingsView() {
     loadSettings()
     loadBackups()
     loadAudit()
-  }, [loadSettings, loadBackups, loadAudit, refreshKey])
+    loadLoyalty()
+  }, [loadSettings, loadBackups, loadAudit, loadLoyalty, refreshKey])
 
   // Guardar configuración
   const handleSaveSettings = async () => {
@@ -464,7 +525,7 @@ export default function SettingsView() {
       <Tabs defaultValue="negocio" className="w-full space-y-4">
         {/* Barra de navegación de pestañas responsive adaptada para móvil y escritorio */}
         <div className="w-full overflow-x-auto no-scrollbar pb-1">
-          <TabsList className="grid grid-cols-3 sm:grid-cols-6 h-auto p-1 bg-muted/60 border border-border/80 rounded-xl gap-1 w-full min-w-[340px]">
+          <TabsList className="grid grid-cols-3 sm:grid-cols-7 h-auto p-1 bg-muted/60 border border-border/80 rounded-xl gap-1 w-full min-w-[340px]">
             <TabsTrigger
               value="negocio"
               className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
@@ -487,6 +548,14 @@ export default function SettingsView() {
             >
               <IconPalette className="h-4 w-4 shrink-0" />
               <span className="truncate">Apariencia</span>
+            </TabsTrigger>
+
+            <TabsTrigger
+              value="puntos"
+              className="py-2 px-1 text-[11px] sm:text-xs font-medium rounded-lg flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs transition-all"
+            >
+              <IconCoin className="h-4 w-4 shrink-0 text-amber-500" />
+              <span className="truncate">Puntos</span>
             </TabsTrigger>
 
             <TabsTrigger
@@ -518,6 +587,239 @@ export default function SettingsView() {
         {/* ==================== PESTAÑA: AGENTES IA & TOKENS MCP ==================== */}
         <TabsContent value="mcp" className="space-y-4">
           <McpTokenGenerator />
+        </TabsContent>
+
+        {/* ==================== PESTAÑA: PROGRAMA DE PUNTOS ==================== */}
+        <TabsContent value="puntos" className="space-y-4">
+          {/* Header */}
+          <Card className="rounded-xl border shadow-xs overflow-hidden">
+            <CardHeader className="p-3.5 sm:p-4 pb-2 sm:pb-3 border-b bg-gradient-to-r from-amber-500/10 to-amber-600/5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25">
+                    <IconCoin className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-sm sm:text-base font-bold">Programa de Fidelización</CardTitle>
+                    <CardDescription className="text-xs">
+                      Recompensa a tus clientes frecuentes con puntos canjeables por descuentos
+                    </CardDescription>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs font-semibold text-muted-foreground">
+                    {loyaltyProgram.enabled ? "Activo" : "Inactivo"}
+                  </span>
+                  <Switch
+                    checked={loyaltyProgram.enabled}
+                    onCheckedChange={(v) => setLoyaltyProgram((p) => ({ ...p, enabled: v }))}
+                  />
+                </div>
+              </div>
+            </CardHeader>
+
+            {/* KPIs de uso */}
+            {loyaltyStats.totalAccounts > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-0 divide-x divide-y sm:divide-y-0 border-b">
+                {[
+                  { label: "Clientes con puntos", value: loyaltyStats.totalAccounts, suffix: "" },
+                  { label: "Puntos activos", value: loyaltyStats.totalPointsActive.toLocaleString("es-CO"), suffix: "pts" },
+                  { label: "Total acumulado", value: loyaltyStats.totalPointsEarned.toLocaleString("es-CO"), suffix: "pts" },
+                  { label: "Total canjeado", value: loyaltyStats.totalPointsRedeemed.toLocaleString("es-CO"), suffix: "pts" },
+                ].map((kpi) => (
+                  <div key={kpi.label} className="p-3 text-center">
+                    <p className="text-xs text-muted-foreground">{kpi.label}</p>
+                    <p className="text-lg font-bold text-foreground tabular-nums">{kpi.value} <span className="text-xs font-normal">{kpi.suffix}</span></p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <CardContent className="p-4 space-y-4">
+              {/* Nombre del programa */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Nombre del programa</Label>
+                <Input
+                  value={loyaltyProgram.programName}
+                  onChange={(e) => setLoyaltyProgram((p) => ({ ...p, programName: e.target.value }))}
+                  placeholder="ej. Club La Salud, Puntos Oro..."
+                  className="h-9 text-sm"
+                  maxLength={80}
+                />
+              </div>
+
+              {/* Regla de acumulación */}
+              <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 space-y-3">
+                <p className="text-xs font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider">Regla de acumulación</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Puntos por unidad</Label>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min={0.1}
+                      step={0.1}
+                      value={loyaltyProgram.pointsPerPurchase}
+                      onChange={(e) => setLoyaltyProgram((p) => ({ ...p, pointsPerPurchase: Number(e.target.value) }))}
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Por cada $ (pesos)</Label>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      min={100}
+                      step={100}
+                      value={loyaltyProgram.purchaseUnit}
+                      onChange={(e) => setLoyaltyProgram((p) => ({ ...p, purchaseUnit: Number(e.target.value) }))}
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground bg-background rounded-lg px-2.5 py-1.5 border">
+                  💡 El cliente gana <strong>{loyaltyProgram.pointsPerPurchase} pto{loyaltyProgram.pointsPerPurchase !== 1 ? "s" : ""}</strong> por cada <strong>${loyaltyProgram.purchaseUnit.toLocaleString("es-CO")}</strong> comprados
+                </p>
+              </div>
+
+              {/* Regla de canje */}
+              <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 space-y-3">
+                <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">Regla de canje</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Valor de 1 punto ($)</Label>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min={1}
+                      value={loyaltyProgram.pointValue}
+                      onChange={(e) => setLoyaltyProgram((p) => ({ ...p, pointValue: Number(e.target.value) }))}
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Mínimo para canjear (pts)</Label>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={loyaltyProgram.minPointsToRedeem}
+                      onChange={(e) => setLoyaltyProgram((p) => ({ ...p, minPointsToRedeem: Number(e.target.value) }))}
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">% máximo del total pagable con puntos</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={100}
+                      value={loyaltyProgram.maxRedeemPercent}
+                      onChange={(e) => setLoyaltyProgram((p) => ({ ...p, maxRedeemPercent: Math.min(100, Number(e.target.value)) }))}
+                      className="h-9 text-sm w-24"
+                    />
+                    <span className="text-xs text-muted-foreground">% del total</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground bg-background rounded-lg px-2.5 py-1.5 border">
+                  💡 Cada punto vale <strong>${loyaltyProgram.pointValue}</strong>. Se necesitan mínimo <strong>{loyaltyProgram.minPointsToRedeem} pts</strong> para canjear
+                </p>
+              </div>
+
+              {/* Puntos extra y vencimiento */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Puntos de bienvenida</Label>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    value={loyaltyProgram.welcomePoints}
+                    onChange={(e) => setLoyaltyProgram((p) => ({ ...p, welcomePoints: Number(e.target.value) }))}
+                    className="h-9 text-sm"
+                    placeholder="0"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Puntos cumpleaños</Label>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    value={loyaltyProgram.birthdayPoints}
+                    onChange={(e) => setLoyaltyProgram((p) => ({ ...p, birthdayPoints: Number(e.target.value) }))}
+                    className="h-9 text-sm"
+                    placeholder="0"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Vencimiento (días, vacío = nunca)</Label>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    value={loyaltyProgram.expirationDays}
+                    onChange={(e) => setLoyaltyProgram((p) => ({ ...p, expirationDays: e.target.value === "" ? "" : Number(e.target.value) }))}
+                    className="h-9 text-sm"
+                    placeholder="Sin vencimiento"
+                  />
+                </div>
+              </div>
+
+              <Button
+                onClick={handleSaveLoyalty}
+                disabled={savingLoyalty || loadingLoyalty}
+                className="w-full gap-2"
+              >
+                <IconDeviceFloppy className="h-4 w-4" />
+                {savingLoyalty ? "Guardando..." : "Guardar Programa de Puntos"}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Top clientes */}
+          {loyaltyTopClients.length > 0 && (
+            <Card className="rounded-xl border shadow-xs overflow-hidden">
+              <CardHeader className="p-3.5 border-b">
+                <CardTitle className="text-sm font-bold flex items-center gap-2">
+                  <IconUsers className="h-4 w-4 text-amber-500" />
+                  Top Clientes por Puntos
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader className="bg-muted/30">
+                    <TableRow>
+                      <TableHead className="text-xs">#</TableHead>
+                      <TableHead className="text-xs">Cliente</TableHead>
+                      <TableHead className="text-xs text-right">Puntos actuales</TableHead>
+                      <TableHead className="text-xs text-right">Total acumulado</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loyaltyTopClients.map((c, i) => (
+                      <TableRow key={c.clientId}>
+                        <TableCell className="text-xs font-bold text-muted-foreground">{i + 1}</TableCell>
+                        <TableCell>
+                          <p className="text-xs font-semibold">{c.clientName}</p>
+                          {c.clientPhone && <p className="text-[10px] text-muted-foreground">{c.clientPhone}</p>}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">{c.points.toLocaleString("es-CO")} pts</span>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="text-xs text-muted-foreground tabular-nums">{c.totalEarned.toLocaleString("es-CO")} pts</span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         {/* ==================== PESTAÑA 1: NEGOCIO ==================== */}

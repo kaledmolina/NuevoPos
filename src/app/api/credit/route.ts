@@ -67,10 +67,10 @@ export async function POST(req: NextRequest) {
     }
 
     const limit = Number(creditLimit) || 0
-    // Upsert: si ya existe, actualiza el límite; si no, crea
+    // Upsert: si ya existe, actualiza el límite; si no, crea con branchId de la sede del cliente
     const account = await db.creditAccount.upsert({
       where: { clientId },
-      create: { clientId, creditLimit: limit, active: active ?? true },
+      create: { clientId, branchId: client.branchId ?? null, creditLimit: limit, active: active ?? true },
       update: { creditLimit: limit, active: active ?? true },
     })
 

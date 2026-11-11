@@ -33,6 +33,8 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url)
     const tenantIdParam = searchParams.get("tenantId")
+    const branchIdParam = searchParams.get("branchId") // filtrar por sede (para domiciliarios)
+    const roleFilter = searchParams.get("role")        // filtrar por rol (ej. "domiciliario")
 
     const userFilter: Record<string, unknown> = {}
     if (session && session.role !== "superadmin") {
@@ -53,7 +55,11 @@ export async function GET(req: NextRequest) {
     })
 
     const rawUsers = await db.user.findMany({
-      where: userFilter,
+      where: {
+        ...userFilter,
+        // Filtro adicional por rol
+        ...(roleFilter ? { role: roleFilter } : {}),
+      },
       include: {
         tenant: {
           select: {
@@ -117,7 +123,16 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    return NextResponse.json({ ok: true, users })
+    // Si se pide filtrar por sede, devolver solo usuarios que tengan esa sede asignada
+    const filteredUsers = branchIdParam
+      ? users.filter((u) =>
+          u.allowedBranchIds.includes(branchIdParam) ||
+          // admin primario tiene todas las sedes
+          (u.isPrimary && u.allowedBranchIds.some(() => true))
+        )
+      : users
+
+    return NextResponse.json({ ok: true, users: filteredUsers })
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 })
   }
