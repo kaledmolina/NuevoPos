@@ -39,6 +39,7 @@ import {
 import { toast } from "sonner"
 import {
   IconMotorbike,
+  IconPhone,
   IconWallet,
   IconCoins,
   IconCheck,
@@ -163,6 +164,32 @@ export interface DriverSettlementApiResponse {
   mySettlement?: DriverSettlementBucket | null
   drivers: DriverSettlementBucket[]
   history: DriverSettlementRecord[]
+}
+
+// Paleta de colores para avatares de domiciliarios (determinístico por nombre)
+const AVATAR_COLORS = [
+  "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30",
+  "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+  "bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/30",
+  "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+  "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30",
+  "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30",
+  "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30",
+  "bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/30",
+]
+
+function getAvatarColor(name: string): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]
+}
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/)
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  return name.slice(0, 2).toUpperCase()
 }
 
 export function DriverSettlementView({
@@ -1075,24 +1102,29 @@ export function DriverSettlementView({
                     )}
                   >
                     <CardContent className="p-4 space-y-3.5">
-                      {/* Encabezado del domiciliario */}
+                      {/* Encabezado del domiciliario con avatar, nombre y botón de llamada */}
                       <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          {/* Avatar colorido con iniciales */}
                           <div
                             className={cn(
-                              "h-10 w-10 rounded-xl flex items-center justify-center shrink-0 border",
-                              hasCashDebt
-                                ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
-                                : "bg-muted text-foreground border-border"
+                              "h-11 w-11 rounded-xl flex items-center justify-center shrink-0 font-bold text-sm border",
+                              getAvatarColor(d.driverName)
                             )}
                           >
-                            <IconMotorbike className="h-5 w-5" />
+                            {getInitials(d.driverName)}
                           </div>
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <h4 className="text-sm font-bold text-foreground truncate">
                                 {d.driverName}
                               </h4>
+                              {d.inTransitCount > 0 && (
+                                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-700 dark:text-blue-400 border border-blue-500/30 text-[9px] font-bold animate-pulse">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                                  En ruta
+                                </div>
+                              )}
                               {d.telegramConnected && (
                                 <Badge
                                   variant="outline"
@@ -1103,26 +1135,65 @@ export function DriverSettlementView({
                               )}
                             </div>
                             <p className="text-[11px] text-muted-foreground">
-                              {d.driverPhone ? `Tel: ${d.driverPhone}` : d.isStaffDomiciliario ? "Repartidor registrado" : "Conductor asignado"}
+                              {d.isStaffDomiciliario ? "Repartidor registrado" : "Conductor asignado"}
                               {d.settledTodayCount > 0 && (
                                 <span className="ml-2 text-emerald-600 dark:text-emerald-400 font-medium">
-                                  · {d.settledTodayCount} liquidado(s) hoy ({formatCurrency(d.settledTodayGrossTotal)})
+                                  · {d.settledTodayCount} liquidado(s) hoy
                                 </span>
                               )}
                             </p>
                           </div>
                         </div>
 
-                        {hasCashDebt ? (
-                          <Badge className="bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 text-[11px] font-bold shrink-0">
-                            {d.unsettledCashCount} {d.unsettledCashCount === 1 ? "pedido" : "pedidos"}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-[10px] shrink-0">
-                            Sin efectivo pendiente
-                          </Badge>
-                        )}
+                        {/* Botones de acción rápida (Llamar, Badge) */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {d.driverPhone && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              asChild
+                              className="h-9 w-9 rounded-xl border-green-500/30 text-green-600 dark:text-green-400 hover:bg-green-500/10"
+                              title={`Llamar a ${d.driverName}`}
+                            >
+                              <a href={`tel:${d.driverPhone}`}>
+                                <IconPhone className="h-4 w-4" />
+                              </a>
+                            </Button>
+                          )}
+                          {hasCashDebt ? (
+                            <Badge className="bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 text-[11px] font-bold">
+                              {d.unsettledCashCount} {d.unsettledCashCount === 1 ? "pedido" : "pedidos"}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px]">
+                              Al día
+                            </Badge>
+                          )}
+                        </div>
                       </div>
+
+                      {/* Barra de progreso de entregas + desglose */}
+                      {(d.settledTodayCount > 0 || d.unsettledCashCount > 0) && (
+                        <div className="space-y-2 p-2.5 rounded-xl bg-muted/20 border border-border/40">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-medium text-muted-foreground">Progreso de entregas</span>
+                            <span className="font-bold text-foreground">
+                              {d.settledTodayCount}/{d.settledTodayCount + d.unsettledCashCount}
+                            </span>
+                          </div>
+                          <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-emerald-500 to-emerald-600 transition-all duration-300"
+                              style={{
+                                width: d.settledTodayCount + d.unsettledCashCount > 0
+                                  ? `${(d.settledTodayCount / (d.settledTodayCount + d.unsettledCashCount)) * 100}%`
+                                  : "0%"
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
 
                       {/* Desglose Pedidos (X) + Domicilios (Y) = Total (X + Y) */}
                       {hasCashDebt && (
@@ -1162,17 +1233,17 @@ export function DriverSettlementView({
                           {d.unsettledNonCashCount > 0 && (
                             <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/20 font-medium">
                               <IconCreditCard className="h-3.5 w-3.5 shrink-0" />
-                              {d.unsettledNonCashCount} transferencia/tarjeta por verificar ({formatCurrency(d.unsettledNonCashTotal)})
+                              {d.unsettledNonCashCount} transf./tarjeta ({formatCurrency(d.unsettledNonCashTotal)})
                             </span>
                           )}
                           {d.inTransitCount > 0 && (
                             <button
                               type="button"
                               onClick={() => setInTransitDriver(d)}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-muted text-muted-foreground hover:text-foreground border border-border font-medium cursor-pointer transition-colors"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20 font-medium cursor-pointer hover:bg-blue-500/15 transition-colors animate-pulse"
                             >
                               <IconClock className="h-3.5 w-3.5 shrink-0" />
-                              {d.inTransitCount} aún en ruta ({formatCurrency(d.inTransitTotal)})
+                              {d.inTransitCount} en ruta · {formatCurrency(d.inTransitTotal)}
                             </button>
                           )}
                         </div>
@@ -1189,7 +1260,7 @@ export function DriverSettlementView({
                             className="h-9 rounded-xl text-xs gap-1.5 border-sky-500/30 text-sky-700 dark:text-sky-300 hover:bg-sky-500/10 active:scale-[0.96] transition-transform duration-150"
                           >
                             <IconCreditCard className="h-3.5 w-3.5" />
-                            Verificar {d.unsettledNonCashCount} Transf.
+                            Verificar {d.unsettledNonCashCount}
                           </Button>
                         )}
 
@@ -1201,7 +1272,7 @@ export function DriverSettlementView({
                             className="h-9 rounded-xl text-xs font-bold gap-1.5 shadow-xs active:scale-[0.96] transition-transform duration-150"
                           >
                             <IconCalculator className="h-4 w-4" />
-                            Cuadrar y Recibir {formatCurrency(d.unsettledCashGrossTotal)}
+                            Cuadrar: {formatCurrency(d.unsettledCashGrossTotal)}
                           </Button>
                         )}
                       </div>

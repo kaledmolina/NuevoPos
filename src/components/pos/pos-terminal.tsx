@@ -28,7 +28,7 @@ import { toast } from "sonner"
 import {
   IconSearch, IconPlus, IconMinus, IconTrash, IconShoppingCart, IconScan, IconX, IconCircleCheck,
   IconPrinter, IconPackage, IconDownload, IconPlayerPause, IconPlayerPlay, IconClock, IconUsers, IconArrowsExchange, IconAlertTriangle,
-  IconCash, IconFileText, IconChevronDown, IconChevronRight, IconArrowLeft, IconLock, IconWallet,
+  IconCash, IconFileText, IconChevronDown, IconChevronRight, IconArrowLeft, IconLock, IconWallet, IconCreditCard,
 } from "@tabler/icons-react"
 
 interface Product {
@@ -58,8 +58,10 @@ interface Sale {
 }
 
 const PAYMENTS = [
-  { value: "efectivo", label: "Efectivo", icon: IconCash },
-  { value: "credito", label: "Crédito", icon: IconFileText },
+  { value: "efectivo", label: "Efectivo", icon: IconCash, color: "emerald" },
+  { value: "tarjeta", label: "Tarjeta", icon: IconCreditCard, color: "blue" },
+  { value: "transferencia", label: "Transferencia", icon: IconArrowsExchange, color: "violet" },
+  { value: "credito", label: "Crédito", icon: IconFileText, color: "amber" },
 ]
 
 export default function PosTerminal() {
@@ -464,31 +466,31 @@ export default function PosTerminal() {
       <div className="border-t p-3 space-y-2.5 shrink-0 bg-muted/10">
         {/* Selector de Método de Pago por Chips Directos (1 solo toque) */}
         <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Forma de Pago
-            </Label>
-            <span className="text-xs font-bold text-primary capitalize">
-              {PAYMENTS.find((p) => p.value === payment)?.label}
-            </span>
-          </div>
+          <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+            Forma de Pago
+          </Label>
           <div className="grid grid-cols-2 gap-1.5">
             {PAYMENTS.map((p) => {
               const Icon = p.icon
               const isSelected = payment === p.value
+              const colorMap: Record<string, string> = {
+                emerald: isSelected ? "bg-emerald-600 border-emerald-600 text-white shadow-emerald-600/25" : "border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10",
+                blue: isSelected ? "bg-blue-600 border-blue-600 text-white shadow-blue-600/25" : "border-blue-500/30 text-blue-700 dark:text-blue-400 hover:bg-blue-500/10",
+                violet: isSelected ? "bg-violet-600 border-violet-600 text-white shadow-violet-600/25" : "border-violet-500/30 text-violet-700 dark:text-violet-400 hover:bg-violet-500/10",
+                amber: isSelected ? "bg-amber-600 border-amber-600 text-white shadow-amber-600/25" : "border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10",
+              }
               return (
                 <button
                   key={p.value}
                   type="button"
                   onClick={() => setPayment(p.value)}
-                  className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl border text-xs font-semibold transition-all ${
-                    isSelected
-                      ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/20 scale-[1.01]"
-                      : "bg-background hover:bg-muted/80 text-foreground border-border active:scale-98"
-                  }`}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl border text-xs font-semibold transition-all shadow-xs active:scale-[0.97] cursor-pointer",
+                    isSelected ? `shadow-md ${colorMap[p.color]}` : `bg-background ${colorMap[p.color]}`
+                  )}
                 >
                   <Icon className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{p.label.split("/")[0].trim()}</span>
+                  <span className="truncate">{p.label}</span>
                 </button>
               )
             })}
@@ -833,16 +835,21 @@ export default function PosTerminal() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Buscar producto o escanear código de barras…"
-            className="pl-10 pr-16 h-11 sm:h-12 text-base rounded-xl border-border/80 focus:border-primary shadow-2xs"
+            className="pl-10 pr-20 h-11 sm:h-12 text-base rounded-xl border-border/80 focus:border-primary shadow-2xs"
           />
           {query ? (
-            <button
-              onClick={() => setQuery("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground active:scale-[0.96] transition-transform"
-              title="Borrar búsqueda (Esc)"
-            >
-              <IconX className="h-4 w-4" />
-            </button>
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground font-medium hidden sm:inline whitespace-nowrap">
+                {filtered.length} {filtered.length === 1 ? "resultado" : "resultados"}
+              </span>
+              <button
+                onClick={() => setQuery("")}
+                className="p-1 text-muted-foreground hover:text-foreground active:scale-[0.96] transition-transform"
+                title="Borrar búsqueda (Esc)"
+              >
+                <IconX className="h-4 w-4" />
+              </button>
+            </div>
           ) : (
             <div className="absolute right-3 top-1/2 -translate-y-1/2 hidden sm:flex items-center gap-1">
               <kbd className="pos-key">F2</kbd>
@@ -951,16 +958,26 @@ export default function PosTerminal() {
                               x{inCartQty}
                             </Badge>
                           )}
-                          <Badge variant={out ? "destructive" : low ? "secondary" : "outline"} className="text-[9px] sm:text-[10px] px-1.5 py-0 shrink-0">
-                            {out ? "Agotado" : `${p.stock}`}
-                          </Badge>
+                          <span className={cn(
+                            "text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded-md font-bold shrink-0 border",
+                            out
+                              ? "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30"
+                              : low
+                              ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30"
+                              : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20"
+                          )}>
+                            {out ? "Agotado" : p.stock}
+                          </span>
                         </div>
                       </div>
                       <div className="flex gap-2 items-start mb-1">
-                        {p.image && (
+                        {p.image ? (
                           <div className="h-10 w-10 rounded-lg border bg-muted/20 overflow-hidden shrink-0 shadow-2xs img-outline">
-                            { }
                             <img src={p.image} alt={p.name} className="h-full w-full object-cover" />
+                          </div>
+                        ) : (
+                          <div className="h-10 w-10 rounded-lg border bg-muted/30 flex items-center justify-center shrink-0 text-muted-foreground/50">
+                            <span className="text-sm font-bold uppercase">{p.name.charAt(0)}</span>
                           </div>
                         )}
                         <p className="text-xs sm:text-sm font-semibold leading-tight line-clamp-2 min-h-[2.5rem] group-hover:text-primary transition-colors flex-1">
@@ -1314,23 +1331,27 @@ export default function PosTerminal() {
 
       {/* Recibo */}
       <Dialog open={!!receipt} onOpenChange={(o) => !o && setReceipt(null)}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <div className="flex flex-col items-center text-center gap-2">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto p-0">
+          {/* Header esmeralda con gradiente */}
+          <div className="relative bg-gradient-to-br from-emerald-500 to-emerald-600 dark:from-emerald-600 dark:to-emerald-700 px-6 py-7 rounded-t-lg text-white overflow-hidden">
+            <div className="absolute top-0 right-0 w-24 h-24 rounded-full bg-white/10 -translate-y-8 translate-x-8" />
+            <div className="absolute bottom-0 left-0 w-16 h-16 rounded-full bg-white/5 translate-y-4 -translate-x-4" />
+            <div className="relative flex flex-col items-center text-center gap-2">
               <motion.div
                 initial={{ scale: 0, rotate: -20 }}
                 animate={{ scale: 1, rotate: 0 }}
                 transition={{ type: "spring", stiffness: 300, damping: 18, delay: 0.1 }}
-                className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary"
+                className="flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm border-2 border-white/30"
               >
-                <IconCircleCheck className="h-8 w-8" />
+                <IconCircleCheck className="h-9 w-9" />
               </motion.div>
-              <DialogTitle>¡Venta exitosa!</DialogTitle>
+              <DialogTitle className="text-lg font-bold text-white">¡Venta Exitosa!</DialogTitle>
               <DialogDescription className="sr-only">Detalle de la venta realizada</DialogDescription>
             </div>
-          </DialogHeader>
+          </div>
+
           {receipt && (
-            <div className="space-y-3">
+            <div className="px-6 py-4 space-y-3">
               <div className="text-center text-sm text-muted-foreground">
                 <p className="font-mono font-semibold text-foreground text-base">{receipt.invoiceNumber}</p>
                 <p>{formatDateTime(receipt.createdAt)}</p>
@@ -1345,11 +1366,15 @@ export default function PosTerminal() {
                 ))}
               </div>
               <Separator />
-              <div className="space-y-1 text-sm bg-muted/40 p-3 rounded-lg">
-                <div className="flex justify-between font-bold text-base"><span>Total</span><span className="text-primary">{formatCurrency(receipt.total)}</span></div>
+              {/* Total destacado */}
+              <div className="bg-gradient-to-r from-emerald-500/10 to-emerald-600/10 dark:from-emerald-500/15 dark:to-emerald-600/15 p-4 rounded-xl border border-emerald-500/20">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Total</span>
+                  <span className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatCurrency(receipt.total)}</span>
+                </div>
                 {receipt.paymentMethod === "credito" ? (
                   <>
-                    <div className="flex justify-between text-amber-600 dark:text-amber-400 text-xs font-semibold">
+                    <div className="flex justify-between text-amber-600 dark:text-amber-400 text-xs font-semibold mt-2 pt-2 border-t border-emerald-500/15">
                       <span>Modalidad:</span>
                       <span>Venta a Crédito</span>
                     </div>
@@ -1360,21 +1385,21 @@ export default function PosTerminal() {
                   </>
                 ) : (
                   <>
-                    <div className="flex justify-between text-muted-foreground text-xs"><span>Recibido ({receipt.paymentMethod})</span><span>{formatCurrency(receipt.amountReceived)}</span></div>
-                    {receipt.change > 0 && <div className="flex justify-between text-primary font-bold"><span>Cambio</span><span>{formatCurrency(receipt.change)}</span></div>}
+                    <div className="flex justify-between text-muted-foreground text-xs mt-2 pt-2 border-t border-emerald-500/15"><span>Recibido ({receipt.paymentMethod})</span><span>{formatCurrency(receipt.amountReceived)}</span></div>
+                    {receipt.change > 0 && <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-bold text-sm"><span>Cambio</span><span>{formatCurrency(receipt.change)}</span></div>}
                   </>
                 )}
               </div>
             </div>
           )}
-          <DialogFooter className="flex flex-col sm:flex-row gap-2 pt-2">
-            <Button variant="outline" className="flex-1" onClick={() => receipt && downloadReceipt(receipt)}>
+          <DialogFooter className="px-6 pb-6 flex flex-col sm:flex-row gap-2">
+            <Button variant="outline" className="flex-1 rounded-xl" onClick={() => receipt && downloadReceipt(receipt)}>
               <IconDownload className="h-4 w-4 mr-1.5" /> Descargar
             </Button>
-            <Button variant="outline" className="flex-1" onClick={() => receipt && printReceipt(receipt)}>
+            <Button variant="outline" className="flex-1 rounded-xl" onClick={() => receipt && printReceipt(receipt)}>
               <IconPrinter className="h-4 w-4 mr-1.5" /> Imprimir
             </Button>
-            <Button className="flex-1" onClick={() => setReceipt(null)}>
+            <Button className="flex-1 rounded-xl" onClick={() => setReceipt(null)}>
               Nueva venta
             </Button>
           </DialogFooter>

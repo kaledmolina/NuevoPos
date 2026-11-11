@@ -1,10 +1,10 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api"
-import { formatCurrency, formatDateTime } from "@/lib/format"
+import { formatCurrency, formatDateTime, formatRelativeTime } from "@/lib/format"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -18,6 +18,14 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from "@/components/ui/sheet"
 import {
   Select,
   SelectContent,
@@ -33,6 +41,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Avatar,
+  AvatarFallback,
+} from "@/components/ui/avatar"
 import {
   Table,
   TableBody,
@@ -76,6 +88,14 @@ import {
   IconCircleCheck,
   IconHistory,
   IconLock,
+  IconLayoutKanban,
+  IconLayoutList,
+  IconTarget,
+  IconCurrencyDollar,
+  IconFlame,
+  IconTimeDuration15,
+  IconBolt,
+  IconUserStar,
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -245,6 +265,15 @@ export default function OrdersView() {
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("all")
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>("all")
   const [driverFilter, setDriverFilter] = useState<string>("all")
+
+  // Vista Kanban vs Lista
+  const [viewMode, setViewMode] = useState<"list" | "kanban">("list")
+  const [draggedOrderId, setDraggedOrderId] = useState<string | null>(null)
+  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null)
+
+  // Sheet de Nueva Orden Rápida
+  const [quickOrderSheetOpen, setQuickOrderSheetOpen] = useState(false)
+  const [productSearch, setProductSearch] = useState("")
 
   // Vista y estado exclusivo del Portal del Domiciliario
   const [driverTab, setDriverTab] = useState<"available" | "active" | "settlement" | "all">("available")
@@ -662,6 +691,94 @@ export default function OrdersView() {
 
   const dedicatedDrivers = useMemo(() => staffDrivers.filter((s) => s.role === "domiciliario"), [staffDrivers])
   const otherStaff = useMemo(() => staffDrivers.filter((s) => s.role !== "domiciliario"), [staffDrivers])
+
+  // KPIs enriquecidos para el encabezado admin
+  const kpis = useMemo(() => {
+    const now = new Date()
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const deliveredToday = branchIsolatedOrders.filter(
+      (o) => o.status === "entregado" && new Date(o.createdAt) >= todayStart
+    )
+    const salesToday = deliveredToday.reduce((acc, o) => acc + (o.total || 0), 0)
+    const activeOrders = branchIsolatedOrders.filter((o) =>
+      ["en_camino", "en_preparacion"].includes(o.status)
+    ).length
+    const totalOrders = branchIsolatedOrders.filter((o) => o.status !== "cancelado").length
+    const deliveryRate = totalOrders > 0 ? Math.round((metrics.delivered / totalOrders) * 100) : 0
+
+    // Tiempo promedio estimado (si dispatchedAt y deliveredAt están disponibles)
+    const timeSamples = branchIsolatedOrders
+      .filter((o) => o.status === "entregado" && o.dispatchedAt && o.deliveredAt)
+      .map((o) => (new Date(o.deliveredAt!).getTime() - new Date(o.dispatchedAt!).getTime()) / 60000)
+    const avgDeliveryMin =
+      timeSamples.length > 0
+        ? Math.round(timeSamples.reduce((a, b) => a + b, 0) / timeSamples.length)
+        : null
+
+    return { salesToday, activeOrders, avgDeliveryMin, deliveryRate, deliveredTodayCount: deliveredToday.length }
+  }, [branchIsolatedOrders, metrics.delivered])
+
+  // Número de pedidos activos por conductor (para "Asignar al más libre")
+  const driverActiveCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const o of branchIsolatedOrders) {
+      if (o.deliveryDriverId && ["pendiente", "confirmado", "en_preparacion", "en_camino"].includes(o.status)) {
+        counts[o.deliveryDriverId] = (counts[o.deliveryDriverId] || 0) + 1
+      }
+    }
+    return counts
+  }, [branchIsolatedOrders])
+
+  // Kanban: agrupar pedidos filtrados por estado
+  const kanbanColumns = useMemo(() => {
+    const cols: Record<string, Order[]> = {
+      pendiente: [],
+      confirmado: [],
+      en_preparacion: [],
+      en_camino: [],
+      entregado: [],
+      cancelado: [],
+    }
+    for (const o of filteredOrders) {
+      const col = cols[o.status]
+      if (col) col.push(o)
+    }
+    return cols
+  }, [filteredOrders])
+
+  // Chips de filtro rápido con conteos
+  const quickFilterCounts = useMemo(() => {
+    const now = new Date()
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    return {
+      all: branchIsolatedOrders.length,
+      pendiente: branchIsolatedOrders.filter((o) => o.status === "pendiente").length,
+      en_camino: branchIsolatedOrders.filter((o) => o.status === "en_camino").length,
+      entregadoHoy: branchIsolatedOrders.filter(
+        (o) => o.status === "entregado" && new Date(o.createdAt) >= todayStart
+      ).length,
+      cancelado: branchIsolatedOrders.filter((o) => o.status === "cancelado").length,
+    }
+  }, [branchIsolatedOrders])
+
+  // Helper para detectar pedidos demorados (urgencia)
+  const isOrderDelayed = (order: Order): boolean => {
+    if (!["pendiente", "confirmado"].includes(order.status)) return false
+    const createdTime = new Date(order.createdAt).getTime()
+    const now = new Date().getTime()
+    const minutesElapsed = (now - createdTime) / 60000
+    return minutesElapsed > 30
+  }
+
+  // Helper para obtener iniciales del nombre
+  const getInitials = (name: string): string => {
+    return name
+      .split(" ")
+      .slice(0, 2)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase()
+  }
 
   // Crear domiciliario rápido desde el propio modal
   const handleCreateQuickDriver = async () => {
@@ -1992,6 +2109,85 @@ export default function OrdersView() {
         </div>
       </div>
 
+      {/* KPIs de alto nivel + Toggle Kanban/Lista */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 flex-1">
+          <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/10 border border-emerald-500/20 rounded-2xl p-3 shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">Ventas del día</span>
+              <IconCurrencyDollar className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <p className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">{formatCurrency(kpis.salesToday)}</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">{kpis.deliveredTodayCount} entrega(s) hoy</p>
+          </div>
+
+          <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/10 border border-blue-500/20 rounded-2xl p-3 shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-400">Activos ahora</span>
+              <IconFlame className="h-4 w-4 text-blue-500" />
+            </div>
+            <div className="flex items-baseline gap-1.5">
+              <p className="text-lg font-extrabold text-blue-700 dark:text-blue-300 tabular-nums">{kpis.activeOrders}</p>
+              {kpis.activeOrders > 0 && <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">En prep + en camino</p>
+          </div>
+
+          <div className="bg-gradient-to-br from-violet-500/10 to-violet-600/10 border border-violet-500/20 rounded-2xl p-3 shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-400">T. promedio</span>
+              <IconTimeDuration15 className="h-4 w-4 text-violet-500" />
+            </div>
+            <p className="text-lg font-extrabold text-violet-700 dark:text-violet-300 tabular-nums">
+              {kpis.avgDeliveryMin !== null ? `${kpis.avgDeliveryMin} min` : "—"}
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">De despacho a entrega</p>
+          </div>
+
+          <div className="bg-gradient-to-br from-amber-500/10 to-amber-600/10 border border-amber-500/20 rounded-2xl p-3 shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">Efectividad</span>
+              <IconTarget className="h-4 w-4 text-amber-500" />
+            </div>
+            <p className="text-lg font-extrabold text-amber-700 dark:text-amber-300 tabular-nums">{kpis.deliveryRate}%</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">{metrics.delivered} entregados</p>
+          </div>
+        </div>
+
+        {/* Toggle vista Kanban / Lista */}
+        <div className="flex items-center gap-1.5 self-start sm:self-auto">
+          <span className="text-xs text-muted-foreground font-medium hidden sm:inline">Vista:</span>
+          <div className="inline-flex rounded-xl bg-muted p-1 gap-0.5">
+            <button
+              type="button"
+              onClick={() => setViewMode("list")}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer",
+                viewMode === "list"
+                  ? "bg-background text-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <IconLayoutList className="h-3.5 w-3.5" />
+              Lista
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("kanban")}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer",
+                viewMode === "kanban"
+                  ? "bg-background text-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <IconLayoutKanban className="h-3.5 w-3.5" />
+              Kanban
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Tarjetas KPI / Métricas Rápidas */}
       <div data-tour="orders-kpi-grid" className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
         <Card
@@ -2130,6 +2326,53 @@ export default function OrdersView() {
         </Card>
       </div>
 
+      {/* Chips de Filtro Rápido con conteos */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-none flex-wrap">
+        {[
+          { key: "all", label: "Todos", count: quickFilterCounts.all, icon: IconBoxSeam },
+          { key: "pendiente", label: "Pendientes", count: quickFilterCounts.pendiente, icon: IconClock },
+          { key: "en_camino", label: "En camino", count: quickFilterCounts.en_camino, icon: IconTruckDelivery },
+          { key: "entregadoHoy", label: "Entregados hoy", count: quickFilterCounts.entregadoHoy, icon: IconCircleCheck },
+          { key: "cancelado", label: "Cancelados", count: quickFilterCounts.cancelado, icon: IconX },
+        ].map((chip) => (
+          <button
+            key={chip.key}
+            type="button"
+            onClick={() => {
+              if (chip.key === "all") {
+                setStatusFilter("all")
+                setPaymentStatusFilter("all")
+                setDriverFilter("all")
+              } else if (chip.key === "pendiente") {
+                setStatusFilter("pendiente")
+              } else if (chip.key === "en_camino") {
+                setStatusFilter("en_camino")
+              } else if (chip.key === "entregadoHoy") {
+                setStatusFilter("entregado")
+              } else if (chip.key === "cancelado") {
+                setStatusFilter("cancelado")
+              }
+            }}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0",
+              chip.key === "all" && statusFilter === "all" && paymentStatusFilter === "all"
+                ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 shadow-sm"
+                : chip.key === "pendiente" && statusFilter === "pendiente"
+                ? "bg-amber-500/20 border border-amber-500/50 text-amber-700 dark:text-amber-300"
+                : chip.key === "en_camino" && statusFilter === "en_camino"
+                ? "bg-blue-500/20 border border-blue-500/50 text-blue-700 dark:text-blue-300"
+                : chip.key === "entregadoHoy" && statusFilter === "entregado"
+                ? "bg-emerald-500/20 border border-emerald-500/50 text-emerald-700 dark:text-emerald-300"
+                : chip.key === "cancelado" && statusFilter === "cancelado"
+                ? "bg-red-500/20 border border-red-500/50 text-red-700 dark:text-red-300"
+                : "bg-muted/60 text-muted-foreground hover:bg-muted border border-border"
+            )}
+          >
+            {chip.count}
+          </button>
+        ))}
+      </div>
+
       {/* Barra de Búsqueda y Filtros Detallados (Envío, Pago, Medio) */}
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5 bg-card p-3 rounded-2xl border shadow-2xs">
         <div className="relative flex-1">
@@ -2212,7 +2455,7 @@ export default function OrdersView() {
         </div>
       </div>
 
-      {/* Lista de Pedidos (Cards o Tabla) */}
+      {/* Lista de Pedidos (Cards o Tabla) o Vista Kanban */}
       {loading ? (
         <div className="py-20 text-center space-y-3">
           <IconRefresh className="h-8 w-8 animate-spin text-zinc-950 dark:text-white mx-auto" />
@@ -2246,6 +2489,85 @@ export default function OrdersView() {
             </Button>
           </div>
         </Card>
+      ) : viewMode === "kanban" ? (
+        /* VISTA KANBAN - Columnas por estado */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+          {["pendiente", "confirmado", "en_preparacion", "en_camino", "entregado", "cancelado"].map((status) => {
+            const col = kanbanColumns[status as keyof typeof kanbanColumns] || []
+            const statusCfg = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG]
+            return (
+              <div
+                key={status}
+                className="flex flex-col rounded-2xl border bg-card/40 p-3 min-h-[600px] shadow-xs"
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  setDragOverColumn(status)
+                }}
+                onDragLeave={() => setDragOverColumn(null)}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  if (draggedOrderId) {
+                    handleUpdateStatus(draggedOrderId, status)
+                    setDraggedOrderId(null)
+                  }
+                  setDragOverColumn(null)
+                }}
+              >
+                {/* Encabezado de columna */}
+                <div className={cn("p-2 rounded-xl mb-3 flex items-center justify-between", statusCfg?.bg, statusCfg?.border, "border")}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={cn("h-2 w-2 rounded-full", statusCfg?.color === "text-emerald-700" ? "bg-emerald-500" : "")}></div>
+                    <span className={cn("font-bold text-sm truncate", statusCfg?.color)}>{statusCfg?.label}</span>
+                  </div>
+                  <Badge className="text-[10px]">{col.length}</Badge>
+                </div>
+
+                {/* Cards de pedidos */}
+                <div className="flex-1 space-y-2 overflow-y-auto">
+                  {col.map((order) => (
+                    <motion.div
+                      key={order.id}
+                      draggable
+                      onDragStart={() => setDraggedOrderId(order.id)}
+                      onDragEnd={() => setDraggedOrderId(null)}
+                      className={cn(
+                        "p-2.5 rounded-xl border cursor-move transition-all shadow-xs hover:shadow-md",
+                        draggedOrderId === order.id ? "opacity-50" : "bg-background hover:border-primary",
+                        isOrderDelayed(order) && "border-red-500/50 bg-red-500/5"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <span className="text-xs font-mono font-bold">{order.orderNumber}</span>
+                        {isOrderDelayed(order) && (
+                          <Badge className="bg-red-500/15 text-red-600 dark:text-red-400 text-[9px] px-1.5 border-red-500/30">⚠️ Demorado</Badge>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[11px] font-semibold text-foreground truncate">{order.customerName}</p>
+                        <p className="text-[10px] text-muted-foreground truncate">{order.deliveryAddress || "Sin dirección"}</p>
+                        <div className="flex items-center justify-between pt-1 border-t border-border/50">
+                          <span className="text-[10px] font-bold tabular-nums">{formatCurrency(order.total)}</span>
+                          {order.deliveryDriverId && (
+                            <Avatar className="h-5 w-5">
+                              <AvatarFallback className="text-[8px] font-bold bg-primary/20 text-primary">
+                                {getInitials(order.deliveryDriverName || "??")}
+                              </AvatarFallback>
+                            </Avatar>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                  {col.length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <p className="text-xs">Sin pedidos</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       ) : (
         /* VISTA DE TABLA DETALLADA (ENVÍO, PAGO, MEDIO) */
         <Card className="rounded-2xl border shadow-xs overflow-hidden">
@@ -2268,17 +2590,30 @@ export default function OrdersView() {
                 {filteredOrders.map((order) => {
                   const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.pendiente
                   const productTotal = order.subtotal || Math.max(0, order.total - order.deliveryFee)
+                  const delayed = isOrderDelayed(order)
                   return (
-                    <TableRow key={order.id} className="hover:bg-muted/20">
+                    <TableRow key={order.id} className={cn("hover:bg-muted/20", delayed && "bg-red-500/5")}>
                       <TableCell className="font-mono font-bold text-xs whitespace-nowrap">
-                        {order.orderNumber}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {order.orderNumber}
+                          {delayed && (
+                            <Badge className="bg-red-500/15 text-red-600 dark:text-red-400 text-[9px] px-1.5 border-red-500/30 font-bold">⚠️ Demorado</Badge>
+                          )}
+                        </div>
                         <span className="block text-[10px] text-muted-foreground font-normal">
-                          {formatDateTime(order.createdAt)}
+                          {formatRelativeTime(order.createdAt)} · {formatDateTime(order.createdAt)}
                         </span>
                       </TableCell>
                       <TableCell>
                         <p className="text-xs font-bold text-foreground">{order.customerName}</p>
-                        <p className="text-[11px] text-muted-foreground">{order.customerPhone}</p>
+                        {order.customerPhone && (
+                          <a
+                            href={`tel:${order.customerPhone}`}
+                            className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-0.5"
+                          >
+                            <IconPhone className="h-3 w-3" />{order.customerPhone}
+                          </a>
+                        )}
                       </TableCell>
                       <TableCell className="max-w-[190px]">
                         <p className="text-xs truncate font-medium">{order.deliveryAddress || "N/A"}</p>
@@ -2394,11 +2729,22 @@ export default function OrdersView() {
                       <TableCell>
                         {order.deliveryDriverName ? (
                           <div className="flex items-center gap-1.5">
-                            <IconMotorbike className="h-3.5 w-3.5 text-foreground" />
+                            <Avatar className="h-7 w-7 shrink-0">
+                              <AvatarFallback className="text-[10px] font-bold bg-primary/15 text-primary">
+                                {getInitials(order.deliveryDriverName)}
+                              </AvatarFallback>
+                            </Avatar>
                             <div>
-                              <p className="text-xs font-bold text-foreground">{order.deliveryDriverName}</p>
+                              <p className="text-xs font-bold text-foreground leading-tight">{order.deliveryDriverName}</p>
+                              {order.deliveryDriverId && driverActiveCounts[order.deliveryDriverId] !== undefined && (
+                                <span className="text-[10px] text-muted-foreground">
+                                  {driverActiveCounts[order.deliveryDriverId]} activo(s)
+                                </span>
+                              )}
                               {order.deliveryDriverPhone && (
-                                <p className="text-[10px] text-muted-foreground">{order.deliveryDriverPhone}</p>
+                                <a href={`tel:${order.deliveryDriverPhone}`} className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-0.5">
+                                  <IconPhone className="h-2.5 w-2.5" />{order.deliveryDriverPhone}
+                                </a>
                               )}
                             </div>
                           </div>

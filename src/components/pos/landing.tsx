@@ -72,7 +72,7 @@ const heroWordVariants = {
     clipPath: "inset(0% 0 0 0)",
     y: 0,
     opacity: 1,
-    transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] },
+    transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as [number, number, number, number] },
   },
 }
 
