@@ -459,6 +459,9 @@ export default function WhatsAppAgentView() {
   const [savingConfig, setSavingConfig] = useState(false)
   const [testingAi, setTestingAi] = useState(false)
   const [testingTelegram, setTestingTelegram] = useState(false)
+  const [testingMeta, setTestingMeta] = useState(false)
+  const [metaConnectionStatus, setMetaConnectionStatus] = useState<"idle" | "ok" | "error">("idle")
+  const [metaConnectionDetail, setMetaConnectionDetail] = useState<string>("")
   const [showApiKey, setShowApiKey] = useState(false)
   const [showOpenRouterKey, setShowOpenRouterKey] = useState(false)
   const [showMetaToken, setShowMetaToken] = useState(false)
@@ -778,6 +781,60 @@ export default function WhatsAppAgentView() {
       toast.error("Error de conexión: " + (e as Error).message)
     } finally {
       setTestingAi(false)
+    }
+  }
+
+  // Validar conexión con Meta Cloud API (WhatsApp Business)
+  const handleTestMeta = async () => {
+    if (!config.metaAccessToken?.trim() || !config.metaPhoneNumberId?.trim()) {
+      toast.error("Completa el Phone Number ID y el Access Token de Meta antes de validar")
+      return
+    }
+    setTestingMeta(true)
+    setMetaConnectionStatus("idle")
+    setMetaConnectionDetail("")
+    try {
+      const res = await apiFetch<{
+        ok: boolean
+        status?: string
+        phoneNumber?: string
+        displayName?: string
+        qualityRating?: string
+        verifiedName?: string
+        error?: string
+        latencyMs?: number
+      }>("/api/whatsapp/config", {
+        method: "PATCH",
+        body: JSON.stringify({
+          action: "test_meta",
+          phoneNumberId: config.metaPhoneNumberId,
+          accessToken: config.metaAccessToken,
+          branchId: currentBranchId,
+        }),
+      })
+      if (res && res.ok) {
+        setMetaConnectionStatus("ok")
+        const detail = [
+          res.displayName && `📱 ${res.displayName}`,
+          res.phoneNumber && `Número: ${res.phoneNumber}`,
+          res.qualityRating && `Calidad: ${res.qualityRating}`,
+          res.latencyMs && `${res.latencyMs}ms`,
+        ].filter(Boolean).join(" · ")
+        setMetaConnectionDetail(detail || "Conexión exitosa")
+        toast.success(`✅ Meta Cloud API conectada correctamente. ${detail}`)
+      } else {
+        setMetaConnectionStatus("error")
+        const errMsg = res?.error || "No se pudo conectar con Meta Cloud API"
+        setMetaConnectionDetail(errMsg)
+        toast.error(errMsg)
+      }
+    } catch (e) {
+      setMetaConnectionStatus("error")
+      const errMsg = "Error de conexión: " + (e as Error).message
+      setMetaConnectionDetail(errMsg)
+      toast.error(errMsg)
+    } finally {
+      setTestingMeta(false)
     }
   }
 
@@ -3375,15 +3432,95 @@ export default function WhatsAppAgentView() {
             <div className="space-y-4">
               <Card className="rounded-2xl border-zinc-200 dark:border-zinc-800 shadow-sm">
                 <CardHeader className="p-4 pb-2">
-                  <div className="flex items-center gap-2">
-                    <IconBrandWhatsapp className="h-4 w-4 text-zinc-900 dark:text-zinc-100" />
-                    <CardTitle className="text-sm font-bold text-zinc-950 dark:text-white">
-                      Conexión WhatsApp (Meta Cloud API)
-                    </CardTitle>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className={cn(
+                        "h-7 w-7 rounded-lg flex items-center justify-center shrink-0",
+                        metaConnectionStatus === "ok"
+                          ? "bg-emerald-500/15 text-emerald-600"
+                          : metaConnectionStatus === "error"
+                          ? "bg-red-500/15 text-red-500"
+                          : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500"
+                      )}>
+                        <IconBrandWhatsapp className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-sm font-bold text-zinc-950 dark:text-white flex items-center gap-2">
+                          Conexión WhatsApp (Meta Cloud API)
+                          {metaConnectionStatus === "ok" && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              Conectado
+                            </span>
+                          )}
+                          {metaConnectionStatus === "error" && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/30">
+                              <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                              Error
+                            </span>
+                          )}
+                        </CardTitle>
+                      </div>
+                    </div>
+                    {/* Botón de Validar Conexión con Meta */}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleTestMeta}
+                      disabled={testingMeta || !config.metaAccessToken?.trim() || !config.metaPhoneNumberId?.trim()}
+                      className={cn(
+                        "h-8 text-xs font-bold rounded-xl gap-1.5 cursor-pointer shrink-0 transition-all",
+                        metaConnectionStatus === "ok"
+                          ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20"
+                          : metaConnectionStatus === "error"
+                          ? "bg-red-500/10 border-red-500/40 text-red-700 dark:text-red-400 hover:bg-red-500/20"
+                          : "border-zinc-300 dark:border-zinc-700"
+                      )}
+                      title="Verifica la conectividad real con Meta Cloud API usando tus credenciales actuales"
+                    >
+                      {testingMeta ? (
+                        <>
+                          <IconRefresh className="h-3.5 w-3.5 animate-spin" />
+                          Validando…
+                        </>
+                      ) : metaConnectionStatus === "ok" ? (
+                        <>
+                          <IconCircleCheck className="h-3.5 w-3.5" />
+                          Verificado
+                        </>
+                      ) : metaConnectionStatus === "error" ? (
+                        <>
+                          <IconAlertCircle className="h-3.5 w-3.5" />
+                          Reintentar
+                        </>
+                      ) : (
+                        <>
+                          <IconShieldCheck className="h-3.5 w-3.5" />
+                          Validar Conexión
+                        </>
+                      )}
+                    </Button>
                   </div>
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-zinc-500 mt-1">
                     Vincula el número oficial de WhatsApp Business de esta sede con Meta Developer Console.
                   </p>
+
+                  {/* Banner de resultado de la validación */}
+                  {metaConnectionStatus !== "idle" && metaConnectionDetail && (
+                    <div className={cn(
+                      "mt-2 p-2.5 rounded-xl text-[11px] flex items-start gap-2 border",
+                      metaConnectionStatus === "ok"
+                        ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-800 dark:text-emerald-300"
+                        : "bg-red-500/10 border-red-500/25 text-red-800 dark:text-red-300"
+                    )}>
+                      {metaConnectionStatus === "ok"
+                        ? <IconCircleCheck className="h-4 w-4 shrink-0 text-emerald-600 mt-0.5" />
+                        : <IconAlertTriangle className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />
+                      }
+                      <span className="font-medium leading-relaxed">{metaConnectionDetail}</span>
+                    </div>
+                  )}
                 </CardHeader>
 
                 <CardContent className="p-4 space-y-3">
@@ -3392,7 +3529,10 @@ export default function WhatsAppAgentView() {
                       <Label className="text-xs font-bold">Número de Teléfono</Label>
                       <Input
                         value={config.phoneNumber || ""}
-                        onChange={(e) => setConfig((c) => ({ ...c, phoneNumber: e.target.value }))}
+                        onChange={(e) => {
+                          setConfig((c) => ({ ...c, phoneNumber: e.target.value }))
+                          setMetaConnectionStatus("idle")
+                        }}
                         placeholder="+573001234567"
                         className="h-9 text-xs font-mono bg-zinc-50 dark:bg-zinc-950"
                       />
@@ -3401,7 +3541,10 @@ export default function WhatsAppAgentView() {
                       <Label className="text-xs font-bold">Phone Number ID (Meta)</Label>
                       <Input
                         value={config.metaPhoneNumberId || ""}
-                        onChange={(e) => setConfig((c) => ({ ...c, metaPhoneNumberId: e.target.value }))}
+                        onChange={(e) => {
+                          setConfig((c) => ({ ...c, metaPhoneNumberId: e.target.value }))
+                          setMetaConnectionStatus("idle")
+                        }}
                         placeholder="1029384756..."
                         className="h-9 text-xs font-mono bg-zinc-50 dark:bg-zinc-950"
                       />
@@ -3410,12 +3553,25 @@ export default function WhatsAppAgentView() {
 
                   {/* Access Token de Meta */}
                   <div className="space-y-1">
-                    <Label className="text-xs font-bold">Meta System User Access Token</Label>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-bold">Meta System User Access Token</Label>
+                      <a
+                        href="https://developers.facebook.com/apps"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-zinc-500 hover:text-zinc-950 dark:hover:text-white underline flex items-center gap-0.5"
+                      >
+                        Meta Developer Console <IconExternalLink className="h-2.5 w-2.5" />
+                      </a>
+                    </div>
                     <div className="relative">
                       <Input
                         type={showMetaToken ? "text" : "password"}
                         value={config.metaAccessToken || ""}
-                        onChange={(e) => setConfig((c) => ({ ...c, metaAccessToken: e.target.value }))}
+                        onChange={(e) => {
+                          setConfig((c) => ({ ...c, metaAccessToken: e.target.value }))
+                          setMetaConnectionStatus("idle")
+                        }}
                         placeholder="EAAB..."
                         className="pr-10 h-9 text-xs font-mono bg-zinc-50 dark:bg-zinc-950"
                       />
@@ -3429,33 +3585,51 @@ export default function WhatsAppAgentView() {
                     </div>
                   </div>
 
-                  {/* Webhook URL & Verify Token */}
-                  <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-200 dark:border-zinc-800 space-y-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 block">
-                      Datos para configurar en Meta App
-                    </span>
+                  {/* Webhook URL & Verify Token mejorado */}
+                  <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-200 dark:border-zinc-800 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                        Datos para configurar en Meta App
+                      </span>
+                      <a
+                        href="https://developers.facebook.com/docs/whatsapp/cloud-api/guides/set-up-webhooks"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 flex items-center gap-0.5 underline"
+                      >
+                        Guía Meta <IconExternalLink className="h-2.5 w-2.5" />
+                      </a>
+                    </div>
                     <div className="space-y-1.5 text-xs font-mono">
-                      <div className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-white dark:bg-zinc-900 border text-[11px]">
-                        <span className="truncate">{webhookUrl}</span>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => copyToClipboard(webhookUrl, "url")}
-                          className="h-6 text-[10px] px-2"
-                        >
-                          {copiedUrl ? <IconCheck className="h-3 w-3" /> : <IconCopy className="h-3 w-3" />}
-                        </Button>
+                      <div className="space-y-0.5">
+                        <span className="text-[9px] text-zinc-400 uppercase font-bold tracking-wider">Webhook URL</span>
+                        <div className="flex items-center gap-2 p-2 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+                          <span className="truncate text-[11px] flex-1 text-zinc-700 dark:text-zinc-300">{webhookUrl}</span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => copyToClipboard(webhookUrl, "url")}
+                            className="h-6 w-6 p-0 shrink-0"
+                            title="Copiar URL del Webhook"
+                          >
+                            {copiedUrl ? <IconCheck className="h-3 w-3 text-emerald-500" /> : <IconCopy className="h-3 w-3" />}
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-white dark:bg-zinc-900 border text-[11px]">
-                        <span className="truncate">{config.metaVerifyToken}</span>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => copyToClipboard(config.metaVerifyToken || "", "token")}
-                          className="h-6 text-[10px] px-2"
-                        >
-                          {copiedToken ? <IconCheck className="h-3 w-3" /> : <IconCopy className="h-3 w-3" />}
-                        </Button>
+                      <div className="space-y-0.5">
+                        <span className="text-[9px] text-zinc-400 uppercase font-bold tracking-wider">Verify Token</span>
+                        <div className="flex items-center gap-2 p-2 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+                          <span className="truncate text-[11px] flex-1 text-zinc-700 dark:text-zinc-300">{config.metaVerifyToken}</span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => copyToClipboard(config.metaVerifyToken || "", "token")}
+                            className="h-6 w-6 p-0 shrink-0"
+                            title="Copiar Verify Token"
+                          >
+                            {copiedToken ? <IconCheck className="h-3 w-3 text-emerald-500" /> : <IconCopy className="h-3 w-3" />}
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </div>

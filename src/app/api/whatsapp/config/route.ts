@@ -202,3 +202,75 @@ export async function POST(req: NextRequest) {
     )
   }
 }
+
+/**
+ * PATCH: Acciones especiales — validar conexión con Meta Cloud API
+ */
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json()
+    const { action, phoneNumberId, accessToken } = body
+
+    if (action !== "test_meta") {
+      return NextResponse.json({ error: "Acción no reconocida" }, { status: 400 })
+    }
+
+    if (!phoneNumberId || !accessToken) {
+      return NextResponse.json(
+        { error: "Se requieren phoneNumberId y accessToken para validar la conexión con Meta" },
+        { status: 400 }
+      )
+    }
+
+    const startMs = Date.now()
+
+    // Llamar a la API de Meta Graph para verificar el Phone Number ID
+    const metaRes = await fetch(
+      `https://graph.facebook.com/v19.0/${phoneNumberId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        // Timeout manual: 8 segundos
+        signal: AbortSignal.timeout(8000),
+      }
+    )
+
+    const latencyMs = Date.now() - startMs
+    const metaData = await metaRes.json().catch(() => ({}))
+
+    if (!metaRes.ok) {
+      const errorMsg =
+        metaData?.error?.message ||
+        metaData?.error?.error_user_msg ||
+        `Error HTTP ${metaRes.status} desde Meta Graph API`
+      return NextResponse.json(
+        { ok: false, error: errorMsg, latencyMs },
+        { status: 200 } // Retornamos 200 para que el frontend maneje el error de forma controlada
+      )
+    }
+
+    // Respuesta exitosa de Meta Graph API
+    return NextResponse.json({
+      ok: true,
+      phoneNumber: metaData.display_phone_number || metaData.phone_number || null,
+      displayName: metaData.verified_name || metaData.display_phone_number || null,
+      qualityRating: metaData.quality_rating || null,
+      verifiedName: metaData.verified_name || null,
+      status: metaData.status || "CONNECTED",
+      latencyMs,
+    })
+  } catch (error) {
+    const isTimeout = (error as Error).name === "AbortError" || (error as Error).name === "TimeoutError"
+    return NextResponse.json(
+      {
+        ok: false,
+        error: isTimeout
+          ? "Tiempo de espera agotado (>8s). Verifica tu conexión o que el Access Token sea válido."
+          : "Error al conectar con Meta Graph API: " + (error as Error).message,
+      },
+      { status: 200 }
+    )
+  }
+}
