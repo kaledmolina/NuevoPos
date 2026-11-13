@@ -73,11 +73,32 @@ export async function POST(req: NextRequest) {
 
     const driverId: string | null = body.driverId ? String(body.driverId) : null
     const driverName: string = String(body.driverName || "Domiciliario").trim()
-    const settlementMode: "full" | "products_only" =
-      body.settlementMode === "products_only" ? "products_only" : "full"
     const verifyNonCash = Boolean(body.verifyNonCash)
     const registerInCash = body.registerInCash !== false
     const notes: string | null = body.notes ? String(body.notes).trim() : null
+
+    // Modalidad de pago al domiciliario por su trabajo
+    const driverPaymentMode: "full_delivery_fee" | "per_order" | "manual" | "none" =
+      body.driverPaymentMode === "per_order"
+        ? "per_order"
+        : body.driverPaymentMode === "manual"
+        ? "manual"
+        : body.driverPaymentMode === "none"
+        ? "none"
+        : "full_delivery_fee"
+
+    const driverPaymentRate = Math.max(0, Number(body.driverPaymentRate || 0))
+
+    // Modalidad de entrega física del dinero:
+    // - "driver_retains_pay": Domiciliario retiene su pago en efectivo y entrega a caja el Neto (X + envíos restantes)
+    // - "full": Domiciliario entrega todo el efectivo recaudado (X + Y)
+    // - "products_only": Domiciliario entrega solo mercancía (X)
+    const settlementMode: "driver_retains_pay" | "full" | "products_only" =
+      body.settlementMode === "full"
+        ? "full"
+        : body.settlementMode === "products_only"
+        ? "products_only"
+        : "driver_retains_pay"
 
     const result = await db.$transaction(async (tx) => {
       const orders = await tx.order.findMany({
@@ -101,6 +122,21 @@ export async function POST(req: NextRequest) {
         throw new Error("Los pedidos seleccionados ya estaban liquidados o no son válidos para esta sede.")
       }
 
+      // Restricción estricta de caja: Para cuadres en efectivo, la caja de la sede debe estar abierta
+      const openSession = await tx.cashSession.findFirst({
+        where: {
+          status: "abierta",
+          ...(branchId ? { branchId } : {}),
+        },
+        orderBy: { openedAt: "desc" },
+      })
+
+      if (!verifyNonCash && !openSession) {
+        throw new Error(
+          "La caja de la sede está cerrada. Para registrar y recibir el efectivo de un cuadre con domiciliarios, debes abrir primero el turno de caja."
+        )
+      }
+
       let productsTotal = 0
       let deliveryFeeTotal = 0
       let grossTotal = 0
@@ -111,11 +147,26 @@ export async function POST(req: NextRequest) {
         grossTotal += amounts.total
       }
 
+      // Calcular lo que le corresponde al domiciliario por su trabajo
+      let driverPayment = 0
+      if (driverPaymentMode === "full_delivery_fee") {
+        driverPayment = deliveryFeeTotal
+      } else if (driverPaymentMode === "per_order") {
+        driverPayment = validOrders.length * driverPaymentRate
+      } else if (driverPaymentMode === "manual") {
+        driverPayment = Math.max(0, Number(body.driverPaymentAmount || 0))
+      } else if (driverPaymentMode === "none") {
+        driverPayment = 0
+      }
+
+      // Monto esperado en caja según modalidad
       const expectedCash = verifyNonCash
         ? 0
+        : settlementMode === "full"
+        ? grossTotal
         : settlementMode === "products_only"
         ? productsTotal
-        : grossTotal
+        : Math.max(0, grossTotal - driverPayment)
 
       const parsedReceived =
         body.receivedCash !== undefined && body.receivedCash !== null && String(body.receivedCash).trim() !== ""
@@ -155,53 +206,50 @@ export async function POST(req: NextRequest) {
       let openSessionId: string | null = null
       let registeredInCash = false
 
-      if (!verifyNonCash && registerInCash && receivedCash > 0) {
-        const openSession = await tx.cashSession.findFirst({
-          where: {
-            status: "abierta",
-            ...(branchId ? { branchId } : {}),
+      if (!verifyNonCash && registerInCash && receivedCash > 0 && openSession) {
+        openSessionId = openSession.id
+        registeredInCash = true
+
+        const modeText =
+          settlementMode === "full"
+            ? "Entrega Total"
+            : settlementMode === "products_only"
+            ? "Solo Pedidos"
+            : "Neto tras Pago Domiciliario"
+
+        const concept = `Cuadre Domiciliario: ${driverName} (${validOrders.length} ped · ${modeText})`
+        const description =
+          `${settlementRef} · Pedidos (Mercancía X): $${productsTotal.toLocaleString("es-CO")} · ` +
+          `Domicilios Cobrados (Y): $${deliveryFeeTotal.toLocaleString("es-CO")} · ` +
+          `Pago al Domiciliario: $${driverPayment.toLocaleString("es-CO")} · ` +
+          `Esperado en Caja: $${expectedCash.toLocaleString("es-CO")} · ` +
+          `Recibido en Caja: $${receivedCash.toLocaleString("es-CO")}` +
+          (notes ? ` · Nota: ${notes}` : "")
+
+        const finTx = await tx.transaction.create({
+          data: {
+            branchId: branchId || null,
+            type: "ingreso",
+            category: "Cuadre Domiciliario",
+            amount: receivedCash,
+            concept,
+            description,
+            method: "efectivo",
+            date: now,
+            cashSessionId: openSession.id,
           },
-          orderBy: { openedAt: "desc" },
         })
 
-        if (openSession) {
-          openSessionId = openSession.id
-          registeredInCash = true
-
-          const modeText = settlementMode === "products_only" ? "Solo Pedidos" : "Pedidos + Domicilios"
-          const concept = `Cuadre Domiciliario: ${driverName} (${validOrders.length} ped · ${modeText})`
-          const description =
-            `${settlementRef} · Pedidos (X): $${productsTotal.toLocaleString("es-CO")} · ` +
-            `Domicilios (Y): $${deliveryFeeTotal.toLocaleString("es-CO")} · ` +
-            `Esperado: $${expectedCash.toLocaleString("es-CO")} · ` +
-            `Recibido: $${receivedCash.toLocaleString("es-CO")}` +
-            (notes ? ` · Nota: ${notes}` : "")
-
-          const finTx = await tx.transaction.create({
-            data: {
-              branchId: branchId || null,
-              type: "ingreso",
-              category: "Cuadre Domiciliario",
-              amount: receivedCash,
-              concept,
-              description,
-              method: "efectivo",
-              date: now,
-              cashSessionId: openSession.id,
-            },
-          })
-
-          await tx.cashTransaction.create({
-            data: {
-              cashSessionId: openSession.id,
-              type: "ingreso",
-              amount: receivedCash,
-              concept,
-              method: "efectivo",
-              reference: finTx.id,
-            },
-          })
-        }
+        await tx.cashTransaction.create({
+          data: {
+            cashSessionId: openSession.id,
+            type: "ingreso",
+            amount: receivedCash,
+            concept,
+            method: "efectivo",
+            reference: finTx.id,
+          },
+        })
       }
 
       const metaObj = {
@@ -216,6 +264,10 @@ export async function POST(req: NextRequest) {
         productsTotal,
         deliveryFeeTotal,
         grossTotal,
+        driverPayment,
+        driverPaymentMode,
+        driverPaymentRate,
+        netToCash: expectedCash,
         settlementMode: verifyNonCash ? "transfer_verification" : settlementMode,
         expectedCash,
         receivedCash,
@@ -230,7 +282,7 @@ export async function POST(req: NextRequest) {
 
       const detail = verifyNonCash
         ? `Verificación de ${validOrders.length} transferencia(s)/tarjeta(s) de ${driverName} por $${grossTotal.toLocaleString("es-CO")}`
-        : `Cuadre ${settlementRef} con ${driverName}: ${validOrders.length} pedido(s) | Pedidos: $${productsTotal.toLocaleString("es-CO")} + Domicilios: $${deliveryFeeTotal.toLocaleString("es-CO")} | Recibido en caja: $${receivedCash.toLocaleString("es-CO")}`
+        : `Cuadre ${settlementRef} con ${driverName}: ${validOrders.length} pedido(s) | Pedidos (X): $${productsTotal.toLocaleString("es-CO")} + Domicilios (Y): $${deliveryFeeTotal.toLocaleString("es-CO")} | Pagado a domiciliario: $${driverPayment.toLocaleString("es-CO")} | Recibido en caja: $${receivedCash.toLocaleString("es-CO")}`
 
       const audit = await tx.auditLog.create({
         data: {

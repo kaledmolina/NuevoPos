@@ -86,6 +86,12 @@ export interface DriverSettlementBucket {
   settledTodayProductsTotal: number
   settledTodayDeliveryTotal: number
   settledTodayGrossTotal: number
+  settledTodayOrders: SettlementOrderSummary[]
+}
+
+export interface TodaySettledOrder extends SettlementOrderSummary {
+  driverName: string
+  driverId: string | null
 }
 
 export interface DriverSettlementHistoryItem {
@@ -101,7 +107,11 @@ export interface DriverSettlementHistoryItem {
   productsTotal: number
   deliveryFeeTotal: number
   grossTotal: number
-  settlementMode: "full" | "products_only" | "transfer_verification"
+  settlementMode: "full" | "products_only" | "transfer_verification" | "driver_retains_pay" | string
+  driverPayment?: number
+  driverPaymentMode?: "full_delivery_fee" | "per_order" | "manual" | "none" | string
+  driverPaymentRate?: number
+  netToCash?: number
   expectedCash: number
   receivedCash: number
   difference: number
@@ -222,6 +232,7 @@ export async function buildDriverSettlementReport(params: {
 
   const driverMap = new Map<string, DriverSettlementBucket>()
   const staffById = new Map(branchDrivers.map((d) => [d.id, d]))
+  const todaySettledOrders: TodaySettledOrder[] = []
 
   const ensureBucket = (
     key: string,
@@ -261,6 +272,7 @@ export async function buildDriverSettlementReport(params: {
       settledTodayProductsTotal: 0,
       settledTodayDeliveryTotal: 0,
       settledTodayGrossTotal: 0,
+      settledTodayOrders: [],
     }
     driverMap.set(key, created)
     return created
@@ -343,6 +355,12 @@ export async function buildDriverSettlementReport(params: {
         bucket.settledTodayProductsTotal += productsAmount
         bucket.settledTodayDeliveryTotal += deliveryFee
         bucket.settledTodayGrossTotal += total
+        bucket.settledTodayOrders.push(summary)
+        todaySettledOrders.push({
+          ...summary,
+          driverName: bucket.driverName,
+          driverId: bucket.driverId,
+        })
       }
       continue
     }
@@ -371,7 +389,7 @@ export async function buildDriverSettlementReport(params: {
   const drivers = Array.from(driverMap.values())
     .filter((d) => {
       if (d.driverKey === "unassigned") {
-        return d.unsettledCashCount > 0 || d.unsettledNonCashCount > 0 || d.inTransitCount > 0
+        return d.unsettledCashCount > 0 || d.unsettledNonCashCount > 0 || d.inTransitCount > 0 || d.settledTodayCount > 0
       }
       return true
     })
@@ -398,12 +416,17 @@ export async function buildDriverSettlementReport(params: {
     totalInTransitOrders: drivers.reduce((acc, d) => acc + d.inTransitCount, 0),
     totalInTransitAmount: drivers.reduce((acc, d) => acc + d.inTransitTotal, 0),
     driversWithDebtCount: drivers.filter((d) => d.unsettledCashCount > 0).length,
+    totalSettledTodayOrders: drivers.reduce((acc, d) => acc + d.settledTodayCount, 0),
+    totalSettledTodayProductsAmount: drivers.reduce((acc, d) => acc + d.settledTodayProductsTotal, 0),
+    totalSettledTodayDeliveryFees: drivers.reduce((acc, d) => acc + d.settledTodayDeliveryTotal, 0),
+    totalSettledTodayGrossAmount: drivers.reduce((acc, d) => acc + d.settledTodayGrossTotal, 0),
+    totalPendingDriverPayment: drivers.reduce((acc, d) => acc + d.unsettledCashDeliveryTotal, 0),
   }
 
   const rawLogs = await db.auditLog.findMany({
     where: { action: "driver_cash_settlement" },
     orderBy: { createdAt: "desc" },
-    take: 80,
+    take: 100,
   })
 
   const history = rawLogs
@@ -431,7 +454,7 @@ export async function buildDriverSettlementReport(params: {
       ) {
         return false
       }
-      if (branchId && item.branchId && item.branchId !== branchId) {
+      if (branchId && item.branchId && item.branchId !== branchId && session.role !== "superadmin") {
         return false
       }
       if (isDriverSelf) {
@@ -465,5 +488,6 @@ export async function buildDriverSettlementReport(params: {
     drivers,
     mySettlement: isDriverSelf ? drivers[0] || null : scopedDriverId ? drivers[0] || null : null,
     history,
+    todaySettledOrders,
   }
 }

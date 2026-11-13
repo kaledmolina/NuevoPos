@@ -60,6 +60,7 @@ import {
   IconX,
   IconLoader2,
   IconLock,
+  IconLockOpen,
   IconBrandGoogleMaps,
   IconTruckDelivery,
   IconInfoCircle,
@@ -110,6 +111,12 @@ export interface DriverSettlementBucket {
   settledTodayProductsTotal: number
   settledTodayDeliveryTotal: number
   settledTodayGrossTotal: number
+  settledTodayOrders?: SettlementOrderSummary[]
+}
+
+export interface TodaySettledOrder extends SettlementOrderSummary {
+  driverName: string
+  driverId: string | null
 }
 
 export interface DriverSettlementRecord {
@@ -125,7 +132,11 @@ export interface DriverSettlementRecord {
   productsTotal: number
   deliveryFeeTotal: number
   grossTotal: number
-  settlementMode: "full" | "products_only" | "transfer_verification"
+  driverPayment?: number
+  driverPaymentMode?: "full_delivery_fee" | "per_order" | "manual" | "none" | string
+  driverPaymentRate?: number
+  netToCash?: number
+  settlementMode: "full" | "products_only" | "transfer_verification" | "driver_retains_pay" | string
   expectedCash: number
   receivedCash: number
   difference: number
@@ -160,10 +171,16 @@ export interface DriverSettlementApiResponse {
     totalInTransitOrders: number
     totalInTransitAmount: number
     driversWithDebtCount: number
+    totalSettledTodayOrders?: number
+    totalSettledTodayProductsAmount?: number
+    totalSettledTodayDeliveryFees?: number
+    totalSettledTodayGrossAmount?: number
+    totalPendingDriverPayment?: number
   }
   mySettlement?: DriverSettlementBucket | null
   drivers: DriverSettlementBucket[]
   history: DriverSettlementRecord[]
+  todaySettledOrders?: TodaySettledOrder[]
 }
 
 // Paleta de colores para avatares de domiciliarios (determinístico por nombre)
@@ -196,10 +213,14 @@ export function DriverSettlementView({
   onSettled,
   compactHeader = false,
   driverSelfMode = false,
+  onOpenCashRegister,
+  isCashRegisterOpen,
 }: {
   onSettled?: () => void
   compactHeader?: boolean
   driverSelfMode?: boolean
+  onOpenCashRegister?: () => void
+  isCashRegisterOpen?: boolean
 }) {
   const activeBranch = useAppStore((s) => s.activeBranch)
   const refreshKey = useAppStore((s) => s.refreshKey)
@@ -215,13 +236,20 @@ export function DriverSettlementView({
   const [range, setRange] = useState<"all" | "today" | "yesterday" | "7d">("all")
   const [driverSearch, setDriverSearch] = useState("")
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
+  const [historySubTab, setHistorySubTab] = useState<"receipts" | "today_settled">("receipts")
 
   // Modal de cuadre de efectivo para un domiciliario
   const [activeDriver, setActiveDriver] = useState<DriverSettlementBucket | null>(null)
   const [modalMode, setModalMode] = useState<"cash" | "non_cash">("cash")
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
   const [orderSearch, setOrderSearch] = useState("")
-  const [settlementPolicy, setSettlementPolicy] = useState<"full" | "products_only">("full")
+  
+  // Modalidades de pago al domiciliario y liquidación en caja
+  const [driverPaymentMode, setDriverPaymentMode] = useState<"full_delivery_fee" | "per_order" | "manual" | "none">("full_delivery_fee")
+  const [driverPaymentRate, setDriverPaymentRate] = useState("3000")
+  const [driverPaymentManualAmount, setDriverPaymentManualAmount] = useState("")
+  const [settlementDeliveryMode, setSettlementDeliveryMode] = useState<"driver_retains_pay" | "full" | "products_only">("driver_retains_pay")
+
   const [receivedCashInput, setReceivedCashInput] = useState("")
   const [registerInCash, setRegisterInCash] = useState(true)
   const [notes, setNotes] = useState("")
@@ -232,6 +260,11 @@ export function DriverSettlementView({
 
   // Modal de detalle de pedidos en ruta (solo lectura)
   const [inTransitDriver, setInTransitDriver] = useState<DriverSettlementBucket | null>(null)
+
+  // Modal para ver entregas liquidadas hoy de un domiciliario
+  const [viewSettledTodayDriver, setViewSettledTodayDriver] = useState<DriverSettlementBucket | null>(null)
+
+  const isCashOpen = isCashRegisterOpen !== undefined ? isCashRegisterOpen : Boolean(data?.openSession)
 
   const branchId = activeBranch?.id
 
@@ -296,9 +329,12 @@ export function DriverSettlementView({
     const ids = driver.unsettledCashOrders.map((o) => o.id)
     setSelectedOrderIds(ids)
     setOrderSearch("")
-    setSettlementPolicy("full")
-    setReceivedCashInput(String(driver.unsettledCashGrossTotal))
-    setRegisterInCash(Boolean(data?.openSession))
+    setDriverPaymentMode("full_delivery_fee")
+    setDriverPaymentRate("3000")
+    setDriverPaymentManualAmount("")
+    setSettlementDeliveryMode("driver_retains_pay")
+    setReceivedCashInput(String(driver.unsettledCashProductsTotal))
+    setRegisterInCash(true)
     setNotes("")
     setCompletedReceipt(null)
   }
@@ -310,7 +346,8 @@ export function DriverSettlementView({
     const ids = driver.unsettledNonCashOrders.map((o) => o.id)
     setSelectedOrderIds(ids)
     setOrderSearch("")
-    setSettlementPolicy("full")
+    setDriverPaymentMode("full_delivery_fee")
+    setSettlementDeliveryMode("full")
     setReceivedCashInput("0")
     setRegisterInCash(false)
     setNotes("")
@@ -337,7 +374,15 @@ export function DriverSettlementView({
   // Cálculo en vivo según pedidos seleccionados en el modal
   const selectionTotals = useMemo(() => {
     if (!activeDriver) {
-      return { count: 0, totalAvailable: 0, productsTotal: 0, deliveryFeeTotal: 0, grossTotal: 0, expectedCash: 0 }
+      return {
+        count: 0,
+        totalAvailable: 0,
+        productsTotal: 0,
+        deliveryFeeTotal: 0,
+        grossTotal: 0,
+        driverPayment: 0,
+        expectedCash: 0,
+      }
     }
     const source =
       modalMode === "cash"
@@ -349,12 +394,29 @@ export function DriverSettlementView({
     const productsTotal = selectedOrders.reduce((acc, o) => acc + o.productsAmount, 0)
     const deliveryFeeTotal = selectedOrders.reduce((acc, o) => acc + o.deliveryFee, 0)
     const grossTotal = selectedOrders.reduce((acc, o) => acc + o.total, 0)
-    const expectedCash =
-      modalMode === "non_cash"
-        ? 0
-        : settlementPolicy === "products_only"
-        ? productsTotal
-        : grossTotal
+
+    let driverPayment = 0
+    if (driverPaymentMode === "full_delivery_fee") {
+      driverPayment = deliveryFeeTotal
+    } else if (driverPaymentMode === "per_order") {
+      const rate = Math.max(0, Number(driverPaymentRate) || 0)
+      driverPayment = selectedOrders.length * rate
+    } else if (driverPaymentMode === "manual") {
+      driverPayment = Math.max(0, Number(driverPaymentManualAmount) || 0)
+    } else if (driverPaymentMode === "none") {
+      driverPayment = 0
+    }
+
+    let expectedCash = 0
+    if (modalMode === "non_cash") {
+      expectedCash = 0
+    } else if (settlementDeliveryMode === "full") {
+      expectedCash = grossTotal
+    } else if (settlementDeliveryMode === "products_only") {
+      expectedCash = productsTotal
+    } else {
+      expectedCash = Math.max(0, grossTotal - driverPayment)
+    }
 
     return {
       count: selectedOrders.length,
@@ -362,20 +424,45 @@ export function DriverSettlementView({
       productsTotal,
       deliveryFeeTotal,
       grossTotal,
+      driverPayment,
       expectedCash,
     }
-  }, [activeDriver, modalMode, selectedOrderIds, settlementPolicy])
+  }, [
+    activeDriver,
+    modalMode,
+    selectedOrderIds,
+    driverPaymentMode,
+    driverPaymentRate,
+    driverPaymentManualAmount,
+    settlementDeliveryMode,
+  ])
 
-  // Si cambia la selección o la política de cobro, actualizar el input recibido automáticamente
-  // solo si aún coincide o antes de editar manualmente — más práctico: helper explícito al cambiar política o selección
-  const syncReceivedInputWithExpected = (nextIds: string[], nextPolicy: "full" | "products_only") => {
+  const syncReceivedInputWithExpected = (
+    nextIds: string[],
+    payMode = driverPaymentMode,
+    payRate = driverPaymentRate,
+    manualAmt = driverPaymentManualAmount,
+    delMode = settlementDeliveryMode
+  ) => {
     if (!activeDriver || modalMode === "non_cash") return
     const selectedSet = new Set(nextIds)
     const selected = activeDriver.unsettledCashOrders.filter((o) => selectedSet.has(o.id))
     const pTotal = selected.reduce((a, o) => a + o.productsAmount, 0)
+    const dTotal = selected.reduce((a, o) => a + o.deliveryFee, 0)
     const gTotal = selected.reduce((a, o) => a + o.total, 0)
-    const nextExpected = nextPolicy === "products_only" ? pTotal : gTotal
-    setReceivedCashInput(String(nextExpected))
+
+    let pay = 0
+    if (payMode === "full_delivery_fee") pay = dTotal
+    else if (payMode === "per_order") pay = selected.length * Math.max(0, Number(payRate) || 0)
+    else if (payMode === "manual") pay = Math.max(0, Number(manualAmt) || 0)
+    else pay = 0
+
+    let nextExp = 0
+    if (delMode === "full") nextExp = gTotal
+    else if (delMode === "products_only") nextExp = pTotal
+    else nextExp = Math.max(0, gTotal - pay)
+
+    setReceivedCashInput(String(nextExp))
   }
 
   const toggleOrderSelection = (orderId: string) => {
@@ -383,7 +470,7 @@ export function DriverSettlementView({
       ? selectedOrderIds.filter((id) => id !== orderId)
       : [...selectedOrderIds, orderId]
     setSelectedOrderIds(next)
-    syncReceivedInputWithExpected(next, settlementPolicy)
+    syncReceivedInputWithExpected(next)
   }
 
   const toggleSelectAllOrders = () => {
@@ -394,11 +481,11 @@ export function DriverSettlementView({
         : activeDriver.unsettledNonCashOrders
     if (selectedOrderIds.length === source.length) {
       setSelectedOrderIds([])
-      syncReceivedInputWithExpected([], settlementPolicy)
+      syncReceivedInputWithExpected([])
     } else {
       const allIds = source.map((o) => o.id)
       setSelectedOrderIds(allIds)
-      syncReceivedInputWithExpected(allIds, settlementPolicy)
+      syncReceivedInputWithExpected(allIds)
     }
   }
 
@@ -411,6 +498,9 @@ export function DriverSettlementView({
       return toast.error("Selecciona al menos un pedido para liquidar.")
     }
     if (modalMode === "cash") {
+      if (!isCashOpen) {
+        return toast.error("La caja de la sede está cerrada. Abre la caja antes de confirmar un cuadre de efectivo.")
+      }
       const parsed = Number(receivedCashInput)
       if (receivedCashInput.trim() === "" || isNaN(parsed) || parsed < 0) {
         return toast.error("Ingresa un valor válido de efectivo recibido.")
@@ -430,7 +520,10 @@ export function DriverSettlementView({
           driverId: activeDriver.driverId,
           driverName: activeDriver.driverName,
           orderIds: selectedOrderIds,
-          settlementMode: settlementPolicy,
+          settlementMode: settlementDeliveryMode,
+          driverPaymentMode,
+          driverPaymentRate: Number(driverPaymentRate) || 0,
+          driverPaymentAmount: Number(driverPaymentManualAmount) || 0,
           receivedCash: modalMode === "non_cash" ? 0 : Number(receivedCashInput),
           verifyNonCash: modalMode === "non_cash",
           registerInCash: modalMode === "cash" && registerInCash,
@@ -465,10 +558,12 @@ export function DriverSettlementView({
 
     const modeLabel =
       rec.settlementMode === "products_only"
-        ? "Solo Productos (Repartidor retiene envíos)"
+        ? "Solo Pedidos (Mercancía X)"
         : rec.settlementMode === "transfer_verification"
         ? "Verificación de Transferencias / Tarjetas"
-        : "Entrega Completa (Productos + Domicilios)"
+        : rec.settlementMode === "full"
+        ? "Entrega Total (Pedidos + Domicilios)"
+        : "Neto tras Pago a Domiciliario"
 
     const diffText =
       Math.abs(rec.difference) < 0.5
@@ -511,11 +606,16 @@ export function DriverSettlementView({
 
           <div class="row"><span>Valor en Pedidos (X):</span><span class="bold">${escapeHtml(formatCurrency(rec.productsTotal))}</span></div>
           <div class="row"><span>Valor en Domicilios (Y):</span><span class="bold">${escapeHtml(formatCurrency(rec.deliveryFeeTotal))}</span></div>
-          <div class="row"><span>Total Bruto (X + Y):</span><span>${escapeHtml(formatCurrency(rec.grossTotal))}</span></div>
+          <div class="row"><span>Total Cobrado (X + Y):</span><span>${escapeHtml(formatCurrency(rec.grossTotal))}</span></div>
+          ${
+            rec.driverPayment !== undefined && rec.driverPayment > 0
+              ? `<div class="row bold"><span>(-) Pago al Domiciliario:</span><span>-${escapeHtml(formatCurrency(rec.driverPayment))}</span></div>`
+              : ""
+          }
           <div class="line"></div>
 
-          <div class="row bold"><span>ESPERADO EN CAJA:</span><span>${escapeHtml(formatCurrency(rec.expectedCash))}</span></div>
-          <div class="row bold" style="font-size:14px;"><span>EFECTIVO RECIBIDO:</span><span>${escapeHtml(formatCurrency(rec.receivedCash))}</span></div>
+          <div class="row bold"><span>NETO ESPERADO EN CAJA:</span><span>${escapeHtml(formatCurrency(rec.expectedCash))}</span></div>
+          <div class="row bold" style="font-size:14px;"><span>EFECTIVO RECIBIDO EN CAJA:</span><span>${escapeHtml(formatCurrency(rec.receivedCash))}</span></div>
           <div class="row bold"><span>ESTADO:</span><span>${escapeHtml(diffText)}</span></div>
 
           ${rec.notes ? `<div class="line"></div><p style="text-align:left;">Nota: ${escapeHtml(rec.notes)}</p>` : ""}
@@ -584,35 +684,35 @@ export function DriverSettlementView({
                   {data.branch.name}
                 </Badge>
               )}
-              {data?.openSession ? (
+              {isCashOpen ? (
                 <Badge className="text-[11px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20 gap-1 font-semibold">
                   <IconCircleCheck className="h-3 w-3" />
                   {isDriverSelf ? "Caja de sede abierta (puedes liquidar)" : "Caja Abierta (Ingresa directo al arqueo)"}
                 </Badge>
               ) : (
-                <Badge variant="outline" className="text-[11px] text-amber-700 dark:text-amber-400 border-amber-500/30 bg-amber-500/10 gap-1">
+                <Badge variant="outline" className="text-[11px] text-amber-700 dark:text-amber-400 border-amber-500/30 bg-amber-500/10 gap-1 font-semibold">
                   <IconLock className="h-3 w-3" />
-                  {isDriverSelf ? "Caja de sede cerrada" : "Caja Cerrada (Solo liquida pedidos)"}
+                  {isDriverSelf ? "Caja de sede cerrada" : "Caja Cerrada · Restricción activa"}
                 </Badge>
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
               {isDriverSelf
-                ? "Consulta cuánto efectivo debes entregar en caja: valor en pedidos (X) más valor en domicilios (Y)."
-                : "Desglose exacto por repartidor: cuánto debe entregar por valor en pedidos (X) y por domicilios (Y) antes de marcar como pagado."}
+                ? "Consulta cuánto efectivo debes entregar en caja: valor en pedidos (X), valor en domicilios (Y) y tu pago devengado."
+                : "Desglose financiero por repartidor: valor en pedidos (X), tarifas de domicilio (Y) y pago al domiciliario antes del ingreso a caja."}
             </p>
           </div>
         ) : (
           <div className="flex items-center gap-2 flex-wrap">
-            {data?.openSession ? (
+            {isCashOpen ? (
               <Badge className="text-[11px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 gap-1 font-semibold">
                 <IconCircleCheck className="h-3 w-3" />
                 {isDriverSelf ? "Caja abierta" : "Caja Abierta · Ingresará al arqueo"}
               </Badge>
             ) : (
-              <Badge variant="outline" className="text-[11px] text-amber-700 dark:text-amber-400 border-amber-500/30 bg-amber-500/10 gap-1">
+              <Badge variant="outline" className="text-[11px] text-amber-700 dark:text-amber-400 border-amber-500/30 bg-amber-500/10 gap-1 font-semibold">
                 <IconLock className="h-3 w-3" />
-                {isDriverSelf ? "Caja cerrada" : "Caja Cerrada · Solo marca pagados"}
+                {isDriverSelf ? "Caja cerrada" : "Caja Cerrada · Restricción activa"}
               </Badge>
             )}
           </div>
@@ -644,6 +744,36 @@ export function DriverSettlementView({
         </div>
       </div>
 
+      {/* Alerta destacada cuando la caja de la sede está cerrada */}
+      {!isCashOpen && !isDriverSelf && (
+        <div className="p-3.5 rounded-2xl border border-amber-500/40 bg-amber-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs">
+          <div className="flex items-start gap-2.5">
+            <div className="h-8 w-8 rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0 mt-0.5">
+              <IconLock className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="font-bold text-amber-900 dark:text-amber-200">
+                Caja de la sede cerrada · Restricción de cuadre en efectivo
+              </p>
+              <p className="text-amber-800/90 dark:text-amber-300/90">
+                Para recibir o pagar efectivo y registrar el ingreso en el arqueo del turno, debes abrir la caja de la sede.
+              </p>
+            </div>
+          </div>
+          {onOpenCashRegister && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={onOpenCashRegister}
+              className="h-8 rounded-xl text-xs font-bold gap-1.5 shrink-0 bg-amber-600 hover:bg-amber-700 text-white shadow-xs"
+            >
+              <IconLockOpen className="h-3.5 w-3.5" />
+              Abrir Turno de Caja
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Aviso normativo para repartidores */}
       {isDriverSelf && (
         <div className="p-3 rounded-2xl border border-amber-500/30 bg-amber-500/5 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
@@ -654,7 +784,7 @@ export function DriverSettlementView({
         </div>
       )}
 
-      {/* KPI Strip: X en pedidos, Y en domicilios, Total X+Y, En ruta */}
+      {/* KPI Strip: X en pedidos, Y en domicilios, Total X+Y, Pago a domiciliario */}
       {summary && (
         isDriverSelf ? (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -735,82 +865,108 @@ export function DriverSettlementView({
             </Card>
           </div>
         ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Card className="rounded-2xl border bg-primary text-primary-foreground shadow-sm">
-            <CardContent className="p-4 flex flex-col justify-between h-full gap-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold text-primary-foreground/85 uppercase tracking-wider">
-                  Efectivo Total a Recibir
-                </span>
-                <IconCoins className="h-4 w-4 text-primary-foreground/85 shrink-0" />
-              </div>
-              <div>
-                <p className="text-2xl font-extrabold tabular-nums tracking-tight">
-                  {formatCurrency(summary.totalUnsettledGrossAmount)}
-                </p>
-                <p className="text-[11px] text-primary-foreground/85 mt-0.5">
-                  {summary.totalUnsettledCashOrders} entrega(s) en {summary.driversWithDebtCount} repartidor(es)
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Card className="rounded-2xl border bg-primary text-primary-foreground shadow-sm">
+              <CardContent className="p-4 flex flex-col justify-between h-full gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-primary-foreground/85 uppercase tracking-wider">
+                    Efectivo Total a Recibir
+                  </span>
+                  <IconCoins className="h-4 w-4 text-primary-foreground/85 shrink-0" />
+                </div>
+                <div>
+                  <p className="text-2xl font-extrabold tabular-nums tracking-tight">
+                    {formatCurrency(summary.totalUnsettledGrossAmount)}
+                  </p>
+                  <p className="text-[11px] text-primary-foreground/85 mt-0.5">
+                    {summary.totalUnsettledCashOrders} entrega(s) en {summary.driversWithDebtCount} repartidor(es)
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-xs">
-            <CardContent className="p-4 flex flex-col justify-between h-full gap-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Valor en Pedidos (X)
-                </span>
-                <IconPackage className="h-4 w-4 text-muted-foreground shrink-0" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold tabular-nums tracking-tight text-foreground">
-                  {formatCurrency(summary.totalUnsettledProductsAmount)}
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Valor mercancía / productos
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+            <Card className="rounded-2xl border bg-card shadow-xs">
+              <CardContent className="p-4 flex flex-col justify-between h-full gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    Valor en Pedidos (X)
+                  </span>
+                  <IconPackage className="h-4 w-4 text-muted-foreground shrink-0" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold tabular-nums tracking-tight text-foreground">
+                    {formatCurrency(summary.totalUnsettledProductsAmount)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Valor mercancía / productos
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-xs">
-            <CardContent className="p-4 flex flex-col justify-between h-full gap-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Valor en Domicilios (Y)
-                </span>
-                <IconMotorbike className="h-4 w-4 text-muted-foreground shrink-0" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold tabular-nums tracking-tight text-foreground">
-                  {formatCurrency(summary.totalUnsettledDeliveryFees)}
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Tarifas de envío cobradas
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+            <Card className="rounded-2xl border bg-card shadow-xs">
+              <CardContent className="p-4 flex flex-col justify-between h-full gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    Valor en Domicilios (Y)
+                  </span>
+                  <IconMotorbike className="h-4 w-4 text-muted-foreground shrink-0" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold tabular-nums tracking-tight text-foreground">
+                    {formatCurrency(summary.totalUnsettledDeliveryFees)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Tarifas de envío cobradas
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-xs">
-            <CardContent className="p-4 flex flex-col justify-between h-full gap-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  En Ruta / Por Verificar
-                </span>
-                <IconClock className="h-4 w-4 text-amber-500 shrink-0" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold tabular-nums tracking-tight text-foreground">
-                  {formatCurrency(summary.totalInTransitAmount)}
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  {summary.totalInTransitOrders} en camino · {summary.totalUnsettledNonCashOrders} transf. sin verificar
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+            <Card className="rounded-2xl border bg-card shadow-xs">
+              <CardContent className="p-4 flex flex-col justify-between h-full gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    Pago a Domiciliarios
+                  </span>
+                  <IconWallet className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold tabular-nums tracking-tight text-emerald-600 dark:text-emerald-400">
+                    {formatCurrency(summary.totalPendingDriverPayment ?? summary.totalUnsettledDeliveryFees)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Devengado por carreras pendientes
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Barra de estado secundario: En ruta, transferencias y liquidados hoy */}
+          <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-muted/40 border text-xs">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground font-medium">
+                <IconClock className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                En ruta: <strong className="text-foreground">{summary.totalInTransitOrders}</strong> ({formatCurrency(summary.totalInTransitAmount)})
+              </span>
+              <span className="text-muted-foreground/30">•</span>
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground font-medium">
+                <IconCreditCard className="h-3.5 w-3.5 text-sky-500 shrink-0" />
+                Transferencias por verificar: <strong className="text-foreground">{summary.totalUnsettledNonCashOrders}</strong> ({formatCurrency(summary.totalUnsettledNonCashAmount)})
+              </span>
+              {(summary.totalSettledTodayOrders ?? 0) > 0 && (
+                <>
+                  <span className="text-muted-foreground/30">•</span>
+                  <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold">
+                    <IconCircleCheck className="h-3.5 w-3.5 shrink-0" />
+                    Liquidados hoy: <strong>{summary.totalSettledTodayOrders}</strong> ({formatCurrency(summary.totalSettledTodayGrossAmount || 0)})
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
         </div>
         )
       )}
@@ -1294,20 +1450,32 @@ export function DriverSettlementView({
               </CardHeader>
               <CardContent className="p-3 flex flex-wrap gap-2">
                 {driversUpToDate.map((d) => (
-                  <div
+                  <button
                     key={d.driverKey}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-background border text-xs"
+                    type="button"
+                    onClick={() => {
+                      if (d.settledTodayCount > 0) {
+                        setViewSettledTodayDriver(d)
+                      }
+                    }}
+                    className={cn(
+                      "inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-background border text-xs transition-colors",
+                      d.settledTodayCount > 0
+                        ? "hover:border-primary/50 cursor-pointer group hover:bg-muted/30"
+                        : "opacity-80"
+                    )}
+                    title={d.settledTodayCount > 0 ? "Click para ver detalle de pedidos liquidados hoy" : undefined}
                   >
-                    <IconMotorbike className="h-3.5 w-3.5 text-muted-foreground" />
+                    <IconMotorbike className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary" />
                     <span className="font-semibold text-foreground">{d.driverName}</span>
                     {d.settledTodayCount > 0 ? (
-                      <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium tabular-nums">
-                        {d.settledTodayCount} liquidado(s) hoy · {formatCurrency(d.settledTodayGrossTotal)}
+                      <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium tabular-nums group-hover:underline">
+                        {d.settledTodayCount} liquidado(s) hoy · {formatCurrency(d.settledTodayGrossTotal)} ↗
                       </span>
                     ) : (
                       <span className="text-[11px] text-muted-foreground">Sin entregas pendientes</span>
                     )}
-                  </div>
+                  </button>
                 ))}
               </CardContent>
             </Card>
@@ -1318,108 +1486,239 @@ export function DriverSettlementView({
       {/* ==================== PESTAÑA 2: HISTORIAL DE CUADRES ==================== */}
       {activeTab === "history" && (
         <Card className="rounded-2xl border overflow-hidden shadow-xs">
-          <CardHeader className="border-b py-3.5 px-4">
-            <CardTitle className="text-sm font-bold flex items-center gap-2">
-              <IconReceipt2 className="h-4 w-4 text-primary" />
-              Cuadres de Caja Registrados
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Registro auditable de cada entrega de efectivo recibida por cajeros o administradores.
-            </CardDescription>
+          <CardHeader className="border-b py-3.5 px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-sm font-bold flex items-center gap-2">
+                <IconReceipt2 className="h-4 w-4 text-primary" />
+                Historial de Cuadres y Liquidaciones
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Registro auditable de cada entrega de efectivo recibida por cajeros y detalle de pedidos liquidados.
+              </CardDescription>
+            </div>
+
+            {/* Sub-selector de vista: Comprobantes vs Pedidos Liquidados Hoy */}
+            <div className="inline-flex rounded-xl bg-muted p-1 gap-1 border self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setHistorySubTab("receipts")}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer",
+                  historySubTab === "receipts"
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <IconReceipt2 className="h-3.5 w-3.5" />
+                Comprobantes de Cuadre ({data?.history?.length || 0})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistorySubTab("today_settled")}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer",
+                  historySubTab === "today_settled"
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <IconCircleCheck className="h-3.5 w-3.5 text-emerald-600" />
+                Entregas Liquidadas Hoy ({data?.todaySettledOrders?.length || 0})
+              </button>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
-            {!data?.history || data.history.length === 0 ? (
-              <div className="py-12 text-center text-muted-foreground space-y-1.5">
-                <IconHistory className="h-9 w-9 mx-auto opacity-40" />
-                <p className="text-sm font-medium">Aún no hay cuadres registrados</p>
-                <p className="text-xs">Cuando recibas el efectivo de un domiciliario aparecerá aquí su comprobante.</p>
-              </div>
+            {historySubTab === "receipts" ? (
+              !data?.history || data.history.length === 0 ? (
+                <div className="py-12 text-center text-muted-foreground space-y-2 p-4">
+                  <IconHistory className="h-9 w-9 mx-auto opacity-40" />
+                  <p className="text-sm font-medium">Aún no hay comprobantes formales emitidos</p>
+                  <p className="text-xs max-w-md mx-auto">
+                    Cuando confirmes un cuadre con un domiciliario aparecerá aquí su comprobante con el desglose de lo entregado a caja y lo pagado al repartidor.
+                  </p>
+                  {(data?.todaySettledOrders?.length ?? 0) > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setHistorySubTab("today_settled")}
+                      className="rounded-xl text-xs gap-1.5 mt-2"
+                    >
+                      <IconCircleCheck className="h-3.5 w-3.5 text-emerald-600" />
+                      Ver {data?.todaySettledOrders?.length} entrega(s) ya liquidadas hoy ({formatCurrency(summary?.totalSettledTodayGrossAmount || 0)})
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader className="bg-muted/30">
+                      <TableRow>
+                        <TableHead className="text-xs">Comprobante / Fecha</TableHead>
+                        <TableHead className="text-xs">Domiciliario</TableHead>
+                        <TableHead className="text-xs text-center">Pedidos</TableHead>
+                        <TableHead className="text-xs text-right">Pedidos (X)</TableHead>
+                        <TableHead className="text-xs text-right">Domicilios (Y)</TableHead>
+                        <TableHead className="text-xs text-right">Pago Domiciliario</TableHead>
+                        <TableHead className="text-xs text-right">Recibido en Caja</TableHead>
+                        <TableHead className="text-xs text-center">Estado</TableHead>
+                        <TableHead className="text-xs">Recibió</TableHead>
+                        <TableHead className="text-xs text-right">Imprimir</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {data.history.map((h) => {
+                        const diff = Number(h.difference || 0)
+                        return (
+                          <TableRow key={h.id} className="hover:bg-muted/20">
+                            <TableCell className="text-xs whitespace-nowrap">
+                              <span className="font-mono font-bold text-foreground block">{h.settlementRef}</span>
+                              <span className="text-[10px] text-muted-foreground">{formatDateTime(h.settledAt || h.createdAt)}</span>
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              <span className="font-bold text-foreground block">{h.driverName}</span>
+                              <span className="text-[10px] text-muted-foreground">
+                                {h.settlementMode === "products_only"
+                                  ? "Solo pedidos (retuvo envíos)"
+                                  : h.settlementMode === "transfer_verification"
+                                  ? "Verificación transferencias"
+                                  : h.settlementMode === "full"
+                                  ? "Entrega total (X + Y)"
+                                  : "Neto tras pago domiciliario"}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-xs text-center font-bold tabular-nums">
+                              {h.orderCount}
+                            </TableCell>
+                            <TableCell className="text-xs text-right font-mono tabular-nums">
+                              {formatCurrency(h.productsTotal)}
+                            </TableCell>
+                            <TableCell className="text-xs text-right font-mono tabular-nums text-muted-foreground">
+                              {formatCurrency(h.deliveryFeeTotal)}
+                            </TableCell>
+                            <TableCell className="text-xs text-right font-mono tabular-nums text-emerald-600 dark:text-emerald-400 font-semibold">
+                              {formatCurrency(h.driverPayment ?? (h.settlementMode === "products_only" ? h.deliveryFeeTotal : 0))}
+                            </TableCell>
+                            <TableCell className="text-xs text-right font-mono font-bold tabular-nums text-foreground">
+                              {formatCurrency(h.receivedCash)}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {h.verifyNonCash ? (
+                                <Badge variant="outline" className="text-[10px] border-sky-500/30 text-sky-700 dark:text-sky-300">
+                                  Verificado
+                                </Badge>
+                              ) : Math.abs(diff) < 0.5 ? (
+                                <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20 text-[10px]">
+                                  Cuadrado
+                                </Badge>
+                              ) : diff < 0 ? (
+                                <Badge variant="outline" className="text-[10px] border-destructive/40 text-destructive tabular-nums">
+                                  Faltante {formatCurrency(Math.abs(diff))}
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-600 tabular-nums">
+                                  Sobrante +{formatCurrency(diff)}
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {h.settledBy}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handlePrintReceipt(h)}
+                                className="h-8 w-8 rounded-lg cursor-pointer"
+                                title="Imprimir comprobante de cuadre"
+                              >
+                                <IconPrinter className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader className="bg-muted/30">
-                    <TableRow>
-                      <TableHead className="text-xs">Comprobante / Fecha</TableHead>
-                      <TableHead className="text-xs">Domiciliario</TableHead>
-                      <TableHead className="text-xs text-center">Pedidos</TableHead>
-                      <TableHead className="text-xs text-right">Pedidos (X)</TableHead>
-                      <TableHead className="text-xs text-right">Domicilios (Y)</TableHead>
-                      <TableHead className="text-xs text-right">Recibido</TableHead>
-                      <TableHead className="text-xs text-center">Estado</TableHead>
-                      <TableHead className="text-xs">Recibió</TableHead>
-                      <TableHead className="text-xs text-right">Imprimir</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.history.map((h) => {
-                      const diff = Number(h.difference || 0)
-                      return (
-                        <TableRow key={h.id} className="hover:bg-muted/20">
-                          <TableCell className="text-xs whitespace-nowrap">
-                            <span className="font-mono font-bold text-foreground block">{h.settlementRef}</span>
-                            <span className="text-[10px] text-muted-foreground">{formatDateTime(h.settledAt || h.createdAt)}</span>
-                          </TableCell>
-                          <TableCell className="text-xs">
-                            <span className="font-bold text-foreground block">{h.driverName}</span>
-                            <span className="text-[10px] text-muted-foreground">
-                              {h.settlementMode === "products_only"
-                                ? "Solo productos (retuvo envíos)"
-                                : h.settlementMode === "transfer_verification"
-                                ? "Verificación transferencias"
-                                : "Entrega completa (X + Y)"}
+              /* Subpestaña: Entregas Liquidadas Hoy */
+              !data?.todaySettledOrders || data.todaySettledOrders.length === 0 ? (
+                <div className="py-12 text-center text-muted-foreground space-y-1.5 p-4">
+                  <IconCircleCheck className="h-9 w-9 mx-auto opacity-40 text-emerald-500" />
+                  <p className="text-sm font-medium">No hay entregas liquidadas registradas hoy</p>
+                  <p className="text-xs">Los pedidos marcados como pagados hoy aparecerán listados aquí con su desglose.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader className="bg-muted/30">
+                      <TableRow>
+                        <TableHead className="text-xs">Orden / Fecha</TableHead>
+                        <TableHead className="text-xs">Domiciliario</TableHead>
+                        <TableHead className="text-xs">Cliente / Dirección</TableHead>
+                        <TableHead className="text-xs text-right">Pedidos (X)</TableHead>
+                        <TableHead className="text-xs text-right">Domicilio (Y)</TableHead>
+                        <TableHead className="text-xs text-right">Total</TableHead>
+                        <TableHead className="text-xs text-center">Método</TableHead>
+                        <TableHead className="text-xs text-center">Estado</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {data.todaySettledOrders.map((o) => (
+                        <TableRow key={o.id} className="hover:bg-muted/20">
+                          <TableCell className="text-xs whitespace-nowrap font-mono font-bold">
+                            {o.orderNumber}
+                            <span className="block text-[10px] font-sans font-normal text-muted-foreground">
+                              {o.deliveredAt ? formatDateTime(o.deliveredAt) : formatDateTime(o.createdAt)}
                             </span>
                           </TableCell>
-                          <TableCell className="text-xs text-center font-bold tabular-nums">
-                            {h.orderCount}
+                          <TableCell className="text-xs font-semibold text-foreground">
+                            {o.driverName}
+                          </TableCell>
+                          <TableCell className="text-xs max-w-[200px]">
+                            <p className="font-medium truncate text-foreground">{o.customerName}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">{o.deliveryAddress || "Sin dirección"}</p>
                           </TableCell>
                           <TableCell className="text-xs text-right font-mono tabular-nums">
-                            {formatCurrency(h.productsTotal)}
+                            {formatCurrency(o.productsAmount)}
                           </TableCell>
-                          <TableCell className="text-xs text-right font-mono tabular-nums">
-                            {formatCurrency(h.deliveryFeeTotal)}
+                          <TableCell className="text-xs text-right font-mono tabular-nums text-muted-foreground">
+                            {formatCurrency(o.deliveryFee)}
                           </TableCell>
                           <TableCell className="text-xs text-right font-mono font-bold tabular-nums text-foreground">
-                            {formatCurrency(h.receivedCash)}
+                            {formatCurrency(o.total)}
+                          </TableCell>
+                          <TableCell className="text-center text-[11px] capitalize text-muted-foreground">
+                            {o.paymentMethod}
                           </TableCell>
                           <TableCell className="text-center">
-                            {h.verifyNonCash ? (
-                              <Badge variant="outline" className="text-[10px] border-sky-500/30 text-sky-700 dark:text-sky-300">
-                                Verificado
-                              </Badge>
-                            ) : Math.abs(diff) < 0.5 ? (
-                              <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20 text-[10px]">
-                                Cuadrado
-                              </Badge>
-                            ) : diff < 0 ? (
-                              <Badge variant="outline" className="text-[10px] border-destructive/40 text-destructive tabular-nums">
-                                Faltante {formatCurrency(Math.abs(diff))}
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-600 tabular-nums">
-                                Sobrante +{formatCurrency(diff)}
-                              </Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {h.settledBy}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handlePrintReceipt(h)}
-                              className="h-8 w-8 rounded-lg"
-                              title="Imprimir comprobante de cuadre"
-                            >
-                              <IconPrinter className="h-4 w-4" />
-                            </Button>
+                            <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-[10px]">
+                              Liquidado
+                            </Badge>
                           </TableCell>
                         </TableRow>
-                      )
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
+                      ))}
+                      <TableRow className="bg-muted/30 font-bold border-t-2">
+                        <TableCell colSpan={3} className="text-xs uppercase text-muted-foreground">
+                          Totales Liquidados Hoy ({data.todaySettledOrders.length} pedidos)
+                        </TableCell>
+                        <TableCell className="text-xs text-right font-mono tabular-nums">
+                          {formatCurrency(data.todaySettledOrders.reduce((a, o) => a + o.productsAmount, 0))}
+                        </TableCell>
+                        <TableCell className="text-xs text-right font-mono tabular-nums">
+                          {formatCurrency(data.todaySettledOrders.reduce((a, o) => a + o.deliveryFee, 0))}
+                        </TableCell>
+                        <TableCell className="text-sm text-right font-mono font-extrabold text-primary tabular-nums">
+                          {formatCurrency(data.todaySettledOrders.reduce((a, o) => a + o.total, 0))}
+                        </TableCell>
+                        <TableCell colSpan={2}></TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              )
             )}
           </CardContent>
         </Card>
@@ -1460,80 +1759,197 @@ export function DriverSettlementView({
               </DialogHeader>
 
               <div className="space-y-4 pt-1">
-                {/* Selector de modalidad si es cuadre en efectivo */}
+                {/* Regla de pago al domiciliario y modalidad de entrega */}
                 {modalMode === "cash" && (
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold">¿Qué entrega el domiciliario en caja?</Label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSettlementPolicy("full")
-                          syncReceivedInputWithExpected(selectedOrderIds, "full")
-                        }}
-                        className={cn(
-                          "p-3 rounded-xl border text-left transition-colors active:scale-[0.98] cursor-pointer",
-                          settlementPolicy === "full"
-                            ? "border-primary bg-primary/10 ring-1 ring-primary/30"
-                            : "border-border hover:bg-muted/40"
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-bold text-foreground">
-                            Entrega Completa (Pedidos + Domicilios)
-                          </span>
-                          <Badge variant="outline" className="text-[10px] font-mono tabular-nums">
-                            X + Y
-                          </Badge>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          Entrega todo lo recaudado: mercancía ({formatCurrency(selectionTotals.productsTotal)}) + envíos ({formatCurrency(selectionTotals.deliveryFeeTotal)}).
-                        </p>
-                      </button>
+                  <div className="space-y-3">
+                    {/* Sección 1: Cuánto se le paga al domiciliario */}
+                    <div className="space-y-2 p-3.5 rounded-2xl border bg-muted/20">
+                      <div className="flex items-center justify-between gap-2">
+                        <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                          <IconWallet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                          ¿Cuánto se le paga al domiciliario por estas entregas?
+                        </Label>
+                        <Badge variant="outline" className="text-[11px] font-mono text-emerald-700 dark:text-emerald-300 font-bold border-emerald-500/30 bg-emerald-500/10">
+                          Pago: {formatCurrency(selectionTotals.driverPayment)}
+                        </Badge>
+                      </div>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSettlementPolicy("products_only")
-                          syncReceivedInputWithExpected(selectedOrderIds, "products_only")
-                        }}
-                        className={cn(
-                          "p-3 rounded-xl border text-left transition-colors active:scale-[0.98] cursor-pointer",
-                          settlementPolicy === "products_only"
-                            ? "border-primary bg-primary/10 ring-1 ring-primary/30"
-                            : "border-border hover:bg-muted/40"
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-bold text-foreground">
-                            Solo Pedidos (Retiene sus domicilios)
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDriverPaymentMode("full_delivery_fee")
+                            syncReceivedInputWithExpected(selectedOrderIds, "full_delivery_fee", driverPaymentRate, driverPaymentManualAmount, settlementDeliveryMode)
+                          }}
+                          className={cn(
+                            "p-2.5 rounded-xl border text-left transition-colors cursor-pointer text-xs",
+                            driverPaymentMode === "full_delivery_fee"
+                              ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/30"
+                              : "border-border hover:bg-muted/40"
+                          )}
+                        >
+                          <span className="font-bold text-foreground block">100% de Envíos</span>
+                          <span className="text-[10px] text-muted-foreground block truncate">
+                            {formatCurrency(selectionTotals.deliveryFeeTotal)}
                           </span>
-                          <Badge variant="outline" className="text-[10px] font-mono tabular-nums">
-                            Solo X
-                          </Badge>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDriverPaymentMode("per_order")
+                            syncReceivedInputWithExpected(selectedOrderIds, "per_order", driverPaymentRate, driverPaymentManualAmount, settlementDeliveryMode)
+                          }}
+                          className={cn(
+                            "p-2.5 rounded-xl border text-left transition-colors cursor-pointer text-xs",
+                            driverPaymentMode === "per_order"
+                              ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/30"
+                              : "border-border hover:bg-muted/40"
+                          )}
+                        >
+                          <span className="font-bold text-foreground block">Por Pedido</span>
+                          <span className="text-[10px] text-muted-foreground block truncate">
+                            ${Number(driverPaymentRate).toLocaleString("es-CO")} c/u
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDriverPaymentMode("manual")
+                            syncReceivedInputWithExpected(selectedOrderIds, "manual", driverPaymentRate, driverPaymentManualAmount, settlementDeliveryMode)
+                          }}
+                          className={cn(
+                            "p-2.5 rounded-xl border text-left transition-colors cursor-pointer text-xs",
+                            driverPaymentMode === "manual"
+                              ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/30"
+                              : "border-border hover:bg-muted/40"
+                          )}
+                        >
+                          <span className="font-bold text-foreground block">Monto Fijo</span>
+                          <span className="text-[10px] text-muted-foreground block truncate">Personalizado</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDriverPaymentMode("none")
+                            syncReceivedInputWithExpected(selectedOrderIds, "none", driverPaymentRate, driverPaymentManualAmount, settlementDeliveryMode)
+                          }}
+                          className={cn(
+                            "p-2.5 rounded-xl border text-left transition-colors cursor-pointer text-xs",
+                            driverPaymentMode === "none"
+                              ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/30"
+                              : "border-border hover:bg-muted/40"
+                          )}
+                        >
+                          <span className="font-bold text-foreground block">Sin Comisión</span>
+                          <span className="text-[10px] text-muted-foreground block truncate">Sueldo fijo / $0</span>
+                        </button>
+                      </div>
+
+                      {/* Inputs complementarios si seleccionó Por Pedido o Manual */}
+                      {driverPaymentMode === "per_order" && (
+                        <div className="flex items-center gap-2 pt-1 flex-wrap">
+                          <Label className="text-xs text-muted-foreground whitespace-nowrap">Tarifa pagada por entrega:</Label>
+                          <Input
+                            type="number"
+                            value={driverPaymentRate}
+                            onChange={(e) => {
+                              setDriverPaymentRate(e.target.value)
+                              syncReceivedInputWithExpected(selectedOrderIds, "per_order", e.target.value, driverPaymentManualAmount, settlementDeliveryMode)
+                            }}
+                            className="h-8 text-xs w-32 rounded-lg font-mono font-bold"
+                            placeholder="3000"
+                          />
+                          <span className="text-xs text-muted-foreground font-mono">
+                            × {selectionTotals.count} = {formatCurrency(selectionTotals.driverPayment)}
+                          </span>
                         </div>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          El repartidor conserva {formatCurrency(selectionTotals.deliveryFeeTotal)} de envíos y entrega {formatCurrency(selectionTotals.productsTotal)} en caja.
-                        </p>
-                      </button>
+                      )}
+
+                      {driverPaymentMode === "manual" && (
+                        <div className="flex items-center gap-2 pt-1 flex-wrap">
+                          <Label className="text-xs text-muted-foreground whitespace-nowrap">Monto exacto a pagar al domiciliario:</Label>
+                          <Input
+                            type="number"
+                            value={driverPaymentManualAmount}
+                            onChange={(e) => {
+                              setDriverPaymentManualAmount(e.target.value)
+                              syncReceivedInputWithExpected(selectedOrderIds, "manual", driverPaymentRate, e.target.value, settlementDeliveryMode)
+                            }}
+                            className="h-8 text-xs w-36 rounded-lg font-mono font-bold"
+                            placeholder="0"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Sección 2: ¿Cómo se entrega el dinero físico? */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold">¿Cómo entrega el dinero el domiciliario?</Label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSettlementDeliveryMode("driver_retains_pay")
+                            syncReceivedInputWithExpected(selectedOrderIds, driverPaymentMode, driverPaymentRate, driverPaymentManualAmount, "driver_retains_pay")
+                          }}
+                          className={cn(
+                            "p-3 rounded-xl border text-left transition-colors cursor-pointer",
+                            settlementDeliveryMode === "driver_retains_pay"
+                              ? "border-primary bg-primary/10 ring-1 ring-primary/30"
+                              : "border-border hover:bg-muted/40"
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-foreground">
+                              Domiciliario retiene su pago
+                            </span>
+                            <Badge variant="outline" className="text-[10px] font-mono">
+                              Recomendado
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            El repartidor conserva {formatCurrency(selectionTotals.driverPayment)} de su trabajo y entrega a caja el saldo neto de {formatCurrency(selectionTotals.expectedCash)}.
+                          </p>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSettlementDeliveryMode("full")
+                            syncReceivedInputWithExpected(selectedOrderIds, driverPaymentMode, driverPaymentRate, driverPaymentManualAmount, "full")
+                          }}
+                          className={cn(
+                            "p-3 rounded-xl border text-left transition-colors cursor-pointer",
+                            settlementDeliveryMode === "full"
+                              ? "border-primary bg-primary/10 ring-1 ring-primary/30"
+                              : "border-border hover:bg-muted/40"
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-foreground">
+                              Entrega todo el efectivo recaudado
+                            </span>
+                            <Badge variant="outline" className="text-[10px] font-mono">
+                              X + Y
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            El repartidor entrega todo ({formatCurrency(selectionTotals.grossTotal)}) a caja y la tienda le desembolsa su pago por separado.
+                          </p>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {/* Tarjeta resumen live de X, Y y Esperado */}
+                {/* Tarjeta resumen live de X, Y, Pago Domiciliario y Neto a Caja */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 rounded-2xl border bg-muted/30">
                   <div className="p-2.5 rounded-xl bg-background border">
-                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
-                      Seleccionados
-                    </span>
-                    <span className="text-base font-bold tabular-nums text-foreground">
-                      {selectionTotals.count} / {selectionTotals.totalAvailable} ped
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-background border">
-                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
-                      Pedidos (X)
+                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block truncate">
+                      Pedidos (Mercancía X)
                     </span>
                     <span className="text-base font-bold tabular-nums text-foreground">
                       {formatCurrency(selectionTotals.productsTotal)}
@@ -1541,17 +1957,26 @@ export function DriverSettlementView({
                   </div>
 
                   <div className="p-2.5 rounded-xl bg-background border">
-                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
-                      Domicilios (Y)
+                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block truncate">
+                      Domicilios (Tarifas Y)
                     </span>
                     <span className="text-base font-bold tabular-nums text-foreground">
                       {formatCurrency(selectionTotals.deliveryFeeTotal)}
                     </span>
                   </div>
 
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                    <span className="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-400 block truncate">
+                      (-) Pago Domiciliario
+                    </span>
+                    <span className="text-base font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                      {formatCurrency(selectionTotals.driverPayment)}
+                    </span>
+                  </div>
+
                   <div className="p-2.5 rounded-xl bg-primary text-primary-foreground">
-                    <span className="text-[10px] uppercase font-bold text-primary-foreground/85 block">
-                      {modalMode === "non_cash" ? "Total a Verificar" : "Debe Entregar"}
+                    <span className="text-[10px] uppercase font-bold text-primary-foreground/85 block truncate">
+                      {modalMode === "non_cash" ? "Total a Verificar" : "Neto a Entregar en Caja"}
                     </span>
                     <span className="text-base font-extrabold tabular-nums">
                       {formatCurrency(
@@ -1727,7 +2152,7 @@ export function DriverSettlementView({
 
                 {/* Integración con caja activa + notas */}
                 <div className="space-y-2.5">
-                  {modalMode === "cash" && data?.openSession ? (
+                  {modalMode === "cash" && isCashOpen ? (
                     <label className="flex items-start gap-2.5 p-3 rounded-xl border bg-emerald-500/5 border-emerald-500/25 cursor-pointer select-none">
                       <input
                         type="checkbox"
@@ -1740,16 +2165,33 @@ export function DriverSettlementView({
                           Sumar {formatCurrency(liveReceived)} a la sesión de Caja abierta actual
                         </p>
                         <p className="text-[11px] text-muted-foreground">
-                          Registrará automáticamente el ingreso en Caja y Arqueo e Ingresos/Egresos para que el cierre de caja cuadre exacto.
+                          Registrará automáticamente el ingreso neto en Caja y Arqueo e Ingresos/Egresos para que el cierre de caja cuadre exacto.
                         </p>
                       </div>
                     </label>
                   ) : modalMode === "cash" ? (
-                    <div className="p-3 rounded-xl border bg-amber-500/5 border-amber-500/25 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2">
-                      <IconAlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                      <span>
-                        No hay una caja abierta en esta sede. Puedes liquidar los pedidos para marcarlos como <strong>Pagados</strong> y guardar el comprobante del cuadre, pero no se sumará a ninguna sesión de caja física.
-                      </span>
+                    <div className="p-3.5 rounded-xl border border-destructive/40 bg-destructive/10 text-xs text-destructive flex items-start gap-2.5">
+                      <IconLock className="h-5 w-5 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <p className="font-bold">Caja cerrada: No se puede confirmar cuadre en efectivo</p>
+                        <p className="text-[11px] text-destructive/90">
+                          Para que el dinero entregado ingrese correctamente al arqueo del turno, debes abrir la caja de la sede antes de confirmar.
+                        </p>
+                        {onOpenCashRegister && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => {
+                              setActiveDriver(null)
+                              onOpenCashRegister()
+                            }}
+                            className="mt-1 h-7 text-xs rounded-lg bg-destructive hover:bg-destructive/90 text-destructive-foreground font-semibold cursor-pointer"
+                          >
+                            <IconLockOpen className="h-3 w-3 mr-1" />
+                            Abrir Caja Ahora
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   ) : null}
 
@@ -1772,16 +2214,16 @@ export function DriverSettlementView({
                   variant="outline"
                   size="sm"
                   onClick={() => setActiveDriver(null)}
-                  className="rounded-xl text-xs"
+                  className="rounded-xl text-xs cursor-pointer"
                 >
                   Cancelar
                 </Button>
                 <Button
                   type="button"
                   size="sm"
-                  disabled={submitting || selectionTotals.count === 0}
+                  disabled={submitting || selectionTotals.count === 0 || (modalMode === "cash" && !isCashOpen)}
                   onClick={handleConfirmSettlement}
-                  className="rounded-xl text-xs font-bold gap-1.5 shadow-xs active:scale-[0.96] transition-transform duration-150"
+                  className="rounded-xl text-xs font-bold gap-1.5 shadow-xs active:scale-[0.96] transition-transform duration-150 cursor-pointer"
                 >
                   {submitting ? (
                     <IconLoader2 className="h-4 w-4 animate-spin" />
@@ -1790,7 +2232,7 @@ export function DriverSettlementView({
                   )}
                   {modalMode === "non_cash"
                     ? `Confirmar ${selectionTotals.count} Transferencia(s) Pagadas`
-                    : `Confirmar Cuadre y Marcar ${selectionTotals.count} Pagados`}
+                    : `Confirmar Cuadre (${formatCurrency(selectionTotals.expectedCash)})`}
                 </Button>
               </DialogFooter>
             </>
@@ -1819,13 +2261,19 @@ export function DriverSettlementView({
                   <span className="font-mono font-bold text-foreground">{completedReceipt.settlementRef}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Valor Pedidos (X):</span>
+                  <span className="text-muted-foreground">Valor Pedidos (Mercancía X):</span>
                   <span className="font-mono font-bold tabular-nums">{formatCurrency(completedReceipt.productsTotal)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Valor Domicilios (Y):</span>
+                  <span className="text-muted-foreground">Valor Domicilios (Tarifas Y):</span>
                   <span className="font-mono font-bold tabular-nums">{formatCurrency(completedReceipt.deliveryFeeTotal)}</span>
                 </div>
+                {completedReceipt.driverPayment !== undefined && completedReceipt.driverPayment > 0 && (
+                  <div className="flex justify-between text-emerald-700 dark:text-emerald-300 font-semibold">
+                    <span>Pago al Domiciliario:</span>
+                    <span className="font-mono tabular-nums">{formatCurrency(completedReceipt.driverPayment)}</span>
+                  </div>
+                )}
                 <Separator />
                 <div className="flex justify-between text-sm font-extrabold text-foreground">
                   <span>Efectivo recibido en Caja:</span>
@@ -1839,7 +2287,7 @@ export function DriverSettlementView({
                   variant="outline"
                   size="sm"
                   onClick={() => handlePrintReceipt(completedReceipt)}
-                  className="rounded-xl text-xs gap-1.5"
+                  className="rounded-xl text-xs gap-1.5 cursor-pointer"
                 >
                   <IconPrinter className="h-4 w-4" />
                   Imprimir Comprobante
@@ -1851,7 +2299,7 @@ export function DriverSettlementView({
                     setActiveDriver(null)
                     setCompletedReceipt(null)
                   }}
-                  className="rounded-xl text-xs font-bold"
+                  className="rounded-xl text-xs font-bold cursor-pointer"
                 >
                   Listo
                 </Button>
@@ -1919,6 +2367,113 @@ export function DriverSettlementView({
 
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setInTransitDriver(null)} className="rounded-xl text-xs">
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ==================== MODAL: ENTREGAS LIQUIDADAS HOY DE UN DOMICILIARIO ==================== */}
+      <Dialog open={Boolean(viewSettledTodayDriver)} onOpenChange={(o) => !o && setViewSettledTodayDriver(null)}>
+        <DialogContent className="max-w-2xl rounded-2xl p-5">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <IconCircleCheck className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              Entregas Liquidadas Hoy — {viewSettledTodayDriver?.driverName}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Detalle pedido por pedido de las entregas liquidadas y pagadas hoy.
+            </DialogDescription>
+          </DialogHeader>
+
+          {viewSettledTodayDriver && (
+            <div className="space-y-3.5">
+              <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-muted/40 border">
+                <div className="p-2.5 rounded-xl bg-background border text-center">
+                  <span className="text-[10px] uppercase font-semibold text-muted-foreground block truncate">
+                    Pedidos (Mercancía X)
+                  </span>
+                  <span className="text-base font-bold tabular-nums text-foreground">
+                    {formatCurrency(viewSettledTodayDriver.settledTodayProductsTotal)}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-background border text-center">
+                  <span className="text-[10px] uppercase font-semibold text-muted-foreground block truncate">
+                    Domicilios (Tarifas Y)
+                  </span>
+                  <span className="text-base font-bold tabular-nums text-foreground">
+                    {formatCurrency(viewSettledTodayDriver.settledTodayDeliveryTotal)}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/25 text-center">
+                  <span className="text-[10px] uppercase font-bold text-primary block truncate">
+                    Total Liquidado
+                  </span>
+                  <span className="text-base font-extrabold tabular-nums text-primary">
+                    {formatCurrency(viewSettledTodayDriver.settledTodayGrossTotal)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="max-h-72 overflow-y-auto rounded-xl border">
+                <Table>
+                  <TableHeader className="bg-muted/40 sticky top-0 z-10">
+                    <TableRow>
+                      <TableHead className="text-xs">Orden</TableHead>
+                      <TableHead className="text-xs">Cliente / Hora</TableHead>
+                      <TableHead className="text-xs text-right">Pedidos (X)</TableHead>
+                      <TableHead className="text-xs text-right">Domicilio (Y)</TableHead>
+                      <TableHead className="text-xs text-right">Total</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {!viewSettledTodayDriver.settledTodayOrders || viewSettledTodayDriver.settledTodayOrders.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-xs text-muted-foreground py-6">
+                          {viewSettledTodayDriver.settledTodayCount} pedido(s) liquidados hoy en sistema.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      viewSettledTodayDriver.settledTodayOrders.map((o) => (
+                        <TableRow key={o.id}>
+                          <TableCell className="font-mono text-xs font-bold whitespace-nowrap">
+                            {o.orderNumber}
+                            <span className="block text-[10px] font-sans font-normal text-muted-foreground capitalize">
+                              {o.paymentMethod}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-xs max-w-[200px]">
+                            <p className="font-medium text-foreground truncate">{o.customerName}</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {o.deliveredAt ? formatDateTime(o.deliveredAt) : formatDateTime(o.createdAt)}
+                            </p>
+                          </TableCell>
+                          <TableCell className="text-xs text-right font-mono tabular-nums">
+                            {formatCurrency(o.productsAmount)}
+                          </TableCell>
+                          <TableCell className="text-xs text-right font-mono tabular-nums text-muted-foreground">
+                            {formatCurrency(o.deliveryFee)}
+                          </TableCell>
+                          <TableCell className="text-xs text-right font-mono font-bold tabular-nums text-foreground">
+                            {formatCurrency(o.total)}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setViewSettledTodayDriver(null)}
+              className="rounded-xl text-xs cursor-pointer"
+            >
               Cerrar
             </Button>
           </DialogFooter>

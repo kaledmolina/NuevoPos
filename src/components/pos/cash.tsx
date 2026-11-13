@@ -383,6 +383,8 @@ export default function CashView() {
           onSettled={() => {
             load()
           }}
+          onOpenCashRegister={() => setOpenOpen(true)}
+          isCashRegisterOpen={Boolean(current)}
         />
       )}
 

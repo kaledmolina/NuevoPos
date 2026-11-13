@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 
 export const dynamic = "force-dynamic"
 
-export interface CuratedModel {
+interface CuratedModel {
   id: string
   name: string
   provider: string
@@ -12,7 +12,7 @@ export interface CuratedModel {
   isFree?: boolean
 }
 
-export const CURATED_OPENROUTER_MODELS: CuratedModel[] = [
+const CURATED_OPENROUTER_MODELS: CuratedModel[] = [
   // --- MODELOS 100% GRATUITOS (0 COSTO / AHORRO TOTAL DE TOKENS) ---
   {
     id: "openrouter/free",
