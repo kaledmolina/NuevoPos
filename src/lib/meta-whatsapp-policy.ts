@@ -557,3 +557,258 @@ export async function syncMetaCloudTemplates(branchId?: string | null, explicitW
     }
   }
 }
+
+/**
+ * Crea una plantilla oficial de WhatsApp en Meta Cloud API
+ * y la registra en la base de datos con estado PENDING/APPROVED.
+ */
+export async function createMetaCloudTemplate(params: {
+  branchId?: string | null
+  name: string
+  category: "MARKETING" | "UTILITY" | "AUTHENTICATION"
+  language?: string
+  bodyText: string
+  headerText?: string
+  footerText?: string
+}) {
+  const { branchId, name, category, language = "es", bodyText, headerText, footerText } = params
+
+  // 1. Obtener credenciales
+  const config = branchId
+    ? await db.whatsAppConfig.findUnique({ where: { branchId } })
+    : await db.whatsAppConfig.findFirst()
+
+  const rawToken = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
+  const phoneId = config?.metaPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
+
+  const token = rawToken ? rawToken.replace(/[\u2022\u2023\u25E6\u2043\u2219•]/g, "").trim() : ""
+  if (!token || !phoneId) {
+    return {
+      ok: false,
+      error: "No hay Token o Phone Number ID de Meta configurado en esta sede.",
+    }
+  }
+
+  // 2. Obtener WABA ID
+  const wabaId = await findWabaId(token, phoneId, null, branchId)
+  if (!wabaId) {
+    return {
+      ok: false,
+      requiresWabaId: true,
+      error: "Se requiere el WABA ID para enviar plantillas a Meta. Vincúlalo en la pestaña Difusión.",
+    }
+  }
+
+  // 3. Normalizar nombre (Meta solo admite minúsculas, números y guiones bajos: ^[a-z0-9_]+$)
+  let cleanName = name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "")
+    .slice(0, 512)
+
+  if (!cleanName) {
+    return {
+      ok: false,
+      error: "El nombre de la plantilla debe contener letras o números (ej: promo_navidad_2026).",
+    }
+  }
+
+  // 4. Normalizar texto de la plantilla: convertir {{nombre}} o {{saldo}} a variables posicionales de Meta {{1}}, {{2}}
+  let metaBodyText = bodyText
+    .replace(/{{nombre}}/gi, "{{1}}")
+    .replace(/{{saldo}}/gi, "{{2}}")
+
+  // Detectar variables en el texto de Meta ({{1}}, {{2}}, etc.)
+  const varMatches = metaBodyText.match(/\{\{(\d+)\}\}/g) || []
+  const uniqueVars = Array.from(new Set(varMatches))
+  const sampleValues: string[] = []
+  for (let i = 0; i < uniqueVars.length; i++) {
+    sampleValues.push(i === 0 ? "Carlos" : i === 1 ? "50.000" : `Dato_${i + 1}`)
+  }
+
+  // 5. Construir componentes para Meta Graph API
+  const components: any[] = []
+
+  if (headerText && headerText.trim()) {
+    components.push({
+      type: "HEADER",
+      format: "TEXT",
+      text: headerText.trim(),
+    })
+  }
+
+  const bodyComponent: any = {
+    type: "BODY",
+    text: metaBodyText.trim(),
+  }
+
+  if (sampleValues.length > 0) {
+    bodyComponent.example = {
+      body_text: [sampleValues],
+    }
+  }
+  components.push(bodyComponent)
+
+  if (footerText && footerText.trim()) {
+    components.push({
+      type: "FOOTER",
+      text: footerText.trim(),
+    })
+  }
+
+  const metaPayload = {
+    name: cleanName,
+    category: category || "MARKETING",
+    language: language || "es",
+    components,
+  }
+
+  try {
+    // 6. Enviar a Meta Cloud API
+    const metaRes = await fetch(`https://graph.facebook.com/v21.0/${wabaId}/message_templates`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(metaPayload),
+    })
+
+    const metaData = await metaRes.json().catch(() => ({}))
+
+    if (!metaRes.ok) {
+      const errorMsg =
+        metaData?.error?.error_user_msg ||
+        metaData?.error?.message ||
+        `Error HTTP ${metaRes.status} de Meta`
+      return {
+        ok: false,
+        error: `Error de Meta al crear plantilla: ${errorMsg}`,
+      }
+    }
+
+    const initialStatus = metaData.status || "PENDING"
+    const metaId = metaData.id
+
+    // 7. Guardar en Base de Datos
+    const metaMetadata = `<!--meta:${JSON.stringify({
+      name: cleanName,
+      language: language || "es",
+      status: initialStatus,
+      category: category || "MARKETING",
+      metaId,
+    })}-->\n`
+
+    const contentToStore = `${metaMetadata}${metaBodyText.trim()}`
+    const catLower = (category || "MARKETING").toLowerCase()
+    const dbCategory = catLower.includes("market")
+      ? "promocion"
+      : catLower.includes("util")
+      ? "recordatorio"
+      : "novedad"
+
+    // Upsert por si ya existía localmente con ese nombre
+    const existing = await db.whatsAppTemplate.findFirst({
+      where: {
+        name: cleanName,
+        ...(branchId ? { branchId } : {}),
+      },
+    })
+
+    let templateRecord
+    if (existing) {
+      templateRecord = await db.whatsAppTemplate.update({
+        where: { id: existing.id },
+        data: {
+          content: contentToStore,
+          category: dbCategory,
+        },
+      })
+    } else {
+      templateRecord = await db.whatsAppTemplate.create({
+        data: {
+          name: cleanName,
+          category: dbCategory,
+          content: contentToStore,
+          branchId: branchId || null,
+        },
+      })
+    }
+
+    return {
+      ok: true,
+      template: templateRecord,
+      metaStatus: initialStatus,
+      metaId,
+      message:
+        initialStatus === "APPROVED"
+          ? "¡Plantilla aprobada instantáneamente por Meta! Ya está disponible para difusiones."
+          : "Plantilla enviada exitosamente a Meta. Está en revisión (PENDING). Por políticas de Meta, no se podrá enviar en difusiones hasta ser aprobada.",
+    }
+  } catch (err: any) {
+    return {
+      ok: false,
+      error: "Error de red al conectar con Meta Graph API: " + err.message,
+    }
+  }
+}
+
+/**
+ * Elimina una plantilla en Meta y en la base de datos local
+ */
+export async function deleteMetaCloudTemplate(templateId: string, branchId?: string | null) {
+  const template = await db.whatsAppTemplate.findUnique({
+    where: { id: templateId },
+  })
+
+  if (!template) {
+    return { ok: false, error: "Plantilla no encontrada" }
+  }
+
+  // Extraer metadata si es de Meta
+  const metaMatch = template.content.match(/<!--meta:(\{.*?\})-->/)
+  let metaName: string | null = null
+  if (metaMatch) {
+    try {
+      metaName = JSON.parse(metaMatch[1]).name
+    } catch {}
+  } else if (/^[a-z0-9_]+$/.test(template.name)) {
+    metaName = template.name
+  }
+
+  // Si tiene nombre en Meta y credenciales, intentar eliminar de Meta
+  if (metaName) {
+    try {
+      const config = branchId
+        ? await db.whatsAppConfig.findUnique({ where: { branchId } })
+        : await db.whatsAppConfig.findFirst()
+      const rawToken = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
+      const phoneId = config?.metaPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
+      const token = rawToken ? rawToken.replace(/[\u2022\u2023\u25E6\u2043\u2219•]/g, "").trim() : ""
+      if (token && phoneId) {
+        const wabaId = await findWabaId(token, phoneId, null, branchId)
+        if (wabaId) {
+          await fetch(
+            `https://graph.facebook.com/v21.0/${wabaId}/message_templates?name=${encodeURIComponent(metaName)}`,
+            {
+              method: "DELETE",
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          )
+        }
+      }
+    } catch (e) {
+      console.warn("[Meta Template DELETE Warning]:", e)
+    }
+  }
+
+  // Eliminar de base de datos local
+  await db.whatsAppTemplate.delete({
+    where: { id: templateId },
+  })
+
+  return { ok: true, message: "Plantilla eliminada correctamente." }
+}

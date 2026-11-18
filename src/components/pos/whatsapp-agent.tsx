@@ -83,6 +83,10 @@ import {
   IconChecks,
   IconClock,
   IconInfoCircle,
+  IconUsers,
+  IconDownload,
+  IconUpload,
+  IconFileSpreadsheet,
 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -217,6 +221,34 @@ interface Template {
   name: string
   category: string
   content: string
+  cleanContent?: string
+  isMetaTemplate?: boolean
+  metaStatus?: "APPROVED" | "PENDING" | "REJECTED" | "LOCAL"
+  metaLanguage?: string
+  metaCategory?: string
+  metaId?: string | null
+}
+
+export interface ContactItem {
+  id: string
+  name: string
+  phone: string
+  document?: string
+  email?: string
+  address?: string
+  notes?: string
+  channel: "whatsapp" | "telegram"
+  creditLimit: number
+  balance: number
+  ordersCount: number
+  totalSpent: number
+  lastOrderDate?: string | null
+  lastMessageText?: string | null
+  lastMessageDate?: string | null
+  unreadCount: number
+  careWindow: CareWindow
+  isRegisteredClient: boolean
+  createdAt: string
 }
 
 export const CURATED_OPENROUTER_MODELS = [
@@ -299,7 +331,40 @@ export default function WhatsAppAgentView() {
   const { branches, activeBranch, setActiveBranch } = useAppStore()
 
   // Pestañas principales
-  const [mainTab, setMainTab] = useState<"crm" | "templates" | "config">("crm")
+  const [mainTab, setMainTab] = useState<"crm" | "templates" | "contacts" | "config">("crm")
+
+  // Estado del Directorio Completo de Contactos
+  const [contactsList, setContactsList] = useState<ContactItem[]>([])
+  const [loadingContacts, setLoadingContacts] = useState(false)
+  const [contactsSearch, setContactsSearch] = useState("")
+  const [contactsFilter, setContactsFilter] = useState<"all" | "open" | "closed" | "debt">("all")
+  const [contactsSummary, setContactsSummary] = useState<{
+    totalContacts: number
+    registeredClients: number
+    unregisteredChats: number
+    withDebt: number
+    activeCareWindow: number
+  } | null>(null)
+  const [importModalOpen, setImportModalOpen] = useState(false)
+  const [importingContacts, setImportingContacts] = useState(false)
+  const [importCsvText, setImportCsvText] = useState("")
+
+  // Estado Modal Crear Plantilla Oficial Meta
+  const [newTemplateModalOpen, setNewTemplateModalOpen] = useState(false)
+  const [newTemplateName, setNewTemplateName] = useState("")
+  const [newTemplateCategory, setNewTemplateCategory] = useState<"MARKETING" | "UTILITY">("MARKETING")
+  const [newTemplateLanguage, setNewTemplateLanguage] = useState("es")
+  const [newTemplateBody, setNewTemplateBody] = useState("")
+  const [newTemplateHeader, setNewTemplateHeader] = useState("")
+  const [newTemplateFooter, setNewTemplateFooter] = useState("")
+  const [creatingTemplate, setCreatingTemplate] = useState(false)
+
+  // Estado Wizard de Difusión Oficial Meta
+  const [broadcastModalOpen, setBroadcastModalOpen] = useState(false)
+  const [broadcastTemplateId, setBroadcastTemplateId] = useState("")
+  const [broadcastAudience, setBroadcastAudience] = useState<"all_chats" | "all_clients" | "manual">("all_chats")
+  const [broadcastSelectedPhones, setBroadcastSelectedPhones] = useState<string[]>([])
+  const [broadcastSearchRecipients, setBroadcastSearchRecipients] = useState("")
 
   // Estado Sede seleccionada para WhatsApp
   const currentBranchId = activeBranch?.id || branches[0]?.id || ""
@@ -705,7 +770,11 @@ export default function WhatsAppAgentView() {
       const res = await apiFetch<{ ok: boolean; templates: Template[] }>("/api/whatsapp/templates")
       if (res && res.ok) {
         setTemplates(res.templates || [])
-        if (res.templates?.length > 0 && !selectedTemplateId) {
+        // Pre-seleccionar la primera plantilla aprobada de Meta si existe
+        const approved = (res.templates || []).find((t) => t.isMetaTemplate && t.metaStatus === "APPROVED")
+        if (approved && (!selectedTemplateId || !res.templates?.some((t) => t.id === selectedTemplateId))) {
+          setSelectedTemplateId(approved.id)
+        } else if (res.templates?.length > 0 && !selectedTemplateId) {
           setSelectedTemplateId(res.templates[0].id)
         }
       }
@@ -717,6 +786,309 @@ export default function WhatsAppAgentView() {
   useEffect(() => {
     loadTemplates()
   }, [loadTemplates])
+
+  // 4.1 Cargar directorio completo de contactos CRM
+  const loadContacts = useCallback(async () => {
+    try {
+      setLoadingContacts(true)
+      const params = new URLSearchParams()
+      if (currentBranchId) params.set("branchId", currentBranchId)
+      if (contactsSearch) params.set("search", contactsSearch)
+      if (contactsFilter === "open") params.set("window", "open")
+      if (contactsFilter === "closed") params.set("window", "closed")
+      if (contactsFilter === "debt") params.set("debt", "true")
+
+      const res = await apiFetch<{ ok: boolean; contacts: ContactItem[]; summary: any }>(
+        `/api/whatsapp/contacts?${params.toString()}`
+      )
+      if (res && res.ok) {
+        setContactsList(res.contacts || [])
+        setContactsSummary(res.summary || null)
+      }
+    } catch (e: any) {
+      toast.error("Error al cargar contactos: " + e.message)
+    } finally {
+      setLoadingContacts(false)
+    }
+  }, [currentBranchId, contactsSearch, contactsFilter])
+
+  useEffect(() => {
+    if (mainTab === "contacts") {
+      loadContacts()
+    }
+  }, [mainTab, loadContacts])
+
+  // 4.2 Exportar contactos a CSV compatible con Excel
+  const handleExportContactsCsv = () => {
+    if (contactsList.length === 0) {
+      toast.error("No hay contactos para exportar")
+      return
+    }
+
+    const headers = [
+      "Nombre",
+      "Teléfono",
+      "Documento / NIT",
+      "Email",
+      "Dirección",
+      "Notas",
+      "Canal",
+      "Saldo Deuda",
+      "Pedidos Realizados",
+      "Consumo Total",
+      "Ventana 24h Meta",
+      "Último Mensaje",
+      "Fecha Último Mensaje",
+    ]
+
+    const rows = contactsList.map((c) => [
+      `"${(c.name || "").replace(/"/g, '""')}"`,
+      `"${c.phone || ""}"`,
+      `"${c.document || ""}"`,
+      `"${c.email || ""}"`,
+      `"${(c.address || "").replace(/"/g, '""')}"`,
+      `"${(c.notes || "").replace(/"/g, '""')}"`,
+      `"${c.channel}"`,
+      String(c.balance || 0),
+      String(c.ordersCount || 0),
+      String(c.totalSpent || 0),
+      `"${c.careWindow.isOpen ? `Abierta (${c.careWindow.formattedTimeLeft})` : "Expirada"}"`,
+      `"${(c.lastMessageText || "").replace(/"/g, '""')}"`,
+      `"${c.lastMessageDate ? new Date(c.lastMessageDate).toLocaleString("es-CO") : ""}"`,
+    ])
+
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n")
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.setAttribute("download", `contactos_whatsapp_${new Date().toISOString().slice(0, 10)}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    toast.success(`Exportados ${contactsList.length} contactos a archivo CSV`)
+  }
+
+  // 4.3 Importar contactos desde CSV
+  const handleImportContactsCsv = async (csvText: string) => {
+    if (!csvText || !csvText.trim()) {
+      toast.error("El contenido CSV está vacío")
+      return
+    }
+
+    const lines = csvText.trim().split(/\r?\n/)
+    if (lines.length < 2) {
+      toast.error("El archivo debe contener una fila de encabezados y al menos un contacto")
+      return
+    }
+
+    const headers = lines[0].split(",").map((h) => h.replace(/^["'\s]+|["'\s]+$/g, "").toLowerCase())
+    const nameIdx = headers.findIndex((h) => h.includes("nombre") || h.includes("name"))
+    const phoneIdx = headers.findIndex((h) => h.includes("tel") || h.includes("phone") || h.includes("cel"))
+    const docIdx = headers.findIndex((h) => h.includes("doc") || h.includes("nit") || h.includes("cedula"))
+    const emailIdx = headers.findIndex((h) => h.includes("email") || h.includes("correo"))
+    const addrIdx = headers.findIndex((h) => h.includes("dir") || h.includes("address"))
+    const notesIdx = headers.findIndex((h) => h.includes("nota") || h.includes("note"))
+
+    if (nameIdx === -1 || phoneIdx === -1) {
+      toast.error("El CSV debe contener al menos las columnas 'Nombre' y 'Teléfono'")
+      return
+    }
+
+    const parsedContacts: any[] = []
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim()
+      if (!line) continue
+      const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map((c) => c.replace(/^["'\s]+|["'\s]+$/g, ""))
+      const name = cols[nameIdx] || ""
+      const phone = cols[phoneIdx] || ""
+      if (name && phone) {
+        parsedContacts.push({
+          name,
+          phone,
+          document: docIdx !== -1 ? cols[docIdx] : undefined,
+          email: emailIdx !== -1 ? cols[emailIdx] : undefined,
+          address: addrIdx !== -1 ? cols[addrIdx] : undefined,
+          notes: notesIdx !== -1 ? cols[notesIdx] : undefined,
+        })
+      }
+    }
+
+    if (parsedContacts.length === 0) {
+      toast.error("No se detectaron contactos válidos con Nombre y Teléfono en el CSV")
+      return
+    }
+
+    setImportingContacts(true)
+    try {
+      const res = await apiFetch<{ ok: boolean; message: string; importedCount: number; updatedCount: number }>(
+        "/api/whatsapp/contacts",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            action: "import",
+            contacts: parsedContacts,
+            branchId: currentBranchId,
+          }),
+        }
+      )
+
+      if (res && res.ok) {
+        toast.success(res.message || `Importados ${res.importedCount} contactos`)
+        setImportModalOpen(false)
+        setImportCsvText("")
+        loadContacts()
+      }
+    } catch (e: any) {
+      toast.error("Error en la importación: " + e.message)
+    } finally {
+      setImportingContacts(false)
+    }
+  }
+
+  // 4.4 Crear plantilla y enviar a aprobación de Meta
+  const handleCreateTemplateForMeta = async () => {
+    if (!newTemplateName.trim()) {
+      toast.error("Ingresa el nombre de la plantilla")
+      return
+    }
+    if (!newTemplateBody.trim()) {
+      toast.error("Ingresa el contenido del mensaje de la plantilla")
+      return
+    }
+
+    setCreatingTemplate(true)
+    try {
+      const res = await apiFetch<{
+        ok: boolean
+        message: string
+        metaStatus?: string
+        template?: any
+      }>("/api/whatsapp/templates", {
+        method: "POST",
+        body: JSON.stringify({
+          name: newTemplateName.trim(),
+          category: newTemplateCategory === "MARKETING" ? "promocion" : "recordatorio",
+          metaCategory: newTemplateCategory,
+          language: newTemplateLanguage,
+          content: newTemplateBody.trim(),
+          headerText: newTemplateHeader.trim() || undefined,
+          footerText: newTemplateFooter.trim() || undefined,
+          submitToMeta: true,
+          branchId: currentBranchId,
+        }),
+      })
+
+      if (res && res.ok) {
+        toast.success(res.message || "Plantilla enviada exitosamente a Meta")
+        setNewTemplateModalOpen(false)
+        setNewTemplateName("")
+        setNewTemplateBody("")
+        setNewTemplateHeader("")
+        setNewTemplateFooter("")
+        loadTemplates()
+      }
+    } catch (e: any) {
+      toast.error("Error al registrar plantilla en Meta: " + e.message)
+    } finally {
+      setCreatingTemplate(false)
+    }
+  }
+
+  // 4.5 Eliminar plantilla
+  const handleDeleteTemplate = async (templateId: string, templateName: string) => {
+    if (!confirm(`¿Estás seguro de eliminar la plantilla '${templateName}'?`)) return
+    try {
+      const res = await apiFetch<{ ok: boolean; message: string }>(
+        `/api/whatsapp/templates?id=${encodeURIComponent(templateId)}`,
+        { method: "DELETE" }
+      )
+      if (res && res.ok) {
+        toast.success(res.message || "Plantilla eliminada")
+        loadTemplates()
+      }
+    } catch (e: any) {
+      toast.error("Error al eliminar: " + e.message)
+    }
+  }
+
+  // 4.6 Abrir Wizard de Difusión Oficial
+  const handleOpenBroadcastModal = (templateId?: string) => {
+    const approvedTemplates = templates.filter((t) => t.isMetaTemplate && t.metaStatus === "APPROVED")
+    if (approvedTemplates.length === 0) {
+      toast.error("No tienes ninguna plantilla Aprobada por Meta (status: APPROVED). Crea una plantilla o sincroniza con Meta antes de enviar difusión.")
+      return
+    }
+
+    if (templateId) {
+      setBroadcastTemplateId(templateId)
+    } else if (!broadcastTemplateId || !approvedTemplates.some((t) => t.id === broadcastTemplateId)) {
+      setBroadcastTemplateId(approvedTemplates[0].id)
+    }
+
+    // Inicializar lista de destinatarios con todos los teléfonos de conversaciones
+    const allPhones = conversations.map((c) => c.phone)
+    setBroadcastSelectedPhones(allPhones)
+    setBroadcastAudience("all_chats")
+    setBroadcastModalOpen(true)
+  }
+
+  // 4.7 Ejecutar Difusión Masiva Oficial
+  const handleExecuteBroadcast = async () => {
+    if (!broadcastTemplateId) {
+      toast.error("Selecciona una plantilla oficial aprobada")
+      return
+    }
+
+    const chosenTpl = templates.find((t) => t.id === broadcastTemplateId)
+    if (!chosenTpl || chosenTpl.metaStatus !== "APPROVED") {
+      toast.error("La plantilla seleccionada no cuenta con aprobación oficial de Meta (status: APPROVED)")
+      return
+    }
+
+    let targetPhones: string[] = []
+    if (broadcastAudience === "all_chats") {
+      targetPhones = conversations.map((c) => c.phone)
+    } else if (broadcastAudience === "manual") {
+      targetPhones = broadcastSelectedPhones
+    } else {
+      // Dejar vacío para que el backend tome todos los clientes de la sede
+      targetPhones = []
+    }
+
+    if (broadcastAudience !== "all_clients" && targetPhones.length === 0) {
+      toast.error("Debes seleccionar al menos un destinatario")
+      return
+    }
+
+    setSendingBroadcast(true)
+    try {
+      const res = await apiFetch<{ ok: boolean; totalSent: number; failedCount: number; errors?: any[] }>(
+        "/api/whatsapp/broadcast",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            templateId: broadcastTemplateId,
+            targetPhones,
+            branchId: currentBranchId,
+          }),
+        }
+      )
+
+      if (res && res.ok) {
+        toast.success(`✅ Difusión completada: ${res.totalSent} mensaje(s) enviados exitosamente con plantilla Meta.`)
+        if (res.failedCount > 0) {
+          toast.warning(`${res.failedCount} mensaje(s) no pudieron enviarse.`)
+        }
+        setBroadcastModalOpen(false)
+        loadConversations()
+      }
+    } catch (e: any) {
+      toast.error("Error al enviar difusión: " + e.message)
+    } finally {
+      setSendingBroadcast(false)
+    }
+  }
 
   const selectedConv = conversations.find((c) => c.phone === selectedPhone) || null
 
@@ -1615,6 +1987,18 @@ export default function WhatsAppAgentView() {
             >
               <IconSpeakerphone className="h-3.5 w-3.5" />
               Difusión
+            </button>
+            <button
+              onClick={() => setMainTab("contacts")}
+              className={cn(
+                "px-3 py-1.5 rounded-full font-semibold transition-all cursor-pointer flex items-center gap-1.5",
+                mainTab === "contacts"
+                  ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 shadow-2xs"
+                  : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
+              )}
+            >
+              <IconUsers className="h-3.5 w-3.5" />
+              Contactos
             </button>
             <button
               onClick={() => setMainTab("config")}
@@ -3058,9 +3442,24 @@ export default function WhatsAppAgentView() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-zinc-950 dark:text-white">Plantillas de Difusión WhatsApp</h2>
-              <p className="text-xs text-zinc-500">Envía promociones y recordatorios personalizados con un solo clic.</p>
+              <p className="text-xs text-zinc-500">Envía promociones y recordatorios oficiales con plantillas aprobadas por Meta.</p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                size="sm"
+                onClick={() => {
+                  setNewTemplateName("")
+                  setNewTemplateBody("")
+                  setNewTemplateHeader("")
+                  setNewTemplateFooter("")
+                  setNewTemplateCategory("MARKETING")
+                  setNewTemplateModalOpen(true)
+                }}
+                className="rounded-xl h-9 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 cursor-pointer shadow-2xs"
+              >
+                <IconPlus className="h-4 w-4" />
+                Nueva Plantilla para Meta
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -3086,55 +3485,424 @@ export default function WhatsAppAgentView() {
                 {config.metaWabaId ? `WABA: ${config.metaWabaId.slice(0, 5)}...` : "Configurar WABA ID"}
               </Button>
               <Button
-                onClick={() => handleSendBroadcast(false)}
+                onClick={() => handleOpenBroadcastModal()}
                 className="rounded-xl h-9 text-xs font-bold bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 gap-1.5 shadow-2xs"
               >
                 <IconSpeakerphone className="h-4 w-4" />
-                Enviar Difusión a Todos ({conversations.length})
+                Enviar Difusión Masiva ({conversations.length})
               </Button>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {templates.map((tpl) => (
-              <Card key={tpl.id} className="rounded-2xl border-zinc-200 dark:border-zinc-800 shadow-2xs flex flex-col justify-between">
-                <CardHeader className="p-4 pb-2">
-                  <div className="flex items-center justify-between">
-                    <Badge variant="outline" className="text-[10px] uppercase font-mono">
-                      {tpl.category}
-                    </Badge>
-                    {Boolean((tpl as any).isMetaTemplate || tpl.content.includes("<!--meta:")) && (
-                      <Badge variant="outline" className="text-[9px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
-                        Meta API
+            {templates.map((tpl) => {
+              const isApproved = tpl.metaStatus === "APPROVED"
+              const isPending = tpl.metaStatus === "PENDING"
+              const isRejected = tpl.metaStatus === "REJECTED"
+              const isLocal = !tpl.isMetaTemplate || tpl.metaStatus === "LOCAL"
+
+              return (
+                <Card key={tpl.id} className="rounded-2xl border-zinc-200 dark:border-zinc-800 shadow-2xs flex flex-col justify-between">
+                  <CardHeader className="p-4 pb-2">
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <Badge variant="outline" className="text-[10px] uppercase font-mono">
+                        {tpl.category}
                       </Badge>
+
+                      {isApproved && (
+                        <Badge variant="outline" className="text-[9px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 font-semibold gap-1">
+                          <IconCircleCheck className="h-3 w-3 text-emerald-600" />
+                          Aprobada Meta
+                        </Badge>
+                      )}
+                      {isPending && (
+                        <Badge variant="outline" className="text-[9px] bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40 font-semibold gap-1 animate-pulse" title="Meta está evaluando esta plantilla. Se habilitará cuando sea aprobada.">
+                          <IconClock className="h-3 w-3 text-amber-600" />
+                          En revisión Meta
+                        </Badge>
+                      )}
+                      {isRejected && (
+                        <Badge variant="outline" className="text-[9px] bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30 font-semibold gap-1">
+                          ✕ Rechazada Meta
+                        </Badge>
+                      )}
+                      {isLocal && (
+                        <Badge variant="outline" className="text-[9px] bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 border-zinc-300 dark:border-zinc-700">
+                          Borrador Local
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-1">
+                      <CardTitle className="text-sm font-bold text-zinc-950 dark:text-white truncate" title={tpl.name}>
+                        {tpl.name}
+                      </CardTitle>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTemplate(tpl.id, tpl.name)}
+                        className="text-zinc-400 hover:text-rose-500 transition p-1"
+                        title="Eliminar plantilla"
+                      >
+                        <IconTrash className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-4 pt-0 space-y-3">
+                    <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800 text-xs whitespace-pre-line text-zinc-700 dark:text-zinc-300 font-mono text-[11px] max-h-40 overflow-y-auto leading-relaxed">
+                      {tpl.cleanContent || tpl.content.replace(/<!--meta:\{.*?\}-->\n?/, "").trim()}
+                    </div>
+
+                    {isApproved ? (
+                      <Button
+                        size="sm"
+                        onClick={() => handleOpenBroadcastModal(tpl.id)}
+                        className="w-full text-xs h-8 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold gap-1.5"
+                      >
+                        <IconSpeakerphone className="h-3.5 w-3.5" />
+                        Usar en Difusión
+                      </Button>
+                    ) : isPending ? (
+                      <Button
+                        size="sm"
+                        disabled
+                        variant="outline"
+                        className="w-full text-xs h-8 rounded-lg border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400 bg-amber-500/5 cursor-not-allowed"
+                        title="Meta está evaluando esta plantilla. Por políticas oficiales, no se puede usar hasta ser aprobada."
+                      >
+                        <IconClock className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        En revisión por Meta
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setNewTemplateName(tpl.name.replace(/[^a-z0-9_]/gi, "_").toLowerCase())
+                          setNewTemplateBody(tpl.cleanContent || tpl.content.replace(/<!--meta:\{.*?\}-->\n?/, "").trim())
+                          setNewTemplateModalOpen(true)
+                        }}
+                        className="w-full text-xs h-8 rounded-lg border-dashed text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
+                      >
+                        <IconShieldCheck className="h-3.5 w-3.5 mr-1" />
+                        Enviar a Meta para Aprobación
+                      </Button>
                     )}
-                  </div>
-                  <CardTitle className="text-sm font-bold mt-1 text-zinc-950 dark:text-white">{tpl.name}</CardTitle>
-                </CardHeader>
-                <CardContent className="p-4 pt-0 space-y-3">
-                  <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800 text-xs whitespace-pre-line text-zinc-700 dark:text-zinc-300 font-mono text-[11px] max-h-40 overflow-y-auto leading-relaxed">
-                    {tpl.content.replace(/<!--meta:\{.*?\}-->\n?/, "").trim()}
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setSelectedTemplateId(tpl.id)
-                      setTemplateModalOpen(true)
-                    }}
-                    className="w-full text-xs h-8 rounded-lg"
-                  >
-                    Usar esta Plantilla
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              )
+            })}
           </div>
         </div>
       )}
 
       {/* ========================================================= */}
-      {/* 4. VISTA CONFIGURACIÓN IA DEEPSEEK & META POR SEDE         */}
+      {/* 4. VISTA DIRECTORIO DE CONTACTOS & AUDIENCIA CRM          */}
+      {/* ========================================================= */}
+      {mainTab === "contacts" && (
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
+          {/* Header con estadísticas rápidas */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold text-zinc-950 dark:text-white flex items-center gap-2">
+                <IconUsers className="h-5 w-5 text-emerald-600" />
+                Directorio de Contactos & Audiencia CRM
+              </h2>
+              <p className="text-xs text-zinc-500">
+                Gestiona tus clientes de WhatsApp y Telegram, exporta listas a Excel o importa nuevos contactos para difusiones.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setImportModalOpen(true)}
+                className="rounded-xl h-9 text-xs font-semibold gap-1.5 cursor-pointer shadow-2xs"
+              >
+                <IconUpload className="h-3.5 w-3.5" />
+                Importar (CSV/Excel)
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportContactsCsv}
+                className="rounded-xl h-9 text-xs font-semibold gap-1.5 cursor-pointer shadow-2xs text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+              >
+                <IconDownload className="h-3.5 w-3.5" />
+                Exportar CSV ({contactsList.length})
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setContactForm({
+                    phone: "",
+                    name: "",
+                    document: "",
+                    email: "",
+                    address: "",
+                    notes: "",
+                    creditLimit: "0",
+                  })
+                  setContactModalOpen(true)
+                }}
+                className="rounded-xl h-9 text-xs font-bold bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 gap-1.5 shadow-2xs cursor-pointer"
+              >
+                <IconPlus className="h-4 w-4" />
+                Nuevo Contacto
+              </Button>
+            </div>
+          </div>
+
+          {/* Tarjetas de Métricas */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Card className="rounded-2xl p-3 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xs">
+              <span className="text-[11px] font-semibold text-zinc-500">Total Contactos</span>
+              <p className="text-xl font-black text-zinc-950 dark:text-white mt-1">
+                {contactsSummary?.totalContacts ?? contactsList.length}
+              </p>
+            </Card>
+            <Card className="rounded-2xl p-3 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xs">
+              <span className="text-[11px] font-semibold text-zinc-500">Clientes Registrados</span>
+              <p className="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
+                {contactsSummary?.registeredClients ?? 0}
+              </p>
+            </Card>
+            <Card className="rounded-2xl p-3 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xs">
+              <span className="text-[11px] font-semibold text-zinc-500">Ventana Meta 24h Activa</span>
+              <p className="text-xl font-black text-blue-600 dark:text-blue-400 mt-1">
+                {contactsSummary?.activeCareWindow ?? 0}
+              </p>
+            </Card>
+            <Card className="rounded-2xl p-3 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xs">
+              <span className="text-[11px] font-semibold text-zinc-500">Con Saldo Deudor</span>
+              <p className="text-xl font-black text-amber-600 dark:text-amber-400 mt-1">
+                {contactsSummary?.withDebt ?? 0}
+              </p>
+            </Card>
+          </div>
+
+          {/* Barra de Búsqueda y Filtros */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+            <div className="relative flex-1 max-w-md">
+              <IconSearch className="h-4 w-4 absolute left-3 top-2.5 text-zinc-400" />
+              <Input
+                value={contactsSearch}
+                onChange={(e) => setContactsSearch(e.target.value)}
+                placeholder="Buscar por nombre, teléfono, cédula o email..."
+                className="pl-9 h-9 text-xs rounded-xl bg-white dark:bg-zinc-950"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] font-semibold text-zinc-500 mr-1">Filtrar:</span>
+              <button
+                onClick={() => setContactsFilter("all")}
+                className={cn(
+                  "px-2.5 py-1 text-xs rounded-lg font-semibold transition cursor-pointer",
+                  contactsFilter === "all"
+                    ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950"
+                    : "bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-950"
+                )}
+              >
+                Todos
+              </button>
+              <button
+                onClick={() => setContactsFilter("open")}
+                className={cn(
+                  "px-2.5 py-1 text-xs rounded-lg font-semibold transition cursor-pointer",
+                  contactsFilter === "open"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-emerald-600"
+                )}
+              >
+                Ventana 24h Activa
+              </button>
+              <button
+                onClick={() => setContactsFilter("closed")}
+                className={cn(
+                  "px-2.5 py-1 text-xs rounded-lg font-semibold transition cursor-pointer",
+                  contactsFilter === "closed"
+                    ? "bg-amber-600 text-white"
+                    : "bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-amber-600"
+                )}
+              >
+                Ventana Expirada
+              </button>
+              <button
+                onClick={() => setContactsFilter("debt")}
+                className={cn(
+                  "px-2.5 py-1 text-xs rounded-lg font-semibold transition cursor-pointer",
+                  contactsFilter === "debt"
+                    ? "bg-rose-600 text-white"
+                    : "bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-rose-600"
+                )}
+              >
+                Con Saldo Deudor
+              </button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={loadContacts}
+                disabled={loadingContacts}
+                className="h-8 px-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+              >
+                <IconRefresh className={cn("h-3.5 w-3.5", loadingContacts && "animate-spin")} />
+              </Button>
+            </div>
+          </div>
+
+          {/* Tabla de Contactos */}
+          <div className="border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-white dark:bg-zinc-900 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/50 text-[11px] font-bold text-zinc-500 uppercase tracking-wider">
+                    <th className="p-3 pl-4">Contacto</th>
+                    <th className="p-3">Teléfono / Canal</th>
+                    <th className="p-3">Cédula / NIT</th>
+                    <th className="p-3">Ventana Meta 24h</th>
+                    <th className="p-3">Pedidos / Total</th>
+                    <th className="p-3">Saldo Deudor</th>
+                    <th className="p-3">Último Mensaje</th>
+                    <th className="p-3 pr-4 text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {contactsList.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center text-zinc-500 text-xs">
+                        {loadingContacts ? "Cargando directorio de contactos..." : "No se encontraron contactos."}
+                      </td>
+                    </tr>
+                  ) : (
+                    contactsList.map((contact) => (
+                      <tr
+                        key={contact.id}
+                        className="hover:bg-zinc-50/80 dark:hover:bg-zinc-800/40 transition group"
+                      >
+                        <td className="p-3 pl-4 font-semibold text-zinc-950 dark:text-white">
+                          <div className="flex items-center gap-2">
+                            <div className="h-7 w-7 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center font-bold text-xs text-zinc-700 dark:text-zinc-300 shrink-0">
+                              {contact.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <div>{contact.name}</div>
+                              {contact.email && (
+                                <div className="text-[10px] text-zinc-400 font-normal">{contact.email}</div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-3 font-mono text-[11px]">
+                          <div className="flex items-center gap-1.5">
+                            {contact.channel === "telegram" ? (
+                              <IconBrandTelegram className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                            ) : (
+                              <IconBrandWhatsapp className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                            )}
+                            <span>{contact.phone}</span>
+                          </div>
+                        </td>
+                        <td className="p-3 font-mono text-zinc-600 dark:text-zinc-400">
+                          {contact.document || "—"}
+                        </td>
+                        <td className="p-3">
+                          {contact.careWindow.isOpen ? (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 gap-1"
+                            >
+                              <IconClock className="h-3 w-3 text-emerald-600" />
+                              Abierta ({contact.careWindow.hoursLeft}h {contact.careWindow.minutesLeft}m)
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] font-mono bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700"
+                              title="Han pasado más de 24h desde el último mensaje del cliente. Meta exige iniciar contacto con plantilla oficial aprobada."
+                            >
+                              Requiere Plantilla
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <div className="font-semibold text-zinc-800 dark:text-zinc-200">
+                            {formatCurrency(contact.totalSpent)}
+                          </div>
+                          <div className="text-[10px] text-zinc-400">
+                            {contact.ordersCount} pedido(s)
+                          </div>
+                        </td>
+                        <td className="p-3">
+                          {contact.balance > 0 ? (
+                            <span className="font-bold text-rose-600 dark:text-rose-400 font-mono">
+                              {formatCurrency(contact.balance)}
+                            </span>
+                          ) : (
+                            <span className="text-zinc-400 font-mono">$0</span>
+                          )}
+                        </td>
+                        <td className="p-3 max-w-xs truncate text-[11px] text-zinc-500">
+                          {contact.lastMessageText || "—"}
+                        </td>
+                        <td className="p-3 pr-4 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setSelectedPhone(contact.phone)
+                                setMainTab("crm")
+                              }}
+                              className="h-7 px-2 text-xs text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                              title="Abrir conversación en CRM"
+                            >
+                              <IconMessageCircle className="h-3.5 w-3.5 mr-1" />
+                              Chatear
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setSelectedPhone(contact.phone)
+                                setTemplateModalOpen(true)
+                              }}
+                              className="h-7 px-2 text-xs text-zinc-600 hover:text-zinc-950 dark:hover:text-white"
+                              title="Iniciar conversación con plantilla oficial de Meta"
+                            >
+                              <IconSpeakerphone className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setContactForm({
+                                  phone: contact.phone,
+                                  name: contact.name,
+                                  document: contact.document || "",
+                                  email: contact.email || "",
+                                  address: contact.address || "",
+                                  notes: contact.notes || "",
+                                  creditLimit: String(contact.creditLimit || 0),
+                                })
+                                setContactModalOpen(true)
+                              }}
+                              className="h-7 px-2 text-xs text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+                              title="Editar datos de contacto CRM"
+                            >
+                              <IconPencil className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* 5. VISTA CONFIGURACIÓN IA DEEPSEEK & META POR SEDE         */}
       {/* ========================================================= */}
       {mainTab === "config" && (
         <div className="flex-1 min-h-0 overflow-y-auto space-y-4 max-w-5xl mx-auto w-full pb-8">
@@ -5216,6 +5984,573 @@ export default function WhatsAppAgentView() {
                 <>
                   <IconShieldCheck className="h-4 w-4" />
                   Guardar y Sincronizar Plantillas
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ========================================================= */}
+      {/* MODAL: CREAR PLANTILLA OFICIAL PARA META CLOUD API        */}
+      {/* ========================================================= */}
+      <Dialog open={newTemplateModalOpen} onOpenChange={setNewTemplateModalOpen}>
+        <DialogContent className="max-w-2xl rounded-2xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <div className="h-8 w-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                <IconSpeakerphone className="h-4 w-4" />
+              </div>
+              <span>Crear Plantilla Oficial en Meta Cloud API</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Meta evaluará esta plantilla. Una vez aprobada (status: APPROVED), podrás usarla para difusiones masivas sin restricciones de la ventana de 24 horas.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
+            {/* Formulario */}
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs font-bold">Nombre de la Plantilla (Meta ID)</Label>
+                <Input
+                  value={newTemplateName}
+                  onChange={(e) => {
+                    const slug = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_")
+                    setNewTemplateName(slug)
+                  }}
+                  placeholder="Ej: promo_fin_semana_2026"
+                  className="h-9 text-xs font-mono bg-zinc-50 dark:bg-zinc-950"
+                />
+                <p className="text-[10px] text-zinc-400">
+                  Solo letras minúsculas, números y guiones bajos (sin espacios ni acentos).
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs font-bold">Categoría Meta</Label>
+                  <Select
+                    value={newTemplateCategory}
+                    onValueChange={(val: any) => setNewTemplateCategory(val)}
+                  >
+                    <SelectTrigger className="h-9 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="text-xs rounded-xl">
+                      <SelectItem value="MARKETING">Marketing / Promoción</SelectItem>
+                      <SelectItem value="UTILITY">Utilidad / Transaccional</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-xs font-bold">Idioma</Label>
+                  <Select
+                    value={newTemplateLanguage}
+                    onValueChange={setNewTemplateLanguage}
+                  >
+                    <SelectTrigger className="h-9 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="text-xs rounded-xl">
+                      <SelectItem value="es">Español (es)</SelectItem>
+                      <SelectItem value="en">Inglés (en)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs font-bold">Encabezado Opcional (Texto)</Label>
+                <Input
+                  value={newTemplateHeader}
+                  onChange={(e) => setNewTemplateHeader(e.target.value)}
+                  placeholder="Ej: 🎉 ¡Gran Promoción Especial!"
+                  className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950"
+                  maxLength={60}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-bold">Cuerpo del Mensaje (Body)</Label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setNewTemplateBody((prev) => prev + " {{nombre}}")}
+                      className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-1.5 py-0.5 rounded font-mono hover:bg-zinc-200"
+                      title="Insertar nombre del cliente"
+                    >
+                      + {"{{nombre}}"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewTemplateBody((prev) => prev + " {{saldo}}")}
+                      className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-1.5 py-0.5 rounded font-mono hover:bg-zinc-200"
+                      title="Insertar saldo fiado"
+                    >
+                      + {"{{saldo}}"}
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  value={newTemplateBody}
+                  onChange={(e) => setNewTemplateBody(e.target.value)}
+                  placeholder="¡Hola {{nombre}}! Te invitamos a conocer nuestras promociones especiales de esta semana..."
+                  rows={4}
+                  className="w-full text-xs p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 font-sans resize-none leading-relaxed"
+                  maxLength={1024}
+                />
+                <p className="text-[10px] text-zinc-400">
+                  Usa {"{{nombre}}"} para el nombre del cliente y {"{{saldo}}"} para su deuda. En Meta se convertirán en {"{{1}}"} y {"{{2}}"}.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs font-bold">Pie de Página Opcional (Footer)</Label>
+                <Input
+                  value={newTemplateFooter}
+                  onChange={(e) => setNewTemplateFooter(e.target.value)}
+                  placeholder="Ej: Responde 'PARAR' para no recibir más promociones"
+                  className="h-8 text-xs bg-zinc-50 dark:bg-zinc-950"
+                  maxLength={60}
+                />
+              </div>
+            </div>
+
+            {/* Vista Previa Móvil de WhatsApp */}
+            <div className="flex flex-col items-center justify-center p-4 bg-zinc-100 dark:bg-zinc-950/70 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+              <span className="text-[11px] font-bold text-zinc-500 mb-2 flex items-center gap-1">
+                <IconBrandWhatsapp className="h-4 w-4 text-emerald-600" />
+                Vista previa en WhatsApp
+              </span>
+
+              {/* Burbuja de mensaje estilo WhatsApp */}
+              <div className="w-full max-w-xs bg-white dark:bg-emerald-950/40 border border-emerald-500/20 rounded-2xl p-3 shadow-md space-y-1.5 text-xs text-zinc-900 dark:text-zinc-100 relative">
+                {newTemplateHeader && (
+                  <div className="font-bold text-xs text-zinc-950 dark:text-white border-b border-zinc-100 dark:border-zinc-800 pb-1">
+                    {newTemplateHeader}
+                  </div>
+                )}
+                <div className="whitespace-pre-line leading-relaxed text-[11px]">
+                  {newTemplateBody
+                    ? newTemplateBody
+                        .replace(/{{nombre}}|{{1}}/gi, "Carlos Mendoza")
+                        .replace(/{{saldo}}|{{2}}/gi, "$45.000")
+                    : "Escribe el texto de tu plantilla en el formulario para previsualizarlo aquí..."}
+                </div>
+                {newTemplateFooter && (
+                  <div className="text-[9px] text-zinc-400 dark:text-zinc-500 pt-1 border-t border-zinc-100 dark:border-zinc-800/50">
+                    {newTemplateFooter}
+                  </div>
+                )}
+                <div className="text-[9px] text-zinc-400 text-right font-mono flex items-center justify-end gap-1">
+                  <span>10:30 a. m.</span>
+                  <IconChecks className="h-3 w-3 text-blue-500" />
+                </div>
+              </div>
+
+              <div className="mt-3 p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-800 dark:text-amber-300 text-center leading-relaxed">
+                ℹ️ La plantilla se enviará automáticamente a revisión de Meta. Quedará en estado <strong>PENDING</strong> y no se podrá despachar en difusiones hasta ser <strong>APPROVED</strong>.
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="pt-2 gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setNewTemplateModalOpen(false)}
+              disabled={creatingTemplate}
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleCreateTemplateForMeta}
+              disabled={creatingTemplate || !newTemplateName.trim() || !newTemplateBody.trim()}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1.5"
+            >
+              {creatingTemplate ? (
+                <>
+                  <IconRefresh className="h-3.5 w-3.5 animate-spin" />
+                  Enviando a Meta...
+                </>
+              ) : (
+                <>
+                  <IconShieldCheck className="h-4 w-4" />
+                  Registrar y Enviar a Meta
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ========================================================= */}
+      {/* MODAL: WIZARD DE DIFUSIÓN OFICIAL DE META                 */}
+      {/* ========================================================= */}
+      <Dialog open={broadcastModalOpen} onOpenChange={setBroadcastModalOpen}>
+        <DialogContent className="max-w-2xl rounded-2xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <div className="h-8 w-8 rounded-xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center shrink-0">
+                <IconSpeakerphone className="h-4 w-4" />
+              </div>
+              <span>Enviar Difusión Oficial por WhatsApp</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Cumplimiento oficial de políticas de Meta: Las difusiones masivas solo admiten plantillas pre-aprobadas (APPROVED).
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Paso 1: Selección de plantilla */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center justify-between">
+                <span>1. Selecciona la Plantilla Aprobada por Meta</span>
+                <span className="text-[10px] text-emerald-600 font-normal">
+                  Solo plantillas con status: APPROVED
+                </span>
+              </Label>
+              <Select value={broadcastTemplateId} onValueChange={setBroadcastTemplateId}>
+                <SelectTrigger className="text-xs h-10 bg-zinc-50 dark:bg-zinc-950">
+                  <SelectValue placeholder="Selecciona una plantilla oficial aprobada" />
+                </SelectTrigger>
+                <SelectContent className="text-xs rounded-xl">
+                  {templates
+                    .filter((t) => t.isMetaTemplate && t.metaStatus === "APPROVED")
+                    .map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        ✓ {t.name} (es · {t.category})
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Vista previa de la plantilla seleccionada */}
+            {(() => {
+              const selectedTpl = templates.find((t) => t.id === broadcastTemplateId)
+              if (!selectedTpl) return null
+              const cleanText = selectedTpl.cleanContent || selectedTpl.content.replace(/<!--meta:\{.*?\}-->\n?/, "").trim()
+              return (
+                <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-xs space-y-1">
+                  <div className="flex items-center justify-between text-[11px] text-emerald-700 dark:text-emerald-300 font-bold">
+                    <span>Vista previa del mensaje a enviar:</span>
+                    <Badge variant="outline" className="text-[9px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
+                      Oficial Meta APPROVED
+                    </Badge>
+                  </div>
+                  <div className="text-[11px] font-mono whitespace-pre-line text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-800 leading-relaxed">
+                    {cleanText
+                      .replace(/{{nombre}}|{{1}}/gi, "Carlos Mendoza")
+                      .replace(/{{saldo}}|{{2}}/gi, "$45.000")}
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* Paso 2: Selección de Audiencia */}
+            <div className="space-y-2">
+              <Label className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                2. Selecciona la Audiencia Destinataria
+              </Label>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBroadcastAudience("all_chats")}
+                  className={cn(
+                    "p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between",
+                    broadcastAudience === "all_chats"
+                      ? "border-emerald-500 bg-emerald-500/10 text-emerald-950 dark:text-emerald-100"
+                      : "border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                  )}
+                >
+                  <span className="text-xs font-bold block">Todos los Chats Activos</span>
+                  <span className="text-[10px] text-zinc-500 block mt-1">
+                    {conversations.length} contactos en CRM
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setBroadcastAudience("all_clients")}
+                  className={cn(
+                    "p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between",
+                    broadcastAudience === "all_clients"
+                      ? "border-emerald-500 bg-emerald-500/10 text-emerald-950 dark:text-emerald-100"
+                      : "border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                  )}
+                >
+                  <span className="text-xs font-bold block">Todos los Clientes</span>
+                  <span className="text-[10px] text-zinc-500 block mt-1">
+                    Base completa con teléfono
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setBroadcastAudience("manual")}
+                  className={cn(
+                    "p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between",
+                    broadcastAudience === "manual"
+                      ? "border-emerald-500 bg-emerald-500/10 text-emerald-950 dark:text-emerald-100"
+                      : "border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                  )}
+                >
+                  <span className="text-xs font-bold block">Selección Manual</span>
+                  <span className="text-[10px] text-zinc-500 block mt-1">
+                    {broadcastSelectedPhones.length} seleccionados
+                  </span>
+                </button>
+              </div>
+
+              {/* Si se elige selección manual, mostrar lista de casillas */}
+              {broadcastAudience === "manual" && (
+                <div className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/50 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Input
+                      value={broadcastSearchRecipients}
+                      onChange={(e) => setBroadcastSearchRecipients(e.target.value)}
+                      placeholder="Filtrar por nombre o teléfono..."
+                      className="h-8 text-xs bg-white dark:bg-zinc-900"
+                    />
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setBroadcastSelectedPhones(conversations.map((c) => c.phone))}
+                        className="h-7 text-[10px] px-2"
+                      >
+                        Marcar todos
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setBroadcastSelectedPhones([])}
+                        className="h-7 text-[10px] px-2"
+                      >
+                        Desmarcar
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                    {conversations
+                      .filter((c) => {
+                        const q = broadcastSearchRecipients.toLowerCase()
+                        if (!q) return true
+                        return (
+                          c.phone.toLowerCase().includes(q) ||
+                          (c.client?.name || "").toLowerCase().includes(q)
+                        )
+                      })
+                      .map((c) => {
+                        const checked = broadcastSelectedPhones.includes(c.phone)
+                        return (
+                          <label
+                            key={c.phone}
+                            className="flex items-center justify-between p-1.5 rounded-lg hover:bg-white dark:hover:bg-zinc-900 cursor-pointer text-xs"
+                          >
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setBroadcastSelectedPhones((prev) => [...prev, c.phone])
+                                  } else {
+                                    setBroadcastSelectedPhones((prev) => prev.filter((p) => p !== c.phone))
+                                  }
+                                }}
+                                className="rounded text-emerald-600 focus:ring-emerald-500"
+                              />
+                              <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                                {c.client?.name || "Contacto"}
+                              </span>
+                              <span className="text-[10px] text-zinc-400 font-mono">{c.phone}</span>
+                            </div>
+                            <Badge variant="outline" className="text-[9px] uppercase font-mono">
+                              {c.channel}
+                            </Badge>
+                          </label>
+                        )
+                      })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Resumen de impacto y consumo de Meta */}
+            <div className="p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-xs">
+              <div>
+                <span className="text-zinc-500 block text-[11px]">Destinatarios totales:</span>
+                <span className="text-base font-black text-zinc-950 dark:text-white">
+                  {broadcastAudience === "all_chats"
+                    ? `${conversations.length} contactos`
+                    : broadcastAudience === "all_clients"
+                    ? "Toda la base de clientes"
+                    : `${broadcastSelectedPhones.length} seleccionados`}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-zinc-500 block text-[11px]">Cuota gratuita de Meta:</span>
+                <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                  {metaQuota?.remainingFree ?? 1000} msgs restantes este mes
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="pt-2 gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setBroadcastModalOpen(false)}
+              disabled={sendingBroadcast}
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleExecuteBroadcast}
+              disabled={
+                sendingBroadcast ||
+                !broadcastTemplateId ||
+                (broadcastAudience === "manual" && broadcastSelectedPhones.length === 0)
+              }
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1.5"
+            >
+              {sendingBroadcast ? (
+                <>
+                  <IconRefresh className="h-3.5 w-3.5 animate-spin" />
+                  Enviando Difusión Oficial...
+                </>
+              ) : (
+                <>
+                  <IconSpeakerphone className="h-4 w-4" />
+                  Confirmar y Enviar Difusión Meta
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ========================================================= */}
+      {/* MODAL: IMPORTAR CONTACTOS (CSV / EXCEL)                   */}
+      {/* ========================================================= */}
+      <Dialog open={importModalOpen} onOpenChange={setImportModalOpen}>
+        <DialogContent className="max-w-lg rounded-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <div className="h-8 w-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                <IconUpload className="h-4 w-4" />
+              </div>
+              <span>Importar Directorio de Contactos (CSV / Excel)</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Sube un archivo .csv exportado de Excel o pega las columnas directamente para registrar clientes masivamente.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs space-y-1.5">
+              <div className="font-bold text-zinc-900 dark:text-zinc-100 flex items-center justify-between">
+                <span>Formato de Columnas requerido:</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    const sample =
+                      "Nombre,Telefono,Documento,Email,Direccion,Notas\n" +
+                      "Carlos Mendoza,+573105551234,1098273645,carlos@gmail.com,Calle 10 # 5-20,Cliente frecuente\n" +
+                      "Maria Rodriguez,+573001234567,1098765432,maria@gmail.com,Carrera 15 # 8-30,Pedidos domicilio\n"
+                    const blob = new Blob(["\uFEFF" + sample], { type: "text/csv;charset=utf-8;" })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement("a")
+                    a.href = url
+                    a.setAttribute("download", "plantilla_contactos_ejemplo.csv")
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                    toast.success("Plantilla CSV de ejemplo descargada")
+                  }}
+                  className="h-6 text-[10px] text-emerald-600 hover:text-emerald-700 p-0 font-semibold cursor-pointer"
+                >
+                  <IconDownload className="h-3 w-3 mr-1" />
+                  Descargar Plantilla CSV
+                </Button>
+              </div>
+              <code className="text-[11px] font-mono text-zinc-600 dark:text-zinc-400 block bg-zinc-100 dark:bg-zinc-900 p-1.5 rounded">
+                Nombre, Telefono, Documento, Email, Direccion, Notas
+              </code>
+            </div>
+
+            {/* Subir archivo CSV */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-bold">Seleccionar archivo .csv desde tu equipo</Label>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) {
+                    const reader = new FileReader()
+                    reader.onload = (event) => {
+                      const text = event.target?.result as string
+                      if (text) setImportCsvText(text)
+                    }
+                    reader.readAsText(file, "UTF-8")
+                  }
+                }}
+                className="w-full text-xs file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-zinc-100 dark:file:bg-zinc-800 file:text-zinc-700 dark:file:text-zinc-300 hover:file:bg-zinc-200 cursor-pointer"
+              />
+            </div>
+
+            {/* O pegar texto CSV */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-bold">O pega el texto CSV aquí</Label>
+              <textarea
+                value={importCsvText}
+                onChange={(e) => setImportCsvText(e.target.value)}
+                placeholder={"Nombre,Telefono,Documento,Email\nCarlos Mendoza,+573105551234,1098273645,carlos@gmail.com"}
+                rows={5}
+                className="w-full text-[11px] font-mono p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 resize-none leading-relaxed"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="pt-2 gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setImportModalOpen(false)}
+              disabled={importingContacts}
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => handleImportContactsCsv(importCsvText)}
+              disabled={importingContacts || !importCsvText.trim()}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1.5"
+            >
+              {importingContacts ? (
+                <>
+                  <IconRefresh className="h-3.5 w-3.5 animate-spin" />
+                  Importando...
+                </>
+              ) : (
+                <>
+                  <IconUpload className="h-4 w-4" />
+                  Iniciar Importación
                 </>
               )}
             </Button>

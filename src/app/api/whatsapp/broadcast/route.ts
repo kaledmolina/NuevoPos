@@ -14,17 +14,20 @@ export async function POST(req: NextRequest) {
     const { templateId, customMessage, targetPhones = [] } = body
 
     let templateContent = customMessage || ""
-    let metaTemplateInfo: { name: string; language: string; isMeta: boolean } = {
+    let metaTemplateInfo: { name: string; language: string; isMeta: boolean; status: string } = {
       name: "",
       language: "es",
       isMeta: false,
+      status: "LOCAL",
     }
 
+    let loadedTemplate: any = null
     if (templateId) {
       const template = await db.whatsAppTemplate.findUnique({
         where: { id: templateId },
       })
       if (template) {
+        loadedTemplate = template
         templateContent = template.content
         const metaMatch = template.content.match(/<!--meta:(\{.*?\})-->/)
         if (metaMatch) {
@@ -34,6 +37,7 @@ export async function POST(req: NextRequest) {
               name: metaParsed.name || template.name,
               language: metaParsed.language || "es",
               isMeta: true,
+              status: metaParsed.status || "APPROVED",
             }
           } catch {}
         } else if (/^[a-z0-9_]+$/.test(template.name)) {
@@ -41,6 +45,7 @@ export async function POST(req: NextRequest) {
             name: template.name,
             language: "es",
             isMeta: true,
+            status: "APPROVED",
           }
         }
       }
@@ -95,6 +100,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No se encontraron contactos destinatarios para la difusión." }, { status: 400 })
     }
 
+    // Regla estricta de políticas de Meta: Difusión a WhatsApp requiere plantilla APROBADA (APPROVED)
+    const hasWhatsAppRecipients = recipients.some((r) => !r.phone.startsWith("tg_"))
+    if (hasWhatsAppRecipients) {
+      if (!metaTemplateInfo.isMeta || metaTemplateInfo.status !== "APPROVED") {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `Por políticas oficiales de Meta Cloud API, las difusiones masivas por WhatsApp solo pueden enviarse usando plantillas pre-aprobadas (status: APPROVED). La plantilla '${metaTemplateInfo.name || loadedTemplate?.name || "seleccionada"}' tiene estado '${metaTemplateInfo.status}'. Por favor selecciona una plantilla con el sello verde 'Aprobada por Meta'.`,
+          },
+          { status: 400 }
+        )
+      }
+    }
+
     // Credenciales de Meta y Telegram de la sede activa
     const config = branchId
       ? await db.whatsAppConfig.findUnique({ where: { branchId } })
@@ -126,7 +145,19 @@ export async function POST(req: NextRequest) {
           let metaPayload: any
 
           if (metaTemplateInfo.isMeta) {
-            // Despacho como Plantilla Oficial de Meta Cloud API (Permitido para difusión según políticas de Meta)
+            // Verificar si la plantilla contiene marcadores de variables
+            const hasVar1 = /\{\{1\}\}/.test(cleanTemplateText) || /\{\{nombre\}\}/i.test(templateContent)
+            const hasVar2 = /\{\{2\}\}/.test(cleanTemplateText) || /\{\{saldo\}\}/i.test(templateContent)
+            const templateParams: Array<{ type: string; text: string }> = []
+
+            if (hasVar1) {
+              templateParams.push({ type: "text", text: r.name || "Cliente" })
+            }
+            if (hasVar2) {
+              templateParams.push({ type: "text", text: r.balance ? `$${r.balance.toLocaleString("es-CO")}` : "$0" })
+            }
+
+            // Despacho como Plantilla Oficial de Meta Cloud API
             metaPayload = {
               messaging_product: "whatsapp",
               recipient_type: "individual",
@@ -135,19 +166,20 @@ export async function POST(req: NextRequest) {
               template: {
                 name: metaTemplateInfo.name,
                 language: { code: metaTemplateInfo.language },
-                components: [
-                  {
-                    type: "body",
-                    parameters: [
-                      { type: "text", text: r.name || "Cliente" },
-                      { type: "text", text: r.balance.toLocaleString("es-CO") },
-                    ],
-                  },
-                ],
+                ...(templateParams.length > 0
+                  ? {
+                      components: [
+                        {
+                          type: "body",
+                          parameters: templateParams,
+                        },
+                      ],
+                    }
+                  : {}),
               },
             }
           } else {
-            // Si no es plantilla oficial de Meta, enviar como texto plano (solo funciona en ventana 24h)
+            // Fallback texto plano (solo para pruebas directas en ventana 24h)
             metaPayload = {
               messaging_product: "whatsapp",
               recipient_type: "individual",
