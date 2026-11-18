@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { findWabaId } from "@/lib/meta-whatsapp-policy"
 
 export const dynamic = "force-dynamic"
 
@@ -286,9 +287,9 @@ export async function PATCH(req: NextRequest) {
 
     const startMs = Date.now()
 
-    // Llamar a la API de Meta Graph para verificar el Phone Number ID y obtener el WABA ID asociado
+    // Llamar a la API de Meta Graph para verificar el Phone Number ID
     const metaRes = await fetch(
-      `https://graph.facebook.com/v21.0/${encodeURIComponent(String(phoneNumberId).trim())}?fields=display_phone_number,verified_name,quality_rating,status,whatsapp_business_account`,
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(String(phoneNumberId).trim())}?fields=display_phone_number,verified_name,quality_rating,status`,
       {
         headers: {
           Authorization: `Bearer ${realToken}`,
@@ -313,25 +314,8 @@ export async function PATCH(req: NextRequest) {
       )
     }
 
-    // Auto-guardar WABA ID en settings si Meta lo retorna
-    const detectedWabaId = metaData.whatsapp_business_account?.id || null
-    if (detectedWabaId) {
-      try {
-        const settingKey = branchId ? `meta_waba_id_${branchId}` : "meta_waba_id"
-        await db.setting.upsert({
-          where: { key: settingKey },
-          create: { key: settingKey, value: String(detectedWabaId) },
-          update: { value: String(detectedWabaId) },
-        })
-        await db.setting.upsert({
-          where: { key: "meta_waba_id" },
-          create: { key: "meta_waba_id", value: String(detectedWabaId) },
-          update: { value: String(detectedWabaId) },
-        })
-      } catch (e) {
-        console.warn("[Meta Config PATCH] Error auto-guardando WABA ID:", e)
-      }
-    }
+    // Auto-detectar WABA ID desde el token/cuentas asociadas de forma inteligente
+    const detectedWabaId = await findWabaId(realToken, phoneNumberId, null, branchId)
 
     // Respuesta exitosa de Meta Graph API
     return NextResponse.json({

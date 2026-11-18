@@ -922,7 +922,14 @@ export default function WhatsAppAgentView() {
   // Sincronizar plantillas con Meta Cloud API
   const handleSyncTemplates = async (wabaIdParam?: string | React.MouseEvent) => {
     setSyncingTemplates(true)
-    const explicitWaba = typeof wabaIdParam === "string" ? wabaIdParam.trim() : (config.metaWabaId?.trim() || undefined)
+    let explicitWaba = typeof wabaIdParam === "string" ? wabaIdParam.trim() : (config.metaWabaId?.trim() || undefined)
+
+    // Si el usuario había ingresado por error el Phone Number ID como WABA ID, descartarlo
+    if (explicitWaba && config.metaPhoneNumberId && explicitWaba === config.metaPhoneNumberId.trim()) {
+      explicitWaba = undefined
+      setConfig((c) => ({ ...c, metaWabaId: "" }))
+    }
+
     try {
       const res = await apiFetch<{
         ok: boolean
@@ -943,9 +950,13 @@ export default function WhatsAppAgentView() {
         loadTemplates()
       } else if (res?.requiresWabaId) {
         const inputWaba = prompt(
-          "Meta requiere el Identificador de la cuenta de WhatsApp Business (WABA ID).\n\nLo encuentras en Meta Developers > WhatsApp > Configuración de la API (está justo al lado del Phone Number ID).\n\nIngrésalo aquí:"
+          `Meta requiere el Identificador de la cuenta de WhatsApp Business (WABA ID).\n\n⚠️ ATENCIÓN: NO ingreses tu Phone Number ID (${config.metaPhoneNumberId || ""}).\nEl WABA ID es un número diferente que encuentras en:\nMeta Developers > WhatsApp > Configuración de la API (etiquetado como 'Identificador de la cuenta de WhatsApp Business').\n\nIngresa tu WABA ID aquí:`
         )
         if (inputWaba && inputWaba.trim()) {
+          if (config.metaPhoneNumberId && inputWaba.trim() === config.metaPhoneNumberId.trim()) {
+            toast.error("El valor ingresado es tu Phone Number ID, no el WABA ID. Busca el Identificador de cuenta de WhatsApp Business.")
+            return
+          }
           handleSyncTemplates(inputWaba.trim())
           return
         }

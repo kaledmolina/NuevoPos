@@ -2018,26 +2018,56 @@ async function executeTool(name, args) {
         throw new Error("No hay Token o Phone Number ID de Meta configurado en la sede.")
       }
 
+      const cleanPhoneId = String(phoneId).trim()
       let wabaId = args.wabaId ? String(args.wabaId).trim() : null
+
+      // Descartar si el WABA ID proporcionado es idéntico al Phone Number ID
+      if (wabaId && wabaId === cleanPhoneId) {
+        wabaId = null
+      }
+
       if (!wabaId) {
-        const phoneRes = await fetch(`https://graph.facebook.com/v21.0/${phoneId}?fields=whatsapp_business_account`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        if (phoneRes.ok) {
-          const phoneData = await phoneRes.json()
-          wabaId = phoneData?.whatsapp_business_account?.id || null
-        }
+        // Intentar detectar WABA ID vía debug_token granular_scopes
+        try {
+          const debugRes = await fetch(
+            `https://graph.facebook.com/v21.0/debug_token?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(token)}`
+          )
+          if (debugRes.ok) {
+            const debugJson = await debugRes.json()
+            const scopes = debugJson?.data?.granular_scopes || []
+            for (const gs of scopes) {
+              if (
+                (gs.scope === "whatsapp_business_management" || gs.scope === "whatsapp_business_messaging") &&
+                Array.isArray(gs.target_ids) &&
+                gs.target_ids.length > 0
+              ) {
+                const targetId = String(gs.target_ids[0]).trim()
+                if (targetId && targetId !== cleanPhoneId) {
+                  wabaId = targetId
+                  break
+                }
+              }
+            }
+          }
+        } catch {}
       }
 
       if (!wabaId) {
         const savedSetting = await prisma.setting.findFirst({
           where: { OR: [{ key: `meta_waba_id_${SESSION_CONTEXT.branchId}` }, { key: "meta_waba_id" }] },
         })
-        wabaId = savedSetting?.value?.trim() || process.env.WHATSAPP_WABA_ID || null
+        const val = savedSetting?.value?.trim()
+        if (val && val !== cleanPhoneId) {
+          wabaId = val
+        } else if (process.env.WHATSAPP_WABA_ID && process.env.WHATSAPP_WABA_ID.trim() !== cleanPhoneId) {
+          wabaId = process.env.WHATSAPP_WABA_ID.trim()
+        }
       }
 
       if (!wabaId) {
-        throw new Error("No se pudo detectar el WABA ID. Por favor proporciónalo como argumento.")
+        throw new Error(
+          `Meta requiere el WABA ID (WhatsApp Business Account ID), no el Phone Number ID (${cleanPhoneId}). Encuéntralo en Meta Developers > WhatsApp > Configuración de la API (etiquetado como 'Identificador de la cuenta de WhatsApp Business') y proporciónalo como wabaId.`
+        )
       }
 
       const templatesRes = await fetch(
@@ -2046,7 +2076,7 @@ async function executeTool(name, args) {
       )
       if (!templatesRes.ok) {
         const errText = await templatesRes.text()
-        throw new Error(`Error de Meta al obtener plantillas: ${errText}`)
+        throw new Error(`Error de Meta al obtener plantillas de la cuenta ${wabaId}: ${errText}`)
       }
 
       const tplData = await templatesRes.json()
