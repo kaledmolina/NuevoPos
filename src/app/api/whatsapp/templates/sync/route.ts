@@ -23,7 +23,8 @@ export async function POST(req: NextRequest) {
           syncedCount: res.syncedCount,
           requiresWabaId: !!res.requiresWabaId,
         },
-        { status: 400 }
+        // Retornar status 200 para que apiFetch devuelva el payload y la UI abra el modal de ingreso de WABA ID
+        { status: res.requiresWabaId ? 200 : 400 }
       )
     }
 

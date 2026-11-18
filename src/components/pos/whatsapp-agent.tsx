@@ -474,6 +474,12 @@ export default function WhatsAppAgentView() {
   const [copiedToken, setCopiedToken] = useState(false)
   const [copiedTgWebhook, setCopiedTgWebhook] = useState(false)
 
+  // Modal interactivo de WABA ID para plantillas de Meta Cloud API
+  const [wabaModalOpen, setWabaModalOpen] = useState(false)
+  const [wabaInputValue, setWabaInputValue] = useState("")
+  const [savingWaba, setSavingWaba] = useState(false)
+  const [detectingWaba, setDetectingWaba] = useState(false)
+
   // Estado del monitor de cuota y peticiones gratis en OpenRouter
   const [openrouterQuota, setOpenrouterQuota] = useState<OpenRouterQuotaInfo | null>(null)
   const [loadingQuota, setLoadingQuota] = useState(false)
@@ -921,19 +927,26 @@ export default function WhatsAppAgentView() {
 
   // Sincronizar plantillas con Meta Cloud API
   const handleSyncTemplates = async (wabaIdParam?: string | React.MouseEvent) => {
-    setSyncingTemplates(true)
     let explicitWaba = typeof wabaIdParam === "string" ? wabaIdParam.trim() : (config.metaWabaId?.trim() || undefined)
 
-    // Si el usuario había ingresado por error el Phone Number ID como WABA ID, descartarlo
+    // Si el usuario tenía registrado por error el Phone Number ID como WABA ID, descartarlo
     if (explicitWaba && config.metaPhoneNumberId && explicitWaba === config.metaPhoneNumberId.trim()) {
       explicitWaba = undefined
       setConfig((c) => ({ ...c, metaWabaId: "" }))
     }
 
+    // Si no se dispone de WABA ID, abrir directamente el modal con instrucciones guiadas
+    if (!explicitWaba) {
+      setWabaInputValue(config.metaWabaId || "")
+      setWabaModalOpen(true)
+      return
+    }
+
+    setSyncingTemplates(true)
     try {
       const res = await apiFetch<{
         ok: boolean
-        message: string
+        message?: string
         syncedCount: number
         wabaId?: string
         requiresWabaId?: boolean
@@ -942,6 +955,7 @@ export default function WhatsAppAgentView() {
         method: "POST",
         body: JSON.stringify({ wabaId: explicitWaba, branchId: currentBranchId }),
       })
+
       if (res && res.ok) {
         if (res.wabaId) {
           setConfig((c) => ({ ...c, metaWabaId: res.wabaId }))
@@ -949,25 +963,114 @@ export default function WhatsAppAgentView() {
         toast.success(res.message || `Se sincronizaron ${res.syncedCount} plantillas oficiales desde Meta`)
         loadTemplates()
       } else if (res?.requiresWabaId) {
-        const inputWaba = prompt(
-          `Meta requiere el Identificador de la cuenta de WhatsApp Business (WABA ID).\n\n⚠️ ATENCIÓN: NO ingreses tu Phone Number ID (${config.metaPhoneNumberId || ""}).\nEl WABA ID es un número diferente que encuentras en:\nMeta Developers > WhatsApp > Configuración de la API (etiquetado como 'Identificador de la cuenta de WhatsApp Business').\n\nIngresa tu WABA ID aquí:`
-        )
-        if (inputWaba && inputWaba.trim()) {
-          if (config.metaPhoneNumberId && inputWaba.trim() === config.metaPhoneNumberId.trim()) {
-            toast.error("El valor ingresado es tu Phone Number ID, no el WABA ID. Busca el Identificador de cuenta de WhatsApp Business.")
-            return
-          }
-          handleSyncTemplates(inputWaba.trim())
-          return
-        }
-        toast.error(res?.error || "Se requiere el WABA ID para sincronizar")
+        setWabaInputValue(explicitWaba || "")
+        setWabaModalOpen(true)
       } else {
         toast.error(res?.error || "No se pudieron sincronizar las plantillas de Meta")
       }
-    } catch (e) {
-      toast.error("Error al sincronizar plantillas con Meta: " + (e as Error).message)
+    } catch (e: any) {
+      const msg = (e as Error).message || ""
+      if (
+        msg.includes("WABA ID") ||
+        msg.includes("Identificador de la Cuenta") ||
+        msg.includes("message_templates") ||
+        msg.includes("nonexisting field")
+      ) {
+        setWabaInputValue(explicitWaba || "")
+        setWabaModalOpen(true)
+      } else {
+        toast.error("Error al sincronizar plantillas con Meta: " + msg)
+      }
     } finally {
       setSyncingTemplates(false)
+    }
+  }
+
+  // Guardar WABA ID y sincronizar plantillas desde el modal interactivo
+  const handleSaveWabaAndSync = async () => {
+    const clean = wabaInputValue.trim()
+    if (!clean) {
+      toast.error("Por favor ingresa el WABA ID de tu cuenta de Meta")
+      return
+    }
+
+    if (config.metaPhoneNumberId && clean === config.metaPhoneNumberId.trim()) {
+      toast.error("⚠️ El número ingresado es tu Phone Number ID. El WABA ID es el 'Identificador de la cuenta de WhatsApp Business' que aparece al lado en Meta Developers.")
+      return
+    }
+
+    setSavingWaba(true)
+    try {
+      // 1. Guardar en configuración de la sede
+      await apiFetch("/api/whatsapp/config", {
+        method: "POST",
+        body: JSON.stringify({
+          ...config,
+          branchId: currentBranchId,
+          metaWabaId: clean,
+        }),
+      })
+      setConfig((c) => ({ ...c, metaWabaId: clean }))
+
+      // 2. Ejecutar sincronización con Meta
+      const res = await apiFetch<{
+        ok: boolean
+        message?: string
+        syncedCount: number
+        wabaId?: string
+        requiresWabaId?: boolean
+        error?: string
+      }>("/api/whatsapp/templates/sync", {
+        method: "POST",
+        body: JSON.stringify({ wabaId: clean, branchId: currentBranchId }),
+      })
+
+      if (res && res.ok) {
+        setWabaModalOpen(false)
+        toast.success(`✅ ¡WABA ID vinculado y sincronizadas ${res.syncedCount} plantillas oficiales de Meta!`)
+        loadTemplates()
+      } else {
+        toast.error(res?.error || "Error al sincronizar plantillas con este WABA ID. Revisa que pertenezca a la misma cuenta de WhatsApp.")
+      }
+    } catch (err: any) {
+      toast.error("Error al vincular WABA ID: " + (err as Error).message)
+    } finally {
+      setSavingWaba(false)
+    }
+  }
+
+  // Auto-detectar WABA ID directamente desde Meta Graph API
+  const handleDetectWaba = async () => {
+    if (!config.metaPhoneNumberId) {
+      toast.error("Primero debes configurar tu Phone Number ID de Meta")
+      return
+    }
+    setDetectingWaba(true)
+    try {
+      const res = await apiFetch<{
+        ok: boolean
+        wabaId?: string | null
+        error?: string
+      }>("/api/whatsapp/config", {
+        method: "PATCH",
+        body: JSON.stringify({
+          action: "test_meta",
+          phoneNumberId: config.metaPhoneNumberId,
+          accessToken: config.metaAccessToken,
+          branchId: currentBranchId,
+        }),
+      })
+
+      if (res && res.ok && res.wabaId) {
+        setWabaInputValue(res.wabaId)
+        toast.success(`¡WABA ID detectado automáticamente desde Meta: ${res.wabaId}!`)
+      } else {
+        toast.info("Meta no expuso el WABA ID automáticamente con este token. Cópialo manualmente desde el panel de Meta Developers.")
+      }
+    } catch (e: any) {
+      toast.error("No se pudo detectar automáticamente: " + (e as Error).message)
+    } finally {
+      setDetectingWaba(false)
     }
   }
 
@@ -2970,6 +3073,19 @@ export default function WhatsAppAgentView() {
                 {syncingTemplates ? "Sincronizando..." : "Sincronizar con Meta"}
               </Button>
               <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setWabaInputValue(config.metaWabaId || "")
+                  setWabaModalOpen(true)
+                }}
+                className="rounded-xl h-9 text-xs text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white border border-dashed border-zinc-300 dark:border-zinc-700 gap-1.5"
+                title="Configurar o cambiar el Identificador de la Cuenta de WhatsApp Business (WABA ID)"
+              >
+                <IconKey className="h-3.5 w-3.5" />
+                {config.metaWabaId ? `WABA: ${config.metaWabaId.slice(0, 5)}...` : "Configurar WABA ID"}
+              </Button>
+              <Button
                 onClick={() => handleSendBroadcast(false)}
                 className="rounded-xl h-9 text-xs font-bold bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 gap-1.5 shadow-2xs"
               >
@@ -4966,6 +5082,142 @@ export default function WhatsAppAgentView() {
           <DialogFooter className="pt-2">
             <Button variant="outline" size="sm" onClick={() => setMetaQuotaModalOpen(false)}>
               Entendido
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ========================================================= */}
+      {/* MODAL: VINCULAR CUENTA DE WHATSAPP BUSINESS (WABA ID)     */}
+      {/* ========================================================= */}
+      <Dialog open={wabaModalOpen} onOpenChange={setWabaModalOpen}>
+        <DialogContent className="max-w-lg rounded-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <div className="h-8 w-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                <IconBrandWhatsapp className="h-5 w-5" />
+              </div>
+              <span>Vincular Cuenta de WhatsApp Business (WABA ID)</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Meta requiere el identificador de tu cuenta comercial para sincronizar y despachar plantillas oficiales aprobadas.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Guía visual paso a paso */}
+            <div className="p-3.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-xs space-y-2.5">
+              <div className="flex items-center gap-2 font-semibold text-emerald-800 dark:text-emerald-300">
+                <IconInfoCircle className="h-4 w-4 shrink-0 text-emerald-600" />
+                <span>¿Cómo encontrar tu WABA ID en 30 segundos?</span>
+              </div>
+              <ol className="list-decimal list-inside space-y-1.5 text-zinc-600 dark:text-zinc-400 pl-1 leading-relaxed">
+                <li>
+                  Ingresa a{" "}
+                  <a
+                    href="https://developers.facebook.com/apps/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-emerald-600 dark:text-emerald-400 font-semibold underline inline-flex items-center gap-0.5"
+                  >
+                    Meta Developers <IconExternalLink className="h-3 w-3" />
+                  </a>{" "}
+                  y selecciona tu Aplicación.
+                </li>
+                <li>
+                  En el menú lateral izquierdo ve a <strong>WhatsApp &gt; Configuración de la API</strong>.
+                </li>
+                <li>
+                  En el <strong>Paso 1 (Enviar y recibir mensajes)</strong> verás dos identificadores:
+                  <div className="mt-1.5 space-y-1 pl-3 font-mono text-[11px]">
+                    <div className="text-zinc-500">
+                      📱 Identificador de número: <span className="font-semibold text-zinc-700 dark:text-zinc-300">{config.metaPhoneNumberId || "1388598761007890"}</span> (este ya está conectado)
+                    </div>
+                    <div className="text-emerald-700 dark:text-emerald-300 font-bold">
+                      🏢 Identificador de la cuenta de WhatsApp Business: <span className="underline">Copia este número</span>
+                    </div>
+                  </div>
+                </li>
+              </ol>
+            </div>
+
+            {/* Input del WABA ID */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center justify-between">
+                <span>Identificador de Cuenta Comercial (WABA ID)</span>
+                {config.metaPhoneNumberId && (
+                  <span className="text-[10px] text-zinc-400 font-normal">
+                    Tu Phone ID es: {config.metaPhoneNumberId}
+                  </span>
+                )}
+              </label>
+              <div className="relative">
+                <Input
+                  value={wabaInputValue}
+                  onChange={(e) => setWabaInputValue(e.target.value)}
+                  placeholder="Ej: 109827364512345 (número de 15 a 16 dígitos)"
+                  className="h-10 text-xs font-mono bg-zinc-50 dark:bg-zinc-950 pr-28"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={detectingWaba}
+                  onClick={handleDetectWaba}
+                  className="absolute right-1 top-1 h-8 text-[11px] text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 px-2 font-semibold"
+                  title="Intentar obtener el WABA ID directamente desde tu token de Meta"
+                >
+                  <IconRefresh className={cn("h-3 w-3 mr-1", detectingWaba && "animate-spin")} />
+                  {detectingWaba ? "Buscando..." : "Auto-detectar"}
+                </Button>
+              </div>
+
+              {/* Advertencia si el usuario pone el Phone Number ID */}
+              {Boolean(
+                config.metaPhoneNumberId &&
+                wabaInputValue.trim() &&
+                wabaInputValue.trim() === config.metaPhoneNumberId.trim()
+              ) && (
+                <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-400 text-xs flex items-start gap-2">
+                  <IconAlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>¡Atención!</strong> Has ingresado tu <em>Phone Number ID</em> ({config.metaPhoneNumberId}). Meta exige el <strong>Identificador de la cuenta de WhatsApp Business</strong> que aparece justo al lado en la consola de Meta Developers.
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="pt-2 gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setWabaModalOpen(false)}
+              disabled={savingWaba}
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSaveWabaAndSync}
+              disabled={
+                savingWaba ||
+                !wabaInputValue.trim() ||
+                (Boolean(config.metaPhoneNumberId) && wabaInputValue.trim() === config.metaPhoneNumberId?.trim())
+              }
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1.5"
+            >
+              {savingWaba ? (
+                <>
+                  <IconRefresh className="h-3.5 w-3.5 animate-spin" />
+                  Guardando y Sincronizando...
+                </>
+              ) : (
+                <>
+                  <IconShieldCheck className="h-4 w-4" />
+                  Guardar y Sincronizar Plantillas
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

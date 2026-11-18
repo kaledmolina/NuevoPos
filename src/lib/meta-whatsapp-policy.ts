@@ -221,7 +221,53 @@ export async function findWabaId(
     return process.env.WHATSAPP_WABA_ID.trim()
   }
 
-  // 4. debug_token (extrae los target_ids bajo granular_scopes)
+  // 4. /me?fields=whatsapp_business_accounts (cuentas asociadas directamente al usuario o System User)
+  try {
+    const meWabaRes = await fetch(
+      `https://graph.facebook.com/v21.0/me?fields=whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number}}`,
+      { headers: { Authorization: `Bearer ${cleanToken}` } }
+    )
+    if (meWabaRes.ok) {
+      const meWabaJson = await meWabaRes.json()
+      const wabas = meWabaJson?.whatsapp_business_accounts?.data || []
+      // 4.1 Priorizar WABA que contenga el phoneId vinculado
+      for (const w of wabas) {
+        const phoneList = w?.phone_numbers?.data || []
+        const hasPhone = phoneList.some((p: any) => String(p.id).trim() === cleanPhoneId)
+        if (hasPhone && isValidWabaCandidate(w.id)) {
+          const candidate = String(w.id).trim()
+          console.log(`[Meta Sync] WABA ID vinculado encontrado por Phone Number ID en /me: ${candidate}`)
+          try {
+            await db.setting.upsert({
+              where: { key: settingKey },
+              create: { key: settingKey, value: candidate },
+              update: { value: candidate },
+            })
+          } catch {}
+          return candidate
+        }
+      }
+      // 4.2 Si solo hay 1 WABA disponible y válida
+      for (const w of wabas) {
+        if (isValidWabaCandidate(w.id)) {
+          const candidate = String(w.id).trim()
+          console.log(`[Meta Sync] WABA ID único detectado vía /me: ${candidate}`)
+          try {
+            await db.setting.upsert({
+              where: { key: settingKey },
+              create: { key: settingKey, value: candidate },
+              update: { value: candidate },
+            })
+          } catch {}
+          return candidate
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[Meta Sync] me?fields=whatsapp_business_accounts warning:", e)
+  }
+
+  // 5. debug_token (extrae los target_ids bajo granular_scopes)
   try {
     const debugUrl = `https://graph.facebook.com/v21.0/debug_token?input_token=${encodeURIComponent(cleanToken)}&access_token=${encodeURIComponent(cleanToken)}`
     const debugRes = await fetch(debugUrl)
@@ -255,15 +301,31 @@ export async function findWabaId(
     console.warn("[Meta Sync] debug_token warning:", e)
   }
 
-  // 5. /me/assigned_whatsapp_business_accounts (para System Users con WABA asignado)
+  // 6. /me/assigned_whatsapp_business_accounts (para System Users con WABA asignado)
   try {
     const assignedRes = await fetch(
-      `https://graph.facebook.com/v21.0/me/assigned_whatsapp_business_accounts`,
+      `https://graph.facebook.com/v21.0/me/assigned_whatsapp_business_accounts?fields=id,name,phone_numbers{id,display_phone_number}`,
       { headers: { Authorization: `Bearer ${cleanToken}` } }
     )
     if (assignedRes.ok) {
       const assignedJson = await assignedRes.json()
       if (Array.isArray(assignedJson?.data) && assignedJson.data.length > 0) {
+        for (const item of assignedJson.data) {
+          const phoneList = item?.phone_numbers?.data || []
+          const hasPhone = phoneList.some((p: any) => String(p.id).trim() === cleanPhoneId)
+          if (hasPhone && isValidWabaCandidate(item.id)) {
+            const candidate = String(item.id).trim()
+            console.log(`[Meta Sync] WABA ID encontrado por Phone ID en assigned_wabas: ${candidate}`)
+            try {
+              await db.setting.upsert({
+                where: { key: settingKey },
+                create: { key: settingKey, value: candidate },
+                update: { value: candidate },
+              })
+            } catch {}
+            return candidate
+          }
+        }
         for (const item of assignedJson.data) {
           const candidate = String(item.id).trim()
           if (isValidWabaCandidate(candidate)) {
