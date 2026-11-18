@@ -331,6 +331,8 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST: Enviar un mensaje manual desde el agente humano en el CRM hacia el cliente
+ * - Aplica política estricta de Meta Cloud API: Fuera de la ventana de 24h, solo permite enviar Plantillas Oficiales.
+ * - Soporta tanto mensajes de texto libre (dentro de ventana 24h) como plantillas oficiales pre-aprobadas por Meta.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -338,43 +340,95 @@ export async function POST(req: NextRequest) {
     const branchId = branchAccess instanceof NextResponse ? null : branchAccess.branchId
 
     const body = await req.json()
-    const { phone, text } = body
+    const { phone, text, templateId, templateName, templateLanguage, templateParams } = body
 
-    if (!phone || !text || !text.trim()) {
-      return NextResponse.json({ error: "Teléfono y texto son requeridos" }, { status: 400 })
+    if (!phone) {
+      return NextResponse.json({ error: "El teléfono es requerido" }, { status: 400 })
     }
 
     const isTelegram = String(phone).startsWith("tg_")
     const cleanPhone = isTelegram ? String(phone) : String(phone).replace(/[^0-9+]/g, "")
+    const numericPhone = cleanPhone.replace("+", "")
+
+    // Buscar configuración de la sede para credenciales de Meta / Telegram
+    const config = branchId
+      ? await db.whatsAppConfig.findUnique({ where: { branchId } })
+      : await db.whatsAppConfig.findFirst()
+
+    // 1. RESTRICCIÓN DE POLÍTICA OFICIAL DE META PARA WHATSAPP
+    // Si no es Telegram y no se está enviando una plantilla oficial:
+    let isTemplateDispatch = Boolean(templateId || templateName)
+    let metaTemplateToUse: { name: string; language: string; content: string } | null = null
+
+    if (templateId) {
+      const dbTpl = await db.whatsAppTemplate.findUnique({ where: { id: templateId } })
+      if (dbTpl) {
+        let parsedMeta: any = null
+        const metaMatch = dbTpl.content.match(/<!--meta:(\{.*?\})-->/)
+        if (metaMatch) {
+          try {
+            parsedMeta = JSON.parse(metaMatch[1])
+          } catch {}
+        }
+        metaTemplateToUse = {
+          name: parsedMeta?.name || dbTpl.name,
+          language: templateLanguage || parsedMeta?.language || "es",
+          content: dbTpl.content.replace(/<!--meta:\{.*?\}-->\n?/, "").trim(),
+        }
+        isTemplateDispatch = true
+      }
+    } else if (templateName) {
+      metaTemplateToUse = {
+        name: templateName,
+        language: templateLanguage || "es",
+        content: text || `Plantilla oficial ${templateName}`,
+      }
+      isTemplateDispatch = true
+    }
+
+    if (!isTelegram && !isTemplateDispatch) {
+      // Verificar si la ventana de 24 horas del cliente está activa
+      const lastCustomerMsg = await db.whatsAppMessage.findFirst({
+        where: {
+          OR: [{ phone: cleanPhone }, { phone: numericPhone }],
+          sender: "customer",
+          channel: "whatsapp",
+        },
+        orderBy: { createdAt: "desc" },
+      })
+
+      const careWindow = calculateCareWindow(lastCustomerMsg?.createdAt)
+      if (!careWindow.isOpen) {
+        return NextResponse.json(
+          {
+            ok: false,
+            policyBlocked: true,
+            error:
+              "Política de Meta Cloud API: La ventana de atención al cliente de 24 horas ha expirado o nunca fue iniciada por el cliente. Para contactar a este cliente debes enviar una Plantilla Oficial de Meta pre-aprobada.",
+          },
+          { status: 403 }
+        )
+      }
+    }
+
+    const finalText = (text || metaTemplateToUse?.content || "").trim()
+    if (!finalText && !metaTemplateToUse) {
+      return NextResponse.json({ error: "El mensaje o la plantilla son requeridos" }, { status: 400 })
+    }
 
     // Buscar cliente asociado
     const client = await db.client.findFirst({
       where: {
         OR: [
           { phone: cleanPhone },
-          ...(isTelegram ? [] : [{ phone: cleanPhone.replace("+", "") }]),
+          ...(isTelegram ? [] : [{ phone: numericPhone }]),
         ],
         ...(branchId ? { branchId } : {}),
       },
     })
 
-    // Guardar en la base de datos como mensaje de "agent"
-    const saved = await db.whatsAppMessage.create({
-      data: {
-        phone: cleanPhone,
-        sender: "agent",
-        text: text.trim(),
-        status: "sent",
-        branchId: branchId || null,
-        clientId: client?.id || null,
-        channel: isTelegram ? "telegram" : "whatsapp",
-      },
-    })
-
-    // Despachar por Telegram Bot API o Meta Cloud API (credenciales de la sede o globales)
-    const config = branchId
-      ? await db.whatsAppConfig.findUnique({ where: { branchId } })
-      : null
+    // Despachar a Telegram o Meta Cloud API
+    let metaDispatchError: string | null = null
 
     if (isTelegram) {
       const tgToken = config?.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN
@@ -385,33 +439,114 @@ export async function POST(req: NextRequest) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             chat_id: chatId,
-            text: text.trim(),
+            text: finalText,
           }),
         }).catch((e) => console.error("[Telegram Dispatch Error]:", e))
       }
     } else {
-      const token = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
+      const rawToken = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
       const phoneId = config?.metaPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
+      const token = rawToken ? rawToken.replace(/[\u2022\u2023\u25E6\u2043\u2219•]/g, "").trim() : ""
+
       if (token && phoneId) {
-        await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
+        let metaPayload: any
+
+        if (isTemplateDispatch && metaTemplateToUse) {
+          // Despacho oficial como plantilla de Meta Cloud API
+          const paramsList = Array.isArray(templateParams) ? templateParams : []
+          metaPayload = {
             messaging_product: "whatsapp",
-            to: cleanPhone,
+            recipient_type: "individual",
+            to: numericPhone,
+            type: "template",
+            template: {
+              name: metaTemplateToUse.name,
+              language: { code: metaTemplateToUse.language || "es" },
+              ...(paramsList.length > 0
+                ? {
+                    components: [
+                      {
+                        type: "body",
+                        parameters: paramsList.map((p: any) => ({
+                          type: "text",
+                          text: String(p ?? ""),
+                        })),
+                      },
+                    ],
+                  }
+                : {}),
+            },
+          }
+        } else {
+          // Despacho de texto libre (dentro de ventana de 24h)
+          metaPayload = {
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: numericPhone,
             type: "text",
-            text: { body: text.trim() },
-          }),
-        }).catch((e) => console.error("[Meta Dispatch Error]:", e))
+            text: { body: finalText },
+          }
+        }
+
+        try {
+          const metaRes = await fetch(
+            `https://graph.facebook.com/v21.0/${encodeURIComponent(String(phoneId).trim())}/messages`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(metaPayload),
+            }
+          )
+
+          if (!metaRes.ok) {
+            const errData = await metaRes.json().catch(() => ({}))
+            const errorMsg =
+              errData?.error?.message ||
+              errData?.error?.error_user_msg ||
+              `Error HTTP ${metaRes.status} desde Meta Cloud API`
+            console.error("[Meta Dispatch Error]:", errData)
+            metaDispatchError = errorMsg
+            return NextResponse.json(
+              {
+                ok: false,
+                error: `Meta Cloud API rechazó el mensaje: ${errorMsg}`,
+              },
+              { status: 400 }
+            )
+          }
+        } catch (e) {
+          console.error("[Meta Dispatch Exception]:", e)
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `Error de red al conectar con Meta: ${(e as Error).message}`,
+            },
+            { status: 500 }
+          )
+        }
       }
     }
+
+    // Guardar en la base de datos como mensaje de "agent"
+    const saved = await db.whatsAppMessage.create({
+      data: {
+        phone: cleanPhone,
+        sender: "agent",
+        text: finalText,
+        status: "sent",
+        branchId: branchId || null,
+        clientId: client?.id || null,
+        channel: isTelegram ? "telegram" : "whatsapp",
+      },
+    })
 
     return NextResponse.json({
       ok: true,
       message: saved,
+      metaDispatchError,
     })
   } catch (error) {
     return NextResponse.json(

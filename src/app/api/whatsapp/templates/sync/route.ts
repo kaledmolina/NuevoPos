@@ -11,8 +11,9 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json().catch(() => ({}))
     const explicitWabaId = body?.wabaId
+    const effectiveBranchId = body?.branchId || branchId
 
-    const res = await syncMetaCloudTemplates(branchId, explicitWabaId)
+    const res = await syncMetaCloudTemplates(effectiveBranchId, explicitWabaId)
 
     if (!res.ok) {
       return NextResponse.json(

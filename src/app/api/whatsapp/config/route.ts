@@ -57,8 +57,22 @@ export async function GET(req: NextRequest) {
     const effectiveOpenRouterKey = config.openrouterApiKey || process.env.OPENROUTER_API_KEY || ""
     const effectiveMetaToken = config.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN || ""
 
+    // Cargar WABA ID guardado en settings si existe
+    let metaWabaId = process.env.WHATSAPP_WABA_ID || ""
+    try {
+      const savedWaba = await db.setting.findFirst({
+        where: {
+          OR: [{ key: `meta_waba_id_${targetBranchId}` }, { key: "meta_waba_id" }],
+        },
+      })
+      if (savedWaba?.value) {
+        metaWabaId = savedWaba.value.trim()
+      }
+    } catch {}
+
     const maskedConfig = {
       ...config,
+      metaWabaId,
       hasDeepSeekKey: !!effectiveDeepSeekKey,
       hasOpenRouterKey: !!effectiveOpenRouterKey,
       hasMetaToken: !!effectiveMetaToken,
@@ -183,10 +197,39 @@ export async function POST(req: NextRequest) {
       update: dataToUpdate,
     })
 
+    // Guardar WABA ID en settings si se proporcionó
+    let savedWabaId = body.metaWabaId ? String(body.metaWabaId).trim() : ""
+    if (savedWabaId) {
+      try {
+        await db.setting.upsert({
+          where: { key: `meta_waba_id_${branchId}` },
+          create: { key: `meta_waba_id_${branchId}`, value: savedWabaId },
+          update: { value: savedWabaId },
+        })
+        await db.setting.upsert({
+          where: { key: "meta_waba_id" },
+          create: { key: "meta_waba_id", value: savedWabaId },
+          update: { value: savedWabaId },
+        })
+      } catch (e) {
+        console.warn("[WhatsApp Config POST] Error guardando metaWabaId en settings:", e)
+      }
+    } else {
+      try {
+        const found = await db.setting.findFirst({
+          where: {
+            OR: [{ key: `meta_waba_id_${branchId}` }, { key: "meta_waba_id" }],
+          },
+        })
+        if (found?.value) savedWabaId = found.value.trim()
+      } catch {}
+    }
+
     return NextResponse.json({
       ok: true,
       config: {
         ...updated,
+        metaWabaId: savedWabaId,
         hasDeepSeekKey: !!updated.deepseekApiKey,
         hasOpenRouterKey: !!updated.openrouterApiKey,
         hasMetaToken: !!updated.metaAccessToken,
@@ -209,27 +252,46 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
-    const { action, phoneNumberId, accessToken } = body
+    const { action, phoneNumberId, accessToken, branchId } = body
 
     if (action !== "test_meta") {
       return NextResponse.json({ error: "Acción no reconocida" }, { status: 400 })
     }
 
-    if (!phoneNumberId || !accessToken) {
+    if (!phoneNumberId) {
       return NextResponse.json(
-        { error: "Se requieren phoneNumberId y accessToken para validar la conexión con Meta" },
+        { error: "Se requiere el Phone Number ID para validar la conexión con Meta" },
         { status: 400 }
+      )
+    }
+
+    // Resolver token real: si el cliente envía token enmascarado o vacío, buscar en DB o env
+    let realToken = (accessToken || "").trim()
+    if (!realToken || realToken.includes("•") || realToken.includes("••••")) {
+      const config = branchId
+        ? await db.whatsAppConfig.findUnique({ where: { branchId } })
+        : await db.whatsAppConfig.findFirst()
+      realToken = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN || ""
+    }
+
+    // Sanitizar token eliminando caracteres no-ASCII / ByteString
+    realToken = realToken.replace(/[\u2022\u2023\u25E6\u2043\u2219•]/g, "").trim()
+
+    if (!realToken) {
+      return NextResponse.json(
+        { ok: false, error: "No se encontró un Access Token válido de Meta. Ingresa o guarda el token en Configuración." },
+        { status: 200 }
       )
     }
 
     const startMs = Date.now()
 
-    // Llamar a la API de Meta Graph para verificar el Phone Number ID
+    // Llamar a la API de Meta Graph para verificar el Phone Number ID y obtener el WABA ID asociado
     const metaRes = await fetch(
-      `https://graph.facebook.com/v19.0/${phoneNumberId}`,
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(String(phoneNumberId).trim())}?fields=display_phone_number,verified_name,quality_rating,status,whatsapp_business_account`,
       {
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${realToken}`,
           "Content-Type": "application/json",
         },
         // Timeout manual: 8 segundos
@@ -247,8 +309,28 @@ export async function PATCH(req: NextRequest) {
         `Error HTTP ${metaRes.status} desde Meta Graph API`
       return NextResponse.json(
         { ok: false, error: errorMsg, latencyMs },
-        { status: 200 } // Retornamos 200 para que el frontend maneje el error de forma controlada
+        { status: 200 }
       )
+    }
+
+    // Auto-guardar WABA ID en settings si Meta lo retorna
+    const detectedWabaId = metaData.whatsapp_business_account?.id || null
+    if (detectedWabaId) {
+      try {
+        const settingKey = branchId ? `meta_waba_id_${branchId}` : "meta_waba_id"
+        await db.setting.upsert({
+          where: { key: settingKey },
+          create: { key: settingKey, value: String(detectedWabaId) },
+          update: { value: String(detectedWabaId) },
+        })
+        await db.setting.upsert({
+          where: { key: "meta_waba_id" },
+          create: { key: "meta_waba_id", value: String(detectedWabaId) },
+          update: { value: String(detectedWabaId) },
+        })
+      } catch (e) {
+        console.warn("[Meta Config PATCH] Error auto-guardando WABA ID:", e)
+      }
     }
 
     // Respuesta exitosa de Meta Graph API
@@ -259,6 +341,7 @@ export async function PATCH(req: NextRequest) {
       qualityRating: metaData.quality_rating || null,
       verifiedName: metaData.verified_name || null,
       status: metaData.status || "CONNECTED",
+      wabaId: detectedWabaId,
       latencyMs,
     })
   } catch (error) {

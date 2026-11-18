@@ -148,23 +148,91 @@ export function calculateCareWindow(lastCustomerMessageDate?: Date | string | nu
 
 /**
  * Resuelve el ID de la cuenta de WhatsApp Business (WABA ID) usando múltiples estrategias:
- * 1. WABA ID explícito proporcionado por el usuario o configuración
- * 2. /debug_token granular_scopes (donde Meta lista los target_ids asignados al token)
- * 3. /me/assigned_whatsapp_business_accounts (asignaciones del System User)
- * 4. /me/businesses -> owned_whatsapp_business_accounts
+ * 1. WABA ID explícito proporcionado por el usuario o guardado en Setting
+ * 2. Consulta directa a la API de Meta: /{phoneId}?fields=whatsapp_business_account
+ * 3. /debug_token granular_scopes (donde Meta lista los target_ids asignados al token)
+ * 4. /me/assigned_whatsapp_business_accounts (asignaciones del System User)
+ * 5. /me/businesses -> owned_whatsapp_business_accounts
  */
 export async function findWabaId(
   token: string,
   phoneId?: string | null,
-  explicitWabaId?: string | null
+  explicitWabaId?: string | null,
+  branchId?: string | null
 ): Promise<string | null> {
+  // Limpiar caracteres no-ASCII (como viñetas •) y espacios
+  const cleanToken = token.replace(/[\u2022\u2023\u25E6\u2043\u2219•]/g, "").trim()
+  if (!cleanToken) return null
+
+  const settingKey = branchId ? `meta_waba_id_${branchId}` : "meta_waba_id"
+
+  // 1. WABA ID explícito
   if (explicitWabaId && String(explicitWabaId).trim().length > 0) {
-    return String(explicitWabaId).trim()
+    const candidate = String(explicitWabaId).trim()
+    try {
+      await db.setting.upsert({
+        where: { key: settingKey },
+        create: { key: settingKey, value: candidate },
+        update: { value: candidate },
+      })
+    } catch (e) {
+      console.warn("[Meta Sync] Error guardando setting explicitWabaId:", e)
+    }
+    return candidate
   }
 
-  const cleanToken = token.trim()
+  // 2. Verificar si ya fue guardado previamente en la tabla Setting
+  try {
+    const saved = await db.setting.findFirst({
+      where: {
+        OR: [{ key: settingKey }, { key: "meta_waba_id" }],
+      },
+    })
+    if (saved?.value?.trim()) {
+      return saved.value.trim()
+    }
+  } catch (e) {
+    console.warn("[Meta Sync] Error buscando setting previo:", e)
+  }
 
-  // Estrategia 1: debug_token (extrae los target_ids bajo granular_scopes)
+  // 3. Variable de entorno
+  if (process.env.WHATSAPP_WABA_ID && process.env.WHATSAPP_WABA_ID.trim()) {
+    return process.env.WHATSAPP_WABA_ID.trim()
+  }
+
+  // 4. Estrategia Directa y Oficial de Meta: Consultar el WhatsApp Business Account ID desde el Phone Number ID
+  if (phoneId && String(phoneId).trim().length > 0) {
+    const cleanPhoneId = String(phoneId).trim()
+    try {
+      const phoneRes = await fetch(
+        `https://graph.facebook.com/v21.0/${cleanPhoneId}?fields=whatsapp_business_account`,
+        { headers: { Authorization: `Bearer ${cleanToken}` } }
+      )
+      if (phoneRes.ok) {
+        const phoneData = await phoneRes.json()
+        const wabaFromPhone = phoneData?.whatsapp_business_account?.id
+        if (wabaFromPhone) {
+          const candidate = String(wabaFromPhone).trim()
+          console.log(`[Meta Sync] WABA ID detectado vía Phone Number ID (${cleanPhoneId}): ${candidate}`)
+          try {
+            await db.setting.upsert({
+              where: { key: settingKey },
+              create: { key: settingKey, value: candidate },
+              update: { value: candidate },
+            })
+          } catch {}
+          return candidate
+        }
+      } else {
+        const errJson = await phoneRes.json().catch(() => ({}))
+        console.warn(`[Meta Sync] Error consultando whatsapp_business_account para phoneId ${cleanPhoneId}:`, errJson)
+      }
+    } catch (e) {
+      console.warn("[Meta Sync] Error consultando Graph API con phoneId:", e)
+    }
+  }
+
+  // 5. debug_token (extrae los target_ids bajo granular_scopes)
   try {
     const debugUrl = `https://graph.facebook.com/v21.0/debug_token?input_token=${encodeURIComponent(cleanToken)}&access_token=${encodeURIComponent(cleanToken)}`
     const debugRes = await fetch(debugUrl)
@@ -177,8 +245,15 @@ export async function findWabaId(
           Array.isArray(gs.target_ids) &&
           gs.target_ids.length > 0
         ) {
-          const candidate = String(gs.target_ids[0])
+          const candidate = String(gs.target_ids[0]).trim()
           console.log(`[Meta Sync] WABA ID detectado vía debug_token granular_scopes: ${candidate}`)
+          try {
+            await db.setting.upsert({
+              where: { key: settingKey },
+              create: { key: settingKey, value: candidate },
+              update: { value: candidate },
+            })
+          } catch {}
           return candidate
         }
       }
@@ -187,7 +262,7 @@ export async function findWabaId(
     console.warn("[Meta Sync] debug_token warning:", e)
   }
 
-  // Estrategia 2: /me/assigned_whatsapp_business_accounts (para System Users con WABA asignado)
+  // 6. /me/assigned_whatsapp_business_accounts (para System Users con WABA asignado)
   try {
     const assignedRes = await fetch(
       `https://graph.facebook.com/v21.0/me/assigned_whatsapp_business_accounts`,
@@ -196,8 +271,15 @@ export async function findWabaId(
     if (assignedRes.ok) {
       const assignedJson = await assignedRes.json()
       if (Array.isArray(assignedJson?.data) && assignedJson.data.length > 0) {
-        const candidate = String(assignedJson.data[0].id)
+        const candidate = String(assignedJson.data[0].id).trim()
         console.log(`[Meta Sync] WABA ID detectado vía assigned_whatsapp_business_accounts: ${candidate}`)
+        try {
+          await db.setting.upsert({
+            where: { key: settingKey },
+            create: { key: settingKey, value: candidate },
+            update: { value: candidate },
+          })
+        } catch {}
         return candidate
       }
     }
@@ -205,7 +287,7 @@ export async function findWabaId(
     console.warn("[Meta Sync] assigned_whatsapp_business_accounts warning:", e)
   }
 
-  // Estrategia 3: /me/businesses -> owned_whatsapp_business_accounts
+  // 7. /me/businesses -> owned_whatsapp_business_accounts
   try {
     const meRes = await fetch(`https://graph.facebook.com/v21.0/me/businesses`, {
       headers: { Authorization: `Bearer ${cleanToken}` },
@@ -221,8 +303,15 @@ export async function findWabaId(
         if (ownedRes.ok) {
           const ownedJson = await ownedRes.json()
           if (Array.isArray(ownedJson?.data) && ownedJson.data.length > 0) {
-            const candidate = String(ownedJson.data[0].id)
+            const candidate = String(ownedJson.data[0].id).trim()
             console.log(`[Meta Sync] WABA ID detectado vía owned_whatsapp_business_accounts: ${candidate}`)
+            try {
+              await db.setting.upsert({
+                where: { key: settingKey },
+                create: { key: settingKey, value: candidate },
+                update: { value: candidate },
+              })
+            } catch {}
             return candidate
           }
         }
@@ -244,10 +333,10 @@ export async function syncMetaCloudTemplates(branchId?: string | null, explicitW
     ? await db.whatsAppConfig.findUnique({ where: { branchId } })
     : await db.whatsAppConfig.findFirst()
 
-  const token = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
+  const rawToken = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
   const phoneId = config?.metaPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
 
-  if (!token || !phoneId) {
+  if (!rawToken || !phoneId) {
     return {
       ok: false,
       error: "No hay Token o Phone Number ID de Meta configurado en esta sede.",
@@ -256,9 +345,20 @@ export async function syncMetaCloudTemplates(branchId?: string | null, explicitW
     }
   }
 
+  // Limpiar cualquier caracter de enmascaramiento o no ByteString
+  const token = rawToken.replace(/[\u2022\u2023\u25E6\u2043\u2219•]/g, "").trim()
+  if (!token) {
+    return {
+      ok: false,
+      error: "El Access Token de Meta guardado no es válido. Ingresa el token real en Configuración.",
+      syncedCount: 0,
+      requiresWabaId: false,
+    }
+  }
+
   try {
     // 1. Resolver el WABA ID de forma inteligente
-    const wabaId = await findWabaId(token, phoneId, explicitWabaId)
+    const wabaId = await findWabaId(token, phoneId, explicitWabaId, branchId)
 
     if (!wabaId) {
       return {
@@ -274,16 +374,21 @@ export async function syncMetaCloudTemplates(branchId?: string | null, explicitW
     const templatesRes = await fetch(
       `https://graph.facebook.com/v21.0/${wabaId}/message_templates?fields=name,status,category,language,components&limit=100`,
       {
-        headers: { Authorization: `Bearer ${token.trim()}` },
+        headers: { Authorization: `Bearer ${token}` },
       }
     )
 
     if (!templatesRes.ok) {
-      const err = await templatesRes.text()
+      const errText = await templatesRes.text().catch(() => "")
+      let parsedErr: any = {}
+      try {
+        parsedErr = JSON.parse(errText)
+      } catch {}
+      const msg = parsedErr?.error?.message || errText || `Error HTTP ${templatesRes.status}`
       return {
         ok: false,
         requiresWabaId: false,
-        error: `Error de Meta al obtener plantillas de la cuenta ${wabaId}: ${err}`,
+        error: `Error de Meta al obtener plantillas de la cuenta ${wabaId}: ${msg}`,
         syncedCount: 0,
       }
     }
@@ -308,7 +413,17 @@ export async function syncMetaCloudTemplates(branchId?: string | null, explicitW
       const bodyComp = tpl.components?.find((c: any) => c.type === "BODY")
       const text = bodyComp?.text || `Plantilla oficial ${tpl.name}`
 
-      // Mapear categoría
+      // Metadata de Meta guardada en el contenido como encabezado
+      const metaMetadata = `<!--meta:${JSON.stringify({
+        name: tpl.name,
+        language: tpl.language || "es",
+        status: tpl.status || "APPROVED",
+        category: tpl.category || "UTILITY",
+      })}-->\n`
+
+      const contentToStore = `${metaMetadata}${text}`
+
+      // Mapear categoría interna
       const catLower = (tpl.category || "UTILITY").toLowerCase()
       const category = catLower.includes("market")
         ? "promocion"
@@ -328,7 +443,7 @@ export async function syncMetaCloudTemplates(branchId?: string | null, explicitW
         await db.whatsAppTemplate.update({
           where: { id: existing.id },
           data: {
-            content: text,
+            content: contentToStore,
             category,
           },
         })
@@ -336,7 +451,7 @@ export async function syncMetaCloudTemplates(branchId?: string | null, explicitW
         await db.whatsAppTemplate.create({
           data: {
             name: tpl.name,
-            content: text,
+            content: contentToStore,
             category,
             branchId: branchId || null,
           },

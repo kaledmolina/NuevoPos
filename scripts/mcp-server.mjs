@@ -120,6 +120,10 @@ const TOOL_PERMISSIONS = {
   pos_open_cash_session: ["admin", "superadmin", "vendedor"],
   pos_close_cash_session: ["admin", "superadmin", "vendedor"],
   pos_get_reorder_suggestions: ["admin", "superadmin"],
+  pos_whatsapp_sync_templates: ["admin", "superadmin", "vendedor"],
+  pos_whatsapp_list_templates: ["admin", "superadmin", "vendedor"],
+  pos_whatsapp_send_template: ["admin", "superadmin", "vendedor"],
+  pos_whatsapp_broadcast_templates: ["admin", "superadmin"],
 }
 
 // Definicin de Herramientas (Tools) del MCP
@@ -455,6 +459,51 @@ const TOOLS = [
       properties: {
         query: { type: "string", description: "Nombre, NIT o teléfono para buscar" },
       },
+    },
+  },
+  {
+    name: "pos_whatsapp_sync_templates",
+    description: "Sincroniza plantillas de WhatsApp Cloud API desde Meta Developers / WABA. Auto-detecta el WABA ID a partir del Phone Number ID de la sede o utiliza el proporcionado.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        wabaId: { type: "string", description: "Opcional: ID de la cuenta de WhatsApp Business (WABA ID)" },
+      },
+    },
+  },
+  {
+    name: "pos_whatsapp_list_templates",
+    description: "Lista todas las plantillas de mensajes (oficiales de Meta Cloud API y borradores locales), indicando nombre, categoría, idioma y contenido.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: { type: "string", description: "Filtrar por categoría (promocion, recordatorio, novedad, cobro)" },
+      },
+    },
+  },
+  {
+    name: "pos_whatsapp_send_template",
+    description: "Envía una plantilla pre-aprobada de Meta por WhatsApp a un cliente. Cumple con la política oficial de Meta para iniciar o reanudar conversaciones fuera de la ventana de 24 horas.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        phone: { type: "string", description: "Teléfono del cliente (ej. +573001234567)" },
+        templateIdOrName: { type: "string", description: "ID o Nombre de la plantilla aprobada en Meta" },
+        parameters: { type: "array", items: { type: "string" }, description: "Valores para las variables {{1}}, {{2}} de la plantilla" },
+      },
+      required: ["phone", "templateIdOrName"],
+    },
+  },
+  {
+    name: "pos_whatsapp_broadcast_templates",
+    description: "Envía una campaña de difusión masiva con plantillas oficiales de Meta a clientes registrados, cumpliendo con las normas de Meta Cloud API.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        templateIdOrName: { type: "string", description: "ID o Nombre de la plantilla aprobada en Meta" },
+        targetPhones: { type: "array", items: { type: "string" }, description: "Lista opcional de números de teléfono destinatarios" },
+      },
+      required: ["templateIdOrName"],
     },
   },
 ]
@@ -1953,6 +2002,305 @@ async function executeTool(name, args) {
           contacto: s.contactName || "No registrado",
           compras_realizadas: s._count.purchases,
         })),
+      }
+    }
+
+    case "pos_whatsapp_sync_templates": {
+      const config = SESSION_CONTEXT.branchId
+        ? await prisma.whatsAppConfig.findUnique({ where: { branchId: SESSION_CONTEXT.branchId } })
+        : await prisma.whatsAppConfig.findFirst()
+
+      const rawToken = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
+      const phoneId = config?.metaPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
+      const token = rawToken ? rawToken.replace(/[\u2022\u2023\u25E6\u2043\u2219•]/g, "").trim() : ""
+
+      if (!token || !phoneId) {
+        throw new Error("No hay Token o Phone Number ID de Meta configurado en la sede.")
+      }
+
+      let wabaId = args.wabaId ? String(args.wabaId).trim() : null
+      if (!wabaId) {
+        const phoneRes = await fetch(`https://graph.facebook.com/v21.0/${phoneId}?fields=whatsapp_business_account`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (phoneRes.ok) {
+          const phoneData = await phoneRes.json()
+          wabaId = phoneData?.whatsapp_business_account?.id || null
+        }
+      }
+
+      if (!wabaId) {
+        const savedSetting = await prisma.setting.findFirst({
+          where: { OR: [{ key: `meta_waba_id_${SESSION_CONTEXT.branchId}` }, { key: "meta_waba_id" }] },
+        })
+        wabaId = savedSetting?.value?.trim() || process.env.WHATSAPP_WABA_ID || null
+      }
+
+      if (!wabaId) {
+        throw new Error("No se pudo detectar el WABA ID. Por favor proporciónalo como argumento.")
+      }
+
+      const templatesRes = await fetch(
+        `https://graph.facebook.com/v21.0/${wabaId}/message_templates?fields=name,status,category,language,components&limit=100`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (!templatesRes.ok) {
+        const errText = await templatesRes.text()
+        throw new Error(`Error de Meta al obtener plantillas: ${errText}`)
+      }
+
+      const tplData = await templatesRes.json()
+      const metaTemplates = tplData.data || []
+      let count = 0
+
+      for (const tpl of metaTemplates) {
+        const bodyComp = tpl.components?.find((c) => c.type === "BODY")
+        const text = bodyComp?.text || `Plantilla oficial ${tpl.name}`
+        const metaMetadata = `<!--meta:${JSON.stringify({
+          name: tpl.name,
+          language: tpl.language || "es",
+          status: tpl.status || "APPROVED",
+        })}-->\n`
+        const contentToStore = `${metaMetadata}${text}`
+
+        const existing = await prisma.whatsAppTemplate.findFirst({
+          where: { name: tpl.name, ...(SESSION_CONTEXT.branchId ? { branchId: SESSION_CONTEXT.branchId } : {}) },
+        })
+        if (existing) {
+          await prisma.whatsAppTemplate.update({ where: { id: existing.id }, data: { content: contentToStore } })
+        } else {
+          await prisma.whatsAppTemplate.create({
+            data: {
+              name: tpl.name,
+              content: contentToStore,
+              category: "promocion",
+              branchId: SESSION_CONTEXT.branchId || null,
+            },
+          })
+        }
+        count++
+      }
+
+      return {
+        ok: true,
+        waba_id: wabaId,
+        total_sincronizadas: count,
+        mensaje: `Se sincronizaron ${count} plantillas oficiales aprobadas desde Meta Developers.`,
+      }
+    }
+
+    case "pos_whatsapp_list_templates": {
+      const where = { ...branchFilter }
+      if (args.category) where.category = args.category
+
+      const list = await prisma.whatsAppTemplate.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+      })
+
+      return {
+        total: list.length,
+        plantillas: list.map((t) => {
+          const metaMatch = t.content.match(/<!--meta:(\{.*?\})-->/)
+          let meta = null
+          if (metaMatch) {
+            try { meta = JSON.parse(metaMatch[1]) } catch {}
+          }
+          return {
+            id: t.id,
+            nombre: t.name,
+            categoria: t.category,
+            es_plantilla_meta: Boolean(meta),
+            idioma: meta?.language || "es",
+            contenido: t.content.replace(/<!--meta:\{.*?\}-->\n?/, "").trim(),
+          }
+        }),
+      }
+    }
+
+    case "pos_whatsapp_send_template": {
+      const cleanPhone = String(args.phone).replace(/[^0-9]/g, "")
+      const searchKey = String(args.templateIdOrName).trim()
+
+      const tpl = await prisma.whatsAppTemplate.findFirst({
+        where: {
+          OR: [{ id: searchKey }, { name: searchKey }],
+          ...branchFilter,
+        },
+      })
+
+      if (!tpl) throw new Error(`Plantilla "${searchKey}" no encontrada.`)
+
+      const config = SESSION_CONTEXT.branchId
+        ? await prisma.whatsAppConfig.findUnique({ where: { branchId: SESSION_CONTEXT.branchId } })
+        : await prisma.whatsAppConfig.findFirst()
+
+      const rawToken = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
+      const phoneId = config?.metaPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
+      const token = rawToken ? rawToken.replace(/[\u2022\u2023\u25E6\u2043\u2219•]/g, "").trim() : ""
+
+      if (!token || !phoneId) {
+        throw new Error("No hay credenciales válidas de Meta Cloud API configuradas.")
+      }
+
+      const metaMatch = tpl.content.match(/<!--meta:(\{.*?\})-->/)
+      let meta = null
+      if (metaMatch) {
+        try { meta = JSON.parse(metaMatch[1]) } catch {}
+      }
+
+      const templateName = meta?.name || tpl.name
+      const languageCode = meta?.language || "es"
+      const params = Array.isArray(args.parameters) ? args.parameters : []
+
+      const payload = {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: cleanPhone,
+        type: "template",
+        template: {
+          name: templateName,
+          language: { code: languageCode },
+          ...(params.length > 0
+            ? {
+                components: [
+                  {
+                    type: "body",
+                    parameters: params.map((p) => ({ type: "text", text: String(p) })),
+                  },
+                ],
+              }
+            : {}),
+        },
+      }
+
+      const metaRes = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+
+      const metaJson = await metaRes.json().catch(() => ({}))
+      if (!metaRes.ok) {
+        throw new Error(`Meta Cloud API error: ${metaJson?.error?.message || metaRes.statusText}`)
+      }
+
+      let cleanContent = tpl.content.replace(/<!--meta:\{.*?\}-->\n?/, "").trim()
+      params.forEach((p, idx) => {
+        cleanContent = cleanContent.replace(new RegExp(`\\{\\{${idx + 1}\\}\\}`, "g"), String(p))
+      })
+
+      const savedMsg = await prisma.whatsAppMessage.create({
+        data: {
+          phone: cleanPhone,
+          sender: "agent",
+          text: cleanContent,
+          status: "sent",
+          branchId: SESSION_CONTEXT.branchId || null,
+          channel: "whatsapp",
+        },
+      })
+
+      return {
+        ok: true,
+        mensaje_id: savedMsg.id,
+        meta_id: metaJson.messages?.[0]?.id || null,
+        destinatario: cleanPhone,
+        plantilla: templateName,
+        aviso: "Plantilla enviada exitosamente. Cumple con la política oficial de Meta para abrir o reanudar conversaciones.",
+      }
+    }
+
+    case "pos_whatsapp_broadcast_templates": {
+      const searchKey = String(args.templateIdOrName).trim()
+      const tpl = await prisma.whatsAppTemplate.findFirst({
+        where: {
+          OR: [{ id: searchKey }, { name: searchKey }],
+          ...branchFilter,
+        },
+      })
+
+      if (!tpl) throw new Error(`Plantilla "${searchKey}" no encontrada.`)
+
+      const config = SESSION_CONTEXT.branchId
+        ? await prisma.whatsAppConfig.findUnique({ where: { branchId: SESSION_CONTEXT.branchId } })
+        : await prisma.whatsAppConfig.findFirst()
+
+      const rawToken = config?.metaAccessToken || process.env.WHATSAPP_ACCESS_TOKEN
+      const phoneId = config?.metaPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
+      const token = rawToken ? rawToken.replace(/[\u2022\u2023\u25E6\u2043\u2219•]/g, "").trim() : ""
+
+      if (!token || !phoneId) {
+        throw new Error("No hay credenciales válidas de Meta Cloud API configuradas.")
+      }
+
+      const metaMatch = tpl.content.match(/<!--meta:(\{.*?\})-->/)
+      let meta = null
+      if (metaMatch) {
+        try { meta = JSON.parse(metaMatch[1]) } catch {}
+      }
+      const templateName = meta?.name || tpl.name
+      const languageCode = meta?.language || "es"
+
+      let targetPhones = Array.isArray(args.targetPhones) && args.targetPhones.length > 0 ? args.targetPhones : []
+      if (targetPhones.length === 0) {
+        const clients = await prisma.client.findMany({
+          where: { phone: { not: null }, ...branchFilter },
+          select: { phone: true },
+          take: 50,
+        })
+        targetPhones = clients.map((c) => c.phone)
+      }
+
+      let sentCount = 0
+      const errors = []
+
+      for (const rawPhone of targetPhones) {
+        const cleanPhone = String(rawPhone).replace(/[^0-9]/g, "")
+        try {
+          const payload = {
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: cleanPhone,
+            type: "template",
+            template: {
+              name: templateName,
+              language: { code: languageCode },
+            },
+          }
+
+          const res = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+
+          if (res.ok) {
+            sentCount++
+            await prisma.whatsAppMessage.create({
+              data: {
+                phone: cleanPhone,
+                sender: "agent",
+                text: tpl.content.replace(/<!--meta:\{.*?\}-->\n?/, "").trim(),
+                status: "sent",
+                branchId: SESSION_CONTEXT.branchId || null,
+                channel: "whatsapp",
+              },
+            })
+          } else {
+            const errJson = await res.json().catch(() => ({}))
+            errors.push({ phone: cleanPhone, error: errJson?.error?.message || "Error al enviar" })
+          }
+        } catch (e) {
+          errors.push({ phone: cleanPhone, error: e.message })
+        }
+      }
+
+      return {
+        ok: true,
+        total_enviados: sentCount,
+        total_fallidos: errors.length,
+        errores: errors.length > 0 ? errors : undefined,
       }
     }
 

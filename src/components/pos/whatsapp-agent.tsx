@@ -269,6 +269,7 @@ interface BranchConfig {
   branchId: string
   phoneNumber?: string | null
   metaPhoneNumberId?: string | null
+  metaWabaId?: string | null
   metaAccessToken?: string | null
   metaVerifyToken?: string | null
   telegramBotToken?: string | null
@@ -439,6 +440,7 @@ export default function WhatsAppAgentView() {
     branchId: currentBranchId,
     phoneNumber: "",
     metaPhoneNumberId: "",
+    metaWabaId: "",
     metaAccessToken: "",
     metaVerifyToken: "omnipos_verify_token_2026",
     telegramBotToken: "",
@@ -539,6 +541,7 @@ export default function WhatsAppAgentView() {
         }
         setConfig({
           ...res.config,
+          metaWabaId: res.config.metaWabaId || "",
           aiProvider: res.config.aiProvider || "deepseek",
           openrouterModel: loadedModel,
           deepseekApiKey: res.config.deepseekApiKeyMasked || "",
@@ -786,7 +789,7 @@ export default function WhatsAppAgentView() {
 
   // Validar conexión con Meta Cloud API (WhatsApp Business)
   const handleTestMeta = async () => {
-    if (!config.metaAccessToken?.trim() || !config.metaPhoneNumberId?.trim()) {
+    if (!config.metaPhoneNumberId?.trim() || (!config.metaAccessToken?.trim() && !config.hasMetaToken)) {
       toast.error("Completa el Phone Number ID y el Access Token de Meta antes de validar")
       return
     }
@@ -794,6 +797,7 @@ export default function WhatsAppAgentView() {
     setMetaConnectionStatus("idle")
     setMetaConnectionDetail("")
     try {
+      const cleanToken = config.metaAccessToken?.includes("•") ? "" : config.metaAccessToken?.trim()
       const res = await apiFetch<{
         ok: boolean
         status?: string
@@ -801,6 +805,7 @@ export default function WhatsAppAgentView() {
         displayName?: string
         qualityRating?: string
         verifiedName?: string
+        wabaId?: string
         error?: string
         latencyMs?: number
       }>("/api/whatsapp/config", {
@@ -808,15 +813,19 @@ export default function WhatsAppAgentView() {
         body: JSON.stringify({
           action: "test_meta",
           phoneNumberId: config.metaPhoneNumberId,
-          accessToken: config.metaAccessToken,
+          accessToken: cleanToken,
           branchId: currentBranchId,
         }),
       })
       if (res && res.ok) {
         setMetaConnectionStatus("ok")
+        if (res.wabaId) {
+          setConfig((c) => ({ ...c, metaWabaId: res.wabaId }))
+        }
         const detail = [
           res.displayName && `📱 ${res.displayName}`,
           res.phoneNumber && `Número: ${res.phoneNumber}`,
+          res.wabaId && `WABA ID: ${res.wabaId}`,
           res.qualityRating && `Calidad: ${res.qualityRating}`,
           res.latencyMs && `${res.latencyMs}ms`,
         ].filter(Boolean).join(" · ")
@@ -913,19 +922,23 @@ export default function WhatsAppAgentView() {
   // Sincronizar plantillas con Meta Cloud API
   const handleSyncTemplates = async (wabaIdParam?: string | React.MouseEvent) => {
     setSyncingTemplates(true)
-    const explicitWaba = typeof wabaIdParam === "string" ? wabaIdParam.trim() : undefined
+    const explicitWaba = typeof wabaIdParam === "string" ? wabaIdParam.trim() : (config.metaWabaId?.trim() || undefined)
     try {
       const res = await apiFetch<{
         ok: boolean
         message: string
         syncedCount: number
+        wabaId?: string
         requiresWabaId?: boolean
         error?: string
       }>("/api/whatsapp/templates/sync", {
         method: "POST",
-        body: JSON.stringify({ wabaId: explicitWaba }),
+        body: JSON.stringify({ wabaId: explicitWaba, branchId: currentBranchId }),
       })
       if (res && res.ok) {
+        if (res.wabaId) {
+          setConfig((c) => ({ ...c, metaWabaId: res.wabaId }))
+        }
         toast.success(res.message || `Se sincronizaron ${res.syncedCount} plantillas oficiales desde Meta`)
         loadTemplates()
       } else if (res?.requiresWabaId) {
@@ -951,8 +964,17 @@ export default function WhatsAppAgentView() {
   const handleSendAgentMessage = async () => {
     if (!selectedPhone || !agentReplyText.trim() || sendingReply) return
 
-    const textToSend = agentReplyText.trim()
     const isTg = selectedPhone.startsWith("tg_") || selectedConv?.channel === "telegram"
+    const isWindowExpired = !isTg && selectedConv?.careWindow && !selectedConv.careWindow.isOpen
+
+    // Si la ventana de 24 horas está cerrada, bloquear texto libre según la política de Meta
+    if (isWindowExpired) {
+      toast.error("Por política oficial de Meta Cloud API, no puedes enviar texto libre fuera de la ventana de 24h. Inicia o reactiva la conversación con una plantilla oficial pre-aprobada.")
+      setTemplateModalOpen(true)
+      return
+    }
+
+    const textToSend = agentReplyText.trim()
     setAgentReplyText("")
 
     // Inserción optimista inmediata en la vista para respuesta instantánea
@@ -2247,68 +2269,130 @@ export default function WhatsAppAgentView() {
                   </div>
                 )}
 
-                {/* Input de respuesta manual del agente */}
-                <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0 space-y-2">
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1 relative">
-                      <Textarea
-                        value={agentReplyText}
-                        onChange={(e) => setAgentReplyText(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault()
-                            handleSendAgentMessage()
-                          }
-                        }}
-                        placeholder={
-                          selectedPhone.startsWith("tg_") || selectedConv?.channel === "telegram"
-                            ? "Respuesta por Telegram... (Enter = enviar, Shift+Enter = nueva línea)"
-                            : "Respuesta por WhatsApp... (Enter = enviar, Shift+Enter = nueva línea)"
-                        }
-                        rows={1}
-                        className="min-h-[40px] max-h-[120px] resize-none text-xs rounded-xl bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 pr-12 py-2.5 leading-relaxed overflow-y-auto"
-                        style={{ fieldSizing: "content" } as React.CSSProperties}
-                      />
-                      {agentReplyText.length > 0 && (
-                        <span className="absolute bottom-1.5 right-2 text-[9px] text-zinc-400 font-mono pointer-events-none">
-                          {agentReplyText.length}
-                        </span>
-                      )}
+                {/* Banner de Ventana 24h Meta Expirada: Obligatorio usar Plantilla Oficial */}
+                {(() => {
+                  const isTg = selectedPhone.startsWith("tg_") || selectedConv.channel === "telegram"
+                  const isWindowExpired = !isTg && selectedConv.careWindow && !selectedConv.careWindow.isOpen
+                  if (!isWindowExpired) return null
+
+                  return (
+                    <div className="mx-3 my-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-2">
+                      <div className="flex items-start gap-2.5">
+                        <IconClock className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                              Ventana de atención de 24 horas expirada
+                            </span>
+                            <Badge variant="outline" className="text-[9px] uppercase font-mono border-amber-500/40 text-amber-700 dark:text-amber-300">
+                              Política Meta
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                            Meta Cloud API exige iniciar o reactivar conversaciones usando una <strong>Plantilla Oficial pre-aprobada</strong> cuando han pasado más de 24 horas del último mensaje del cliente.
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => setTemplateModalOpen(true)}
+                        className="w-full h-8 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl gap-2 cursor-pointer shadow-xs"
+                      >
+                        <IconSpeakerphone className="h-3.5 w-3.5" />
+                        Iniciar conversación con Plantilla Meta
+                      </Button>
                     </div>
-                    <Button
-                      onClick={handleSendAgentMessage}
-                      disabled={sendingReply || !agentReplyText.trim()}
-                      className={cn(
-                        "h-10 w-10 p-0 rounded-xl shrink-0 transition-all",
-                        agentReplyText.trim()
-                          ? "bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 shadow-xs"
-                          : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed"
-                      )}
-                    >
-                      {sendingReply
-                        ? <IconRefresh className="h-4 w-4 animate-spin" />
-                        : <IconSend className="h-4 w-4" />
-                      }
-                    </Button>
-                  </div>
-                  <div className="flex items-center justify-between text-[10px] text-zinc-400 dark:text-zinc-500 px-0.5">
-                    <span className="flex items-center gap-1.5">
-                      <span className={cn(
-                        "h-1.5 w-1.5 rounded-full",
-                        aiActiveForChat[selectedPhone] === false ? "bg-amber-400" : "bg-emerald-500"
-                      )} />
-                      {aiActiveForChat[selectedPhone] === false ? "Modo Agente Humano" : "Bot IA activo"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={openSimModal}
-                      className="flex items-center gap-1 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer font-medium"
-                    >
-                      <IconBolt className="h-3 w-3" />
-                      Simular mensaje
-                    </button>
-                  </div>
-                </div>
+                  )
+                })()}
+
+                {/* Input de respuesta manual del agente */}
+                {(() => {
+                  const isTg = selectedPhone.startsWith("tg_") || selectedConv.channel === "telegram"
+                  const isWindowExpired = !isTg && selectedConv.careWindow && !selectedConv.careWindow.isOpen
+
+                  return (
+                    <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0 space-y-2">
+                      <div className="flex items-end gap-2">
+                        {/* Botón rápido para abrir plantillas oficiales */}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setTemplateModalOpen(true)}
+                          className="h-10 px-2.5 rounded-xl shrink-0 text-zinc-500 hover:text-zinc-950 dark:hover:text-white border-zinc-200 dark:border-zinc-800"
+                          title="Enviar plantilla oficial pre-aprobada"
+                        >
+                          <IconSpeakerphone className="h-4 w-4" />
+                        </Button>
+
+                        <div className="flex-1 relative">
+                          <Textarea
+                            value={agentReplyText}
+                            onChange={(e) => setAgentReplyText(e.target.value)}
+                            disabled={isWindowExpired}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault()
+                                handleSendAgentMessage()
+                              }
+                            }}
+                            placeholder={
+                              isWindowExpired
+                                ? "Ventana 24h cerrada por política de Meta. Usa una Plantilla para iniciar..."
+                                : isTg
+                                ? "Respuesta por Telegram... (Enter = enviar, Shift+Enter = nueva línea)"
+                                : "Respuesta por WhatsApp... (Enter = enviar, Shift+Enter = nueva línea)"
+                            }
+                            rows={1}
+                            className={cn(
+                              "min-h-[40px] max-h-[120px] resize-none text-xs rounded-xl bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 pr-12 py-2.5 leading-relaxed overflow-y-auto",
+                              isWindowExpired && "opacity-60 cursor-not-allowed bg-zinc-100 dark:bg-zinc-900"
+                            )}
+                            style={{ fieldSizing: "content" } as React.CSSProperties}
+                          />
+                          {agentReplyText.length > 0 && (
+                            <span className="absolute bottom-1.5 right-2 text-[9px] text-zinc-400 font-mono pointer-events-none">
+                              {agentReplyText.length}
+                            </span>
+                          )}
+                        </div>
+                        <Button
+                          onClick={handleSendAgentMessage}
+                          disabled={sendingReply || isWindowExpired || !agentReplyText.trim()}
+                          className={cn(
+                            "h-10 w-10 p-0 rounded-xl shrink-0 transition-all",
+                            agentReplyText.trim() && !isWindowExpired
+                              ? "bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 shadow-xs"
+                              : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed"
+                          )}
+                        >
+                          {sendingReply
+                            ? <IconRefresh className="h-4 w-4 animate-spin" />
+                            : <IconSend className="h-4 w-4" />
+                          }
+                        </Button>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-zinc-400 dark:text-zinc-500 px-0.5">
+                        <span className="flex items-center gap-1.5">
+                          <span className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            aiActiveForChat[selectedPhone] === false ? "bg-amber-400" : "bg-emerald-500"
+                          )} />
+                          {aiActiveForChat[selectedPhone] === false ? "Modo Agente Humano" : "Bot IA activo"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={openSimModal}
+                          className="flex items-center gap-1 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer font-medium"
+                        >
+                          <IconBolt className="h-3 w-3" />
+                          Simular mensaje
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })()}
               </>
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4 bg-[#f0f2f5] dark:bg-zinc-950/40">
@@ -2892,12 +2976,17 @@ export default function WhatsAppAgentView() {
                     <Badge variant="outline" className="text-[10px] uppercase font-mono">
                       {tpl.category}
                     </Badge>
+                    {Boolean((tpl as any).isMetaTemplate || tpl.content.includes("<!--meta:")) && (
+                      <Badge variant="outline" className="text-[9px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
+                        Meta API
+                      </Badge>
+                    )}
                   </div>
                   <CardTitle className="text-sm font-bold mt-1 text-zinc-950 dark:text-white">{tpl.name}</CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 pt-0 space-y-3">
-                  <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800 text-xs whitespace-pre-line text-zinc-700 dark:text-zinc-300 font-mono text-[11px] max-h-40 overflow-y-auto">
-                    {tpl.content}
+                  <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800 text-xs whitespace-pre-line text-zinc-700 dark:text-zinc-300 font-mono text-[11px] max-h-40 overflow-y-auto leading-relaxed">
+                    {tpl.content.replace(/<!--meta:\{.*?\}-->\n?/, "").trim()}
                   </div>
                   <Button
                     size="sm"
@@ -3551,6 +3640,31 @@ export default function WhatsAppAgentView() {
                     </div>
                   </div>
 
+                  {/* WABA ID (WhatsApp Business Account ID) */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-bold">WABA ID (WhatsApp Business Account ID)</Label>
+                      {config.metaWabaId ? (
+                        <Badge variant="outline" className="text-[10px] text-emerald-700 dark:text-emerald-300 border-emerald-500/30 bg-emerald-500/10 font-medium">
+                          Detectado ✓
+                        </Badge>
+                      ) : (
+                        <span className="text-[10px] text-zinc-400">Requerido para plantillas</span>
+                      )}
+                    </div>
+                    <Input
+                      value={config.metaWabaId || ""}
+                      onChange={(e) => {
+                        setConfig((c) => ({ ...c, metaWabaId: e.target.value }))
+                      }}
+                      placeholder="Ej: 109827364512345 (se auto-detecta al validar conexión)"
+                      className="h-9 text-xs font-mono bg-zinc-50 dark:bg-zinc-950"
+                    />
+                    <p className="text-[10px] text-zinc-400">
+                      Identificador de cuenta WABA en Meta Developers &gt; WhatsApp &gt; Configuración de la API. Se auto-detecta automáticamente al presionar &quot;Validar Conexión&quot;.
+                    </p>
+                  </div>
+
                   {/* Access Token de Meta */}
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
@@ -4018,15 +4132,17 @@ export default function WhatsAppAgentView() {
         </DialogContent>
       </Dialog>
 
-      {/* Modal 3: Enviar Plantilla de Promoción */}
+      {/* Modal 3: Enviar Plantilla Oficial de Meta / Iniciar Conversación */}
       <Dialog open={templateModalOpen} onOpenChange={setTemplateModalOpen}>
         <DialogContent className="max-w-md rounded-2xl">
           <DialogHeader>
             <DialogTitle className="text-base font-bold flex items-center gap-2">
-              <IconSpeakerphone className="h-4 w-4" /> Enviar Plantilla Promocional
+              <IconSpeakerphone className="h-4 w-4 text-emerald-600" /> Iniciar con Plantilla de Meta
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Envía una plantilla oficial personalizada a este contacto.
+              {selectedPhone
+                ? `Inicia o reactiva la conversación con ${selectedConv?.client?.name || selectedPhone} cumpliendo las políticas oficiales de Meta.`
+                : "Envía una plantilla oficial pre-aprobada a tus contactos."}
             </DialogDescription>
           </DialogHeader>
 
@@ -4051,18 +4167,38 @@ export default function WhatsAppAgentView() {
                 <SelectContent className="text-xs rounded-xl">
                   {templates.map((t) => (
                     <SelectItem key={t.id} value={t.id}>
-                      {t.name} ({t.category})
+                      {t.name} ({(t as any).metaLanguage || "es"} · {t.category})
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            {selectedTemplateId && (
-              <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border text-xs whitespace-pre-line font-mono text-[11px]">
-                {templates.find((t) => t.id === selectedTemplateId)?.content}
-              </div>
-            )}
+            {selectedTemplateId && (() => {
+              const tpl = templates.find((t) => t.id === selectedTemplateId)
+              if (!tpl) return null
+              const cleanText = tpl.content.replace(/<!--meta:\{.*?\}-->\n?/, "").trim()
+              const isMeta = Boolean((tpl as any).isMetaTemplate || tpl.content.includes("<!--meta:"))
+
+              return (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-zinc-400 font-medium">Contenido de la plantilla:</span>
+                    {isMeta && (
+                      <Badge variant="outline" className="text-[9px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 font-medium">
+                        Plantilla Oficial Meta Cloud API
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border text-xs whitespace-pre-line font-mono text-[11px] max-h-48 overflow-y-auto leading-relaxed">
+                    {cleanText}
+                  </div>
+                  <p className="text-[10px] text-zinc-400">
+                    Las variables se reemplazarán automáticamente con los datos del destinatario ({selectedConv?.client?.name || "Cliente"}).
+                  </p>
+                </div>
+              )
+            })()}
           </div>
 
           <DialogFooter className="pt-2">
@@ -4073,9 +4209,13 @@ export default function WhatsAppAgentView() {
               size="sm"
               onClick={() => handleSendBroadcast(true)}
               disabled={sendingBroadcast || !selectedTemplateId}
-              className="bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 font-bold"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1.5"
             >
-              {sendingBroadcast ? "Enviando…" : "Enviar por WhatsApp"}
+              {sendingBroadcast
+                ? "Enviando…"
+                : selectedPhone
+                ? "Iniciar Conversación con Plantilla"
+                : "Enviar por WhatsApp"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -58,7 +58,22 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      templates,
+      templates: templates.map((t) => {
+        const metaMatch = t.content.match(/<!--meta:(\{.*?\})-->/)
+        let meta: any = null
+        if (metaMatch) {
+          try {
+            meta = JSON.parse(metaMatch[1])
+          } catch {}
+        }
+        return {
+          ...t,
+          cleanContent: t.content.replace(/<!--meta:\{.*?\}-->\n?/, "").trim(),
+          isMetaTemplate: Boolean(meta || /^[a-z0-9_]+$/.test(t.name)),
+          metaLanguage: meta?.language || "es",
+          metaStatus: meta?.status || "APPROVED",
+        }
+      }),
     })
   } catch (error) {
     return NextResponse.json(
